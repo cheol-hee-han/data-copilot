@@ -1,0 +1,64 @@
+아래 테이블의 메타 정보를 참고하여, 테이블 설명을 **세 가지 관점**으로 보강하세요.
+
+[세 가지 관점]
+1. **엔티티 집합 정의** — 이 테이블에 어떤 데이터가 저장되어 있는지 (한 행이 무엇을 의미하는지)
+2. **기능적 정의** — 이 데이터가 어디에, 어떻게 사용·활용되는지 (조회·분석·보고 등)
+3. **데이터 발생규칙** — 이 데이터가 언제, 어떤 조건으로 생성·적재되는지 (배치 주기, 트리거 등)
+
+[규칙]
+- 컬럼 구성, 데이터 타입, 관련 SQL을 근거로 추론하세요.
+- 추론에 확신이 없는 부분은 "추정:" 접두어를 붙이세요.
+- 금융 도메인(은행) 맥락을 고려하세요.
+- 각 관점별로 1~2문장, 전체 3~6문장으로 작성하세요.
+- 설명 텍스트만 출력하세요. 번호·제목·마크다운 서식은 사용하지 마세요.
+
+[테이블 정보]
+테이블명: {table_name}
+기존 설명: {original_description}
+갱신주기: {update_cycle}
+
+[컬럼 정보]
+{column_summary}
+
+[관련 SQL (이 테이블을 참조하는 보고서·과거 SQL)]
+{related_sqls}
+
+[Few-shot 예제]
+
+입력:
+테이블명: TB_LOAN_INFO
+기존 설명: 여신(대출) 정보 테이블
+갱신주기: 일배치
+컬럼: LOAN_NO(PK), CUST_NO(FK), LOAN_AMT, LOAN_BAL, LOAN_DT, MTRTY_DT, INT_RATE, LOAN_TYPE_CD, OVERDUE_YN, OVERDUE_DAYS, OVERDUE_AMT
+관련 SQL: SELECT LOAN_TYPE_CD, COUNT(*), SUM(LOAN_AMT) FROM TB_LOAN_INFO GROUP BY LOAN_TYPE_CD
+
+출력:
+고객별 개별 대출 건의 현재 상태를 저장하는 테이블로, 한 행이 하나의 대출 계약을 나타낸다. 대출 유형별 실행 현황 조회, 연체 관리, 만기 도래 분석 등 여신 업무 전반에서 기본 참조 데이터로 활용된다. 일배치로 매일 갱신되며, 대출 실행(신규 계약) 시 행이 생성되고 상환·연체 상태 변동 시 해당 컬럼이 갱신된다.
+
+---
+
+입력:
+테이블명: TB_LOAN_OVERDUE_STAT
+기존 설명: 여신 연체 통계 테이블
+갱신주기: 월배치
+컬럼: BASE_YM, BRCH_CD, LOAN_TYPE_CD, TOTAL_LOAN_CNT, TOTAL_LOAN_AMT, OVERDUE_CNT, OVERDUE_AMT, OVERDUE_RATE
+관련 SQL: SELECT BASE_YM, ROUND(SUM(OVERDUE_AMT)::NUMERIC / NULLIF(SUM(TOTAL_LOAN_AMT), 0) * 100, 2) AS overdue_rate FROM TB_LOAN_OVERDUE_STAT GROUP BY BASE_YM ORDER BY BASE_YM
+
+출력:
+기준년월·지점·대출유형별로 집계된 여신 연체 통계 데이터를 저장하며, 한 행이 특정 월·지점·유형의 연체 집계 결과를 나타낸다. 월별 연체율 추이 분석, 지점별 연체 현황 보고, 자산건전성 모니터링 등에 활용된다. 월배치로 매월 말 집계되어 적재되며, 해당 월의 대출 잔액 대비 연체 금액·건수를 산출하여 생성된다.
+
+---
+
+입력:
+테이블명: TB_TXN_DAILY
+기존 설명: (설명 없음)
+갱신주기: (갱신주기 미상)
+컬럼: TXN_DT, ACCT_NO, TXN_AMT, TXN_TYPE_CD, BRCH_CD
+관련 SQL: (관련 SQL 없음)
+
+출력:
+추정: 일자별 거래 내역 데이터를 저장하며, 한 행이 하나의 계좌 거래를 나타내는 것으로 보인다. 추정: 일별 거래량 집계, 지점별 거래 현황 조회 등에 활용될 가능성이 높다. 추정: 거래 발생 시점에 실시간 또는 일배치로 적재되는 것으로 추정된다.
+
+---
+
+지금 아래 테이블의 설명을 보강하세요.

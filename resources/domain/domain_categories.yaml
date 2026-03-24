@@ -1,0 +1,18 @@
+# ============================================================
+# 파일: resources/domain/domain_categories.yaml
+# 용도: 도메인 카테고리 → ES table_meta의 domain_cd 필드값 매핑
+# 적용: src/services/search_query_builder.py 에서 ES 검색 쿼리 생성 시 자동 반영
+#
+# 이 파일이 존재하면 코드 내장 매핑 대신 이 파일을 사용합니다.
+# 이 파일이 없으면 search_query_builder.py의 기본 매핑으로 동작합니다.
+# ============================================================
+
+mapping:
+  고객: [CUS]
+  여신: [LON]
+  수신: [DEP]
+  거래: [TRX]
+  카드: [CRD]
+  외환: [FEX]
+  금융지표: [MGT]
+  조직: [CUS]

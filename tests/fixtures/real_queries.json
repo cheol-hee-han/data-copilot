@@ -1,0 +1,162 @@
+[
+  {
+    "id": "RQ-001",
+    "query": "이번 달 신규 고객 수 알려줘",
+    "expected_intent": "data_extraction",
+    "category": "고객",
+    "complexity": "simple",
+    "tags": ["고객", "신규", "건수"]
+  },
+  {
+    "id": "RQ-002",
+    "query": "지점별 여신 잔액 현황 보여줘",
+    "expected_intent": "data_extraction",
+    "category": "여신",
+    "complexity": "simple",
+    "tags": ["지점", "여신", "잔액"]
+  },
+  {
+    "id": "RQ-003",
+    "query": "분기별 대출 추이를 분석해줘",
+    "expected_intent": "data_analysis",
+    "category": "여신",
+    "complexity": "medium",
+    "tags": ["분기", "대출", "추이", "분석"]
+  },
+  {
+    "id": "RQ-004",
+    "query": "2024년 1분기 서울 지역 고객 등급별 여신 평균 잔액 상위 10건",
+    "expected_intent": "data_extraction",
+    "category": "여신",
+    "complexity": "complex",
+    "tags": ["기간", "지역", "등급", "여신", "평균", "상위"]
+  },
+  {
+    "id": "RQ-005",
+    "query": "연체율 추이 비교 분석해줘",
+    "expected_intent": "data_analysis",
+    "category": "여신",
+    "complexity": "medium",
+    "tags": ["연체율", "추이", "비교"]
+  },
+  {
+    "id": "RQ-006",
+    "query": "고객별 수신 평균 잔액은?",
+    "expected_intent": "data_extraction",
+    "category": "수신",
+    "complexity": "simple",
+    "tags": ["고객", "수신", "평균"]
+  },
+  {
+    "id": "RQ-007",
+    "query": "이번달 카드 매출 TOP 10 뽑아줘",
+    "expected_intent": "data_extraction",
+    "category": "카드",
+    "complexity": "medium",
+    "tags": ["카드", "매출", "상위"]
+  },
+  {
+    "id": "RQ-008",
+    "query": "안녕하세요",
+    "expected_intent": "casual_talk",
+    "category": "일반",
+    "complexity": "trivial",
+    "tags": ["인사"]
+  },
+  {
+    "id": "RQ-009",
+    "query": "고객 테이블에 어떤 컬럼이 있어?",
+    "expected_intent": "meta_question",
+    "category": "메타",
+    "complexity": "simple",
+    "tags": ["메타", "테이블", "컬럼"]
+  },
+  {
+    "id": "RQ-010",
+    "query": "데이터 좀 뽑아줘",
+    "expected_intent": "clarification_needed",
+    "category": "모호",
+    "complexity": "ambiguous",
+    "tags": ["모호"]
+  },
+  {
+    "id": "RQ-011",
+    "query": "작년 대비 올해 수신 잔액 증감 분석",
+    "expected_intent": "data_analysis",
+    "category": "수신",
+    "complexity": "complex",
+    "tags": ["비교", "수신", "증감", "연도"]
+  },
+  {
+    "id": "RQ-012",
+    "query": "부서별 대출건수 및 총잔액 집계",
+    "expected_intent": "data_extraction",
+    "category": "여신",
+    "complexity": "medium",
+    "tags": ["부서", "대출", "건수", "잔액", "집계"]
+  },
+  {
+    "id": "RQ-013",
+    "query": "VIP 고객 중 연체 이력이 있는 고객 목록",
+    "expected_intent": "data_extraction",
+    "category": "고객",
+    "complexity": "complex",
+    "tags": ["VIP", "연체", "이력", "목록"]
+  },
+  {
+    "id": "RQ-014",
+    "query": "외환 거래 현황 요약해줘",
+    "expected_intent": "data_analysis",
+    "category": "외환",
+    "complexity": "medium",
+    "tags": ["외환", "거래", "요약"]
+  },
+  {
+    "id": "RQ-015",
+    "query": "최근 3개월 신규 여신 건수와 금액 월별 추이",
+    "expected_intent": "data_analysis",
+    "category": "여신",
+    "complexity": "complex",
+    "tags": ["기간", "신규", "여신", "월별", "추이"]
+  },
+  {
+    "id": "RQ-016",
+    "query": "고갱 잔액 조회해줭",
+    "expected_intent": "data_extraction",
+    "category": "고객",
+    "complexity": "typo",
+    "tags": ["오타", "고객", "잔액"]
+  },
+  {
+    "id": "RQ-017",
+    "query": "ㅇㅇ 대출 현황",
+    "expected_intent": "clarification_needed",
+    "category": "모호",
+    "complexity": "ambiguous",
+    "tags": ["줄임말", "모호"]
+  },
+  {
+    "id": "RQ-018",
+    "query": "BIS비율 산출해줘",
+    "expected_intent": "data_extraction",
+    "category": "금융지표",
+    "complexity": "domain_specific",
+    "tags": ["금융지표", "BIS", "산출식"]
+  },
+  {
+    "id": "RQ-019",
+    "query": "NIM 추이 분석해주세요",
+    "expected_intent": "data_analysis",
+    "category": "금융지표",
+    "complexity": "domain_specific",
+    "tags": ["금융지표", "NIM", "추이"]
+  },
+  {
+    "id": "RQ-020",
+    "query": "어제 입금된 수신 계좌 중 1억 이상인 건수",
+    "expected_intent": "data_extraction",
+    "category": "수신",
+    "complexity": "complex",
+    "tags": ["날짜", "수신", "금액조건", "건수"]
+  }
+]

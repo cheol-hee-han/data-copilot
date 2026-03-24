@@ -1,0 +1,63 @@
+# ============================================================
+# 파일: resources/security/pii_columns.yaml
+# 용도: PII(개인식별정보) 컬럼 정의 — SQL 검증 시 노출/마스킹 규칙 적용
+# 적용: src/nodes/sql_validator.py 에서 SQL 검증 시,
+#       prompts/system_prompts.py 절대규칙 3~4번에 자동 반영
+# 대상: customization-targets.md #9 (PII 컬럼 정의 재설정)
+#
+# 이 파일이 존재하면 코드 내장 PII 목록 대신 이 파일을 사용합니다.
+# 이 파일이 없으면 sql_validator.py의 기본 PII 목록으로 동작합니다.
+# ============================================================
+
+# SELECT 자체 금지 (절대 노출 불가)
+forbidden:
+  # 주민번호
+  - JUMIN_NO
+  - JUMIN_NUM
+  - SSN
+  - RESIDENT_NO
+  - RESIDENT_NUM
+  - RRNO
+  - RESI_NO
+  - CUST_RRNO
+  # 카드번호
+  - CARD_NO
+  - CARD_NUM
+  - CARD_NUMBER
+  # 계좌번호
+  - ACCT_NO
+  - ACCT_NUM
+  - ACCOUNT_NO
+  - ACCOUNT_NUMBER
+  - BANK_ACCT_NO
+  # 비밀번호
+  - ACCT_PWD
+  - PASSWORD
+  - PASSWD
+  - PWD
+  - PIN_NO
+  # CVC/CVV
+  - CVC
+  - CVV
+  - CVC_NO
+  - CVV_NO
+  # 외국인등록번호
+  - FRNO
+  - FRNR_NO
+
+# SELECT 허용, 마스킹 필수
+masking:
+  - pattern: "PHONE_NO|TEL_NO|HP_NO|MOBILE_NO|CUST_TEL_NO|CUST_HP_NO"
+    expression: "LEFT({col}, 3) || '****'"
+  - pattern: "EMAIL|EMAIL_ADDR|CUST_EMAIL"
+    expression: "LEFT({col}, 2) || '**@**'"
+  - pattern: "BIRTH_DT|BIRTHDAY|BIRTH_YMD|CUST_BIRTH_DT"
+    expression: "LEFT(CAST({col} AS VARCHAR), 4) || '-**-**'"
+  - pattern: "ADDR|ADDRESS|HOME_ADDR|WORK_ADDR|ADDR_DTL"
+    expression: "LEFT({col}, 6) || ' **'"
+
+# 조건부 마스킹
+conditional:
+  - pattern: "CUST_NM|CUST_NAME"
+    when: list_query
+    expression: "LEFT({col}, 1) || '**'"

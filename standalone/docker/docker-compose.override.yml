@@ -1,0 +1,25 @@
+# ============================================================
+# 파일: standalone/docker/docker-compose.override.yml
+# 용도: Docker Compose 이미지 오버라이드 (폐쇄망 내부 레지스트리 사용)
+# 적용: docker compose -f standalone/docker/docker-compose.dev.yml
+#       -f standalone/docker/docker-compose.override.yml up
+# 대상: customization-targets.md #18 (Docker 이미지 빌드)
+#
+# 이 파일로 이미지를 내부 레지스트리 주소로 교체합니다.
+# ============================================================
+
+services:
+  elasticsearch:
+    image: registry.internal.bank.co.kr/elasticsearch-nori:8.15
+
+  postgres:
+    image: registry.internal.bank.co.kr/postgres:16
+
+  qdrant:
+    image: registry.internal.bank.co.kr/qdrant:1.12.6
+
+  redis:
+    image: registry.internal.bank.co.kr/redis:7
+
+  mongodb:
+    image: registry.internal.bank.co.kr/mongo:8.0.6

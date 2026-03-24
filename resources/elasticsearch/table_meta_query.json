@@ -1,0 +1,9 @@
+{
+  "_comment": "resources/elasticsearch/table_meta_query.json — 테이블/컬럼 메타정보 검색",
+  "query": {
+    "multi_match": {
+      "query": "{query}",
+      "fields": ["*"]
+    }
+  }
+}

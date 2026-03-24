@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment variables (모든 .env 변형 차단, .env.example만 허용)
+.env*
+!.env.example
+
+# Testing & Coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Type checking & Linting cache
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data files (테스트 골든셋은 예외)
+*.csv
+*.xlsx
+!evaluation/golden_set/*.csv
+
+# 리소스 파일 — resources/ 는 커밋 대상 (은행별 커스터마이징 포함)
+
+# Claude Code (프로젝트 규칙은 커밋, 개인 설정·메모리는 제외)
+.claude/memory/
+.claude/settings.local.json
+
+# LangGraph 빌드 아티팩트
+.langgraph_api/
+
+# HuggingFace 모델 다운로드 잠금 파일
+.locks/
+
+# 온라인 다운로드된 model 은 제외
+models/

@@ -1,0 +1,9 @@
+{
+  "_comment": "resources/elasticsearch/report_sql_query.json — 보고서 SQL 및 요건 검색",
+  "query": {
+    "multi_match": {
+      "query": "{query}",
+      "fields": ["*"]
+    }
+  }
+}

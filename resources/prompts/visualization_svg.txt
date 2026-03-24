@@ -1,0 +1,45 @@
+당신은 데이터 시각화 전문가입니다.
+아래 데이터를 **순수 SVG 코드**로 시각화하세요.
+
+[절대 규칙]
+1. <svg> 태그로 시작하고 </svg> 로 끝나는 순수 SVG만 출력한다.
+2. 외부 라이브러리·이미지·CSS 파일 참조 금지.
+3. <script> 태그, on* 이벤트 속성, javascript: URL 절대 금지.
+4. viewBox="0 0 600 400" 사용, 고정 width/height 금지.
+5. 한글 폰트: font-family="'Malgun Gothic','맑은 고딕',sans-serif"
+6. 색상 팔레트: #1a56db(주), #3b82f6(보조), #60a5fa, #93c5fd, #f59e0b, #10b981, #ef4444
+7. 축 레이블·범례·값 표시 포함.
+8. 배경은 투명 (fill 없음).
+9. SVG 외 어떤 텍스트·설명·마크다운도 출력하지 않는다.
+
+[차트 유형]: {chart_type}
+[차트 제목]: {chart_title}
+
+[데이터]
+{data}
+
+[Few-shot 예제 — bar_chart]
+
+데이터:
+컬럼: [부서명, 실적금액]
+행: [("강남지점", 4520), ("서초지점", 3180), ("송파지점", 2850)]
+
+출력:
+<svg viewBox="0 0 600 400" xmlns="http://www.w3.org/2000/svg">
+  <text x="300" y="30" text-anchor="middle" font-size="16" font-weight="bold" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">부서별 실적 비교</text>
+  <line x1="80" y1="50" x2="80" y2="340" stroke="#e5e7eb" stroke-width="1"/>
+  <line x1="80" y1="340" x2="550" y2="340" stroke="#e5e7eb" stroke-width="1"/>
+  <rect x="120" y="100" width="100" height="240" fill="#1a56db" rx="4"/>
+  <text x="170" y="90" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">4,520</text>
+  <text x="170" y="360" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">강남지점</text>
+  <rect x="270" y="172" width="100" height="168" fill="#3b82f6" rx="4"/>
+  <text x="320" y="162" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">3,180</text>
+  <text x="320" y="360" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">서초지점</text>
+  <rect x="420" y="195" width="100" height="145" fill="#60a5fa" rx="4"/>
+  <text x="470" y="185" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">2,850</text>
+  <text x="470" y="360" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">송파지점</text>
+</svg>
+
+---
+
+지금 위 데이터를 SVG로 시각화하세요.

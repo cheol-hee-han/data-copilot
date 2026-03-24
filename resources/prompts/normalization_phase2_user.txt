@@ -1,0 +1,10 @@
+아래는 원본 질의와 Phase 1에서 생성된 정규화 JSON입니다.
+교차 검증 규칙 R1~R12를 모두 적용하여 수정된 JSON을 출력해 주세요.
+
+[원본 질의]
+{query}
+
+[Phase 1 결과 JSON]
+{phase1_json}
+
+JSON만 출력하세요.

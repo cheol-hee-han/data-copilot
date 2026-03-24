@@ -1,0 +1,858 @@
+{
+  "metadata": {
+    "version": "2.0",
+    "created": "2026-03-20",
+    "description": "NL-to-SQL 테스트 질의셋 (추출 30 + 분석 30 + 시각화 30 = 총 90건, 마케팅 시나리오 포함)",
+    "difficulty_distribution": {"hard": "30%", "medium": "50%", "easy": "20%"},
+    "core_domains": ["CUS(고객)", "DEP(수신)", "LON(여신)", "CRD(카드)", "TRX(거래)"]
+  },
+
+  "extraction": [
+    {
+      "id": "EX-001",
+      "difficulty": "easy",
+      "domain": "CUS",
+      "user_input": "우리 은행 전체 고객 수 알려줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO"],
+      "description": "단일 테이블 COUNT"
+    },
+    {
+      "id": "EX-002",
+      "difficulty": "easy",
+      "domain": "DEP",
+      "user_input": "현재 정상 상태인 계좌가 몇 개야?",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "description": "단일 테이블 WHERE + COUNT"
+    },
+    {
+      "id": "EX-003",
+      "difficulty": "easy",
+      "domain": "LON",
+      "user_input": "담보대출 평균 금리 알려줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "description": "단일 테이블 AVG + WHERE"
+    },
+    {
+      "id": "EX-004",
+      "difficulty": "easy",
+      "domain": "CRD",
+      "user_input": "카드 유형별 발급 건수 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CARD_INFO"],
+      "description": "단일 테이블 GROUP BY. TYPE-2: 미정의 카드유형코드 04 존재 가능"
+    },
+    {
+      "id": "EX-005",
+      "difficulty": "medium",
+      "domain": "CUS",
+      "user_input": "연령대별 고객 수와 평균 예금 잔액을 알고 싶어",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL"],
+      "description": "2테이블 JOIN + GROUP BY. 고객-계좌 조인"
+    },
+    {
+      "id": "EX-006",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "지점별 대출 잔액 합계를 많은 순서대로 10개만 보여줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO", "TB_BRANCH"],
+      "description": "2테이블 JOIN + GROUP BY + ORDER BY + LIMIT. TYPE-1: LOAN_INFO vs LOAN_MST 구분"
+    },
+    {
+      "id": "EX-007",
+      "difficulty": "medium",
+      "domain": "DEP",
+      "user_input": "상품별 계좌 수와 총 잔액, 평균 금리를 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "description": "단일 테이블 다중 집계. TYPE-2: 미정의 ACCT_TYPE_CD 05/99 존재"
+    },
+    {
+      "id": "EX-008",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "연체 등급 C 이상인 고객 목록이랑 연체 금액 보여줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO", "TB_CUST_INFO"],
+      "description": "2테이블 JOIN + IN절. TYPE-2: OVDU_GRD_CD에 F,Z 미정의 코드 존재"
+    },
+    {
+      "id": "EX-009",
+      "difficulty": "medium",
+      "domain": "TRX",
+      "user_input": "이번 달 거래 10건 이상인 계좌 번호랑 거래 건수 알려줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_TRX_HST"],
+      "description": "HAVING절. TB_TRX_HST 파티션 테이블 — TRX_DT 범위 조건 필수"
+    },
+    {
+      "id": "EX-010",
+      "difficulty": "medium",
+      "domain": "CUS",
+      "user_input": "VIP 고객이 보유한 예금, 대출, 카드 현황을 한눈에 보고 싶어",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "4테이블 LEFT JOIN. TYPE-1: CUST_GRD_CD '01'이 VIP. TYPE-4: 영업등급 vs 마케팅등급 혼동"
+    },
+    {
+      "id": "EX-011",
+      "difficulty": "medium",
+      "domain": "DEP",
+      "user_input": "평균 잔액보다 높은 계좌 목록 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "description": "스칼라 서브쿼리. TYPE-4: TB_ACCT_BAL(T+0) vs TB_ACCT_SMRY(T+1) 구분"
+    },
+    {
+      "id": "EX-012",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "대출 유형별로 건수, 총 잔액, 평균 금리 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "description": "GROUP BY + 다중 집계"
+    },
+    {
+      "id": "EX-013",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "고객별 예금 총액이랑 대출 총액을 합산해서 순자산 기준으로 상위 50명 보여줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO"],
+      "description": "3테이블 LEFT JOIN + COALESCE + 연산 컬럼 + ORDER BY + LIMIT"
+    },
+    {
+      "id": "EX-014",
+      "difficulty": "hard",
+      "domain": "LON",
+      "user_input": "지점별, 대출유형별 대출 건수, 잔액 합계, 평균 금리를 알려줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO", "TB_BRANCH"],
+      "description": "2테이블 JOIN + 2차원 GROUP BY + 다중 집계"
+    },
+    {
+      "id": "EX-015",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "영업 등급이랑 마케팅 등급이 서로 다른 고객 목록 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_CUST_PROFILE"],
+      "description": "2테이블 JOIN + 불일치 조건. TYPE-4: CUST_GRD_CD vs MKT_GRD_CD 이중화"
+    },
+    {
+      "id": "EX-016",
+      "difficulty": "hard",
+      "domain": "LON",
+      "user_input": "대출 잔액이 승인 금액의 50% 이상 남아있는 건 목록을 고객 정보랑 같이 보여줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO", "TB_LOAN_MST", "TB_CUST_INFO"],
+      "description": "3테이블 JOIN + 산술 비교. TYPE-4: LOAN_AMT(실행) vs APPR_AMT(승인) 개념 차이"
+    },
+    {
+      "id": "EX-017",
+      "difficulty": "hard",
+      "domain": "DEP",
+      "user_input": "예금 계좌가 없는 고객 목록 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL"],
+      "description": "NOT IN 서브쿼리 또는 LEFT JOIN + IS NULL"
+    },
+    {
+      "id": "EX-018",
+      "difficulty": "hard",
+      "domain": "TRX",
+      "user_input": "최근 한 달간 채널별 거래 건수, 금액 합계, 건당 평균 금액을 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_TRX_HST"],
+      "description": "GROUP BY + 다중 집계. 파티션 테이블 TRX_DT 범위 필수. TYPE-2: TRX_TYPE_CD 200+/999"
+    },
+    {
+      "id": "EX-019",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "기업 고객 중 대출이 있으면서 카드도 보유한 고객 목록을 보여줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "3테이블 JOIN + EXISTS 또는 INNER JOIN. CUST_TYPE_CD='02' 조건"
+    },
+    {
+      "id": "EX-020",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "대출 상태별 건수랑 잔액 합계 알려줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "description": "GROUP BY. TYPE-2: LOAN_STAT_CD에 '0A' 미정의 코드 존재"
+    },
+    {
+      "id": "EX-MKT-001",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "정기예금 만기가 30일 이내인 고객 명단이랑 잔액을 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_ACCT_BAL", "TB_CUST_INFO"],
+      "description": "만기 도래 고객 추출. 재가입 마케팅 대상. JOIN + 날짜 조건"
+    },
+    {
+      "id": "EX-MKT-002",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "보통예금 잔액 5천만원 이상인데 정기예금은 없는 고객 목록 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_ACCT_BAL", "TB_CUST_INFO"],
+      "description": "교차판매 대상. NOT EXISTS 또는 LEFT JOIN IS NULL 패턴"
+    },
+    {
+      "id": "EX-MKT-003",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "체크카드 월 이용 50만원 이상인데 신용카드는 없는 고객 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CARD_INFO", "TB_CUST_INFO"],
+      "description": "카드 업셀 대상. CARD_TYPE_CD 조건 + NOT EXISTS"
+    },
+    {
+      "id": "EX-MKT-004",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "예금만 있고 대출이랑 카드 둘 다 없는 고객 명단 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "주거래 육성 대상. 3테이블 LEFT JOIN + IS NULL 조건"
+    },
+    {
+      "id": "EX-MKT-005",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "VIP 기준 자산에 10% 이내로 근접한 고객 목록이랑 현재 자산 규모 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL"],
+      "description": "VIP 승급 직전 고객. 산술 비교 + 복합 조건"
+    },
+    {
+      "id": "EX-MKT-006",
+      "difficulty": "easy",
+      "domain": "MKT",
+      "user_input": "최근 1년간 거래가 없는 고객 수가 몇 명이야?",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_TRX_HST"],
+      "description": "휴면/이탈 위험 고객 규모 파악. NOT EXISTS + 날짜 조건"
+    },
+    {
+      "id": "EX-MKT-007",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "기존 대출 금리가 현재 평균보다 1%p 이상 높은 고객 목록 보여줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_LOAN_INFO", "TB_CUST_INFO"],
+      "description": "리파이낸싱 마케팅 대상. 스칼라 서브쿼리 + 산술 비교"
+    },
+    {
+      "id": "EX-MKT-008",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "50대 이상 고객 중에 퇴직연금이나 연금보험 하나도 없는 고객 명단 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO"],
+      "description": "연금 크로스셀 대상. 연령 조건 + 다중 상품 미보유 확인. 실제 연금 테이블에 데이터 없어 빈 결과 가능"
+    },
+    {
+      "id": "EX-MKT-009",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "가입한 지 3개월 이내인데 거래가 3건 미만인 신규 고객 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_TRX_HST"],
+      "description": "신규 고객 온보딩 대상. JOIN + HAVING + 날짜 조건"
+    },
+    {
+      "id": "EX-MKT-010",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "총 자산 3억 이상인데 보유 상품이 2개 이하인 종합자산관리 추천 대상 고객 뽑아줘",
+      "intent": "data_extraction",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "PB 배정 검토 대상. 4테이블 조인 + 보유상품수 산출 + 자산 합산"
+    }
+  ],
+
+  "analysis": [
+    {
+      "id": "AN-001",
+      "difficulty": "easy",
+      "domain": "CUS",
+      "user_input": "우리 은행 고객 중에 개인이 많아 기업이 많아?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO"],
+      "description": "비율 비교. 단순 집계 후 의미 해석"
+    },
+    {
+      "id": "AN-002",
+      "difficulty": "easy",
+      "domain": "DEP",
+      "user_input": "휴면 계좌 비중이 어느 정도 돼?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "description": "비율 산출. ACCT_STAT_CD='03' 비중 분석"
+    },
+    {
+      "id": "AN-003",
+      "difficulty": "easy",
+      "domain": "LON",
+      "user_input": "신용대출이랑 담보대출 중에 어떤 게 금리가 더 높아?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "description": "조건별 평균 비교 분석"
+    },
+    {
+      "id": "AN-004",
+      "difficulty": "easy",
+      "domain": "CRD",
+      "user_input": "해외 사용 가능 카드랑 불가능 카드 비율이 어떻게 돼?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CARD_INFO"],
+      "description": "FLG_YN 기반 비율 분석. TYPE-3: FLG_YN 메타 설명이 'Y/N FLAG'로 부실"
+    },
+    {
+      "id": "AN-005",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "연체 등급별 고객 분포를 분석해줘. 심각한 연체가 많은 편이야?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "description": "등급별 분포 분석 + 인사이트 도출. TYPE-2: F/Z 미정의 등급 존재"
+    },
+    {
+      "id": "AN-006",
+      "difficulty": "medium",
+      "domain": "CUS",
+      "user_input": "고객 등급별로 평균 예금 잔액이 얼마나 차이 나는지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL"],
+      "description": "등급별 비교 분석. TYPE-2: CUST_GRD_CD '99'/NULL 미정의"
+    },
+    {
+      "id": "AN-007",
+      "difficulty": "medium",
+      "domain": "DEP",
+      "user_input": "계좌 유형별로 평균 잔액이랑 계좌 수 비교 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "description": "유형별 비교 분석. TYPE-2: ACCT_TYPE_CD '05'/'99' 미정의"
+    },
+    {
+      "id": "AN-008",
+      "difficulty": "medium",
+      "domain": "TRX",
+      "user_input": "채널별로 거래 금액 비중이 어떻게 되는지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_TRX_HST"],
+      "description": "채널별 비중 분석. CHNL_CD 기반"
+    },
+    {
+      "id": "AN-009",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "지점별 연체율을 분석해서 어느 지점이 가장 관리가 필요한지 알려줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_LOAN_INFO", "TB_BRANCH"],
+      "description": "지점별 연체율 산출 + 순위 + 인사이트"
+    },
+    {
+      "id": "AN-010",
+      "difficulty": "medium",
+      "domain": "CUS",
+      "user_input": "성별에 따라 대출 유형 선호도가 다른지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_LOAN_INFO"],
+      "description": "교차 분석 (성별 × 대출유형)"
+    },
+    {
+      "id": "AN-011",
+      "difficulty": "medium",
+      "domain": "CRD",
+      "user_input": "카드 월 이용금액 기준으로 고객을 구간별로 나눠서 분포를 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CARD_INFO"],
+      "description": "구간별 히스토그램 분석 (CASE WHEN 구간 분류)"
+    },
+    {
+      "id": "AN-012",
+      "difficulty": "medium",
+      "domain": "DEP",
+      "user_input": "당일 기준 잔액이랑 전일 기준 잔액이 많이 차이 나는 계좌가 있어?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_ACCT_BAL", "TB_ACCT_SMRY"],
+      "description": "TYPE-4 이중화 분석. BAL_AMT vs TOT_BAL_AMT 차이 분석"
+    },
+    {
+      "id": "AN-013",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "고객 등급별로 보유 상품 수(예금+대출+카드) 평균을 분석해서 등급간 차이가 유의미한지 봐줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "4테이블 조인 + 등급별 교차 분석 + 인사이트 도출"
+    },
+    {
+      "id": "AN-014",
+      "difficulty": "hard",
+      "domain": "LON",
+      "user_input": "대출 유형별로 연체 비율이 어떤지, 특히 어떤 유형이 부실 위험이 높은지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "description": "유형별 연체율 산출 + 위험도 비교 분석"
+    },
+    {
+      "id": "AN-015",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "연령대별로 선호하는 금융 상품이 다른지 분석해줘 (예금, 대출, 카드 비중)",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "다차원 교차 분석 (연령 × 상품유형) + 패턴 해석"
+    },
+    {
+      "id": "AN-016",
+      "difficulty": "hard",
+      "domain": "DEP",
+      "user_input": "지점별로 예금 잔액 편중도가 어떤지 분석해줘. 소수 고객에게 집중되어 있는 지점이 있어?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_ACCT_BAL", "TB_BRANCH"],
+      "description": "지점별 집중도(편차/상위비중) 분석 + 인사이트"
+    },
+    {
+      "id": "AN-017",
+      "difficulty": "hard",
+      "domain": "LON",
+      "user_input": "승인 금액 대비 실행 비율이 낮은 대출 건들의 특성을 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_LOAN_INFO", "TB_LOAN_MST", "TB_CUST_INFO"],
+      "description": "TYPE-4: LOAN_AMT vs APPR_AMT 비율 분석 + 특성 프로파일링"
+    },
+    {
+      "id": "AN-018",
+      "difficulty": "hard",
+      "domain": "TRX",
+      "user_input": "거래 금액 구간별로 어떤 채널을 주로 사용하는지 패턴을 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_TRX_HST"],
+      "description": "금액구간 × 채널 교차 분석"
+    },
+    {
+      "id": "AN-019",
+      "difficulty": "medium",
+      "domain": "CUS",
+      "user_input": "개인사업자 고객이 주로 어떤 대출을 이용하는지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_LOAN_INFO"],
+      "description": "CUST_TYPE_CD='03' 필터 + 대출유형 비중 분석"
+    },
+    {
+      "id": "AN-020",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "대출 금리 분포가 어떻게 되는지, 이상치가 있는지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "description": "분포 분석 (평균, 중앙값, 사분위수, 이상치 탐지)"
+    },
+    {
+      "id": "AN-MKT-001",
+      "difficulty": "easy",
+      "domain": "MKT",
+      "user_input": "우리 지점 고객 중에 교차판매 여지가 큰 고객이 어느 정도 돼?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "단일 상품만 보유한 고객 비율 분석 → 교차판매 기회 규모 파악"
+    },
+    {
+      "id": "AN-MKT-002",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "정기예금 만기 도래 고객 중 재가입률이 어느 정도인지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "description": "만기 후 재가입 여부 패턴 분석 + 재가입률 산출"
+    },
+    {
+      "id": "AN-MKT-003",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "고객등급별로 보유 상품 수 평균이 어떤지 분석해서 어떤 등급에 교차판매가 효과적일지 알려줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "description": "등급별 상품 보유 패턴 분석 + 교차판매 타겟 등급 추천"
+    },
+    {
+      "id": "AN-MKT-004",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "잔액이 줄어드는 추세인 고객이 얼마나 되는지, 이탈 위험이 높은 편인지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_ACCT_BAL", "TB_ACCT_SMRY"],
+      "description": "잔액 감소 추세 고객 비율 분석. TYPE-4: BAL_AMT vs TOT_BAL_AMT 비교 활용"
+    },
+    {
+      "id": "AN-MKT-005",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "체크카드에서 신용카드로 전환한 고객과 안 한 고객의 월 이용금액 차이를 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CARD_INFO", "TB_CUST_INFO"],
+      "description": "전환 그룹 vs 미전환 그룹 비교 분석 + 전환 효과 인사이트"
+    },
+    {
+      "id": "AN-MKT-006",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "VIP 등급 이탈(등급 하락) 위험이 있는 고객의 특성을 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO"],
+      "description": "VIP 고객 중 자산 감소 추세 분석 + 이탈 위험 프로파일링"
+    },
+    {
+      "id": "AN-MKT-007",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "연령대별로 어떤 마케팅 채널이 효과적인지 거래 채널 이용 패턴을 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_TRX_HST"],
+      "description": "연령대 × 채널 교차 분석 + 마케팅 채널 전략 제안"
+    },
+    {
+      "id": "AN-MKT-008",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "신규 가입 후 3개월 이내 활성화되는 고객 비율이 어느 정도야?",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_TRX_HST"],
+      "description": "신규 고객 온보딩 성공률 분석"
+    },
+    {
+      "id": "AN-MKT-009",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "리파이낸싱 대상 고객의 규모가 어느 정도 되고, 예상 금리 절감 효과는 얼마나 될지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_LOAN_INFO", "TB_CUST_INFO"],
+      "description": "현재 금리 vs 시장 평균 비교 + 전환 시 절감액 시뮬레이션"
+    },
+    {
+      "id": "AN-MKT-010",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "지점별로 교차판매 잠재 고객 비율이 어떻게 다른지 분석해줘",
+      "intent": "data_analysis",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_BRANCH"],
+      "description": "지점별 단일상품 고객 비율 비교 → 교차판매 집중 지점 선정"
+    }
+  ],
+
+  "visualization": [
+    {
+      "id": "VZ-001",
+      "difficulty": "easy",
+      "domain": "CUS",
+      "user_input": "고객 유형별 비율을 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO"],
+      "expected_chart": "pie",
+      "description": "파이 차트. CUST_TYPE_CD별 비율"
+    },
+    {
+      "id": "VZ-002",
+      "difficulty": "easy",
+      "domain": "CUS",
+      "user_input": "연령대별 고객 수를 그래프로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO"],
+      "expected_chart": "bar",
+      "description": "막대 차트. AGE_GRP_CD별 COUNT"
+    },
+    {
+      "id": "VZ-003",
+      "difficulty": "easy",
+      "domain": "DEP",
+      "user_input": "계좌 상태별 비율을 파이 차트로 그려줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "expected_chart": "pie",
+      "description": "파이 차트. ACCT_STAT_CD별 비율"
+    },
+    {
+      "id": "VZ-004",
+      "difficulty": "easy",
+      "domain": "LON",
+      "user_input": "대출 유형별 잔액 합계를 막대 그래프로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "expected_chart": "bar",
+      "description": "막대 차트. LOAN_TYPE_CD별 SUM(LOAN_BAL)"
+    },
+    {
+      "id": "VZ-005",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "지점별 대출 잔액 TOP 10을 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO", "TB_BRANCH"],
+      "expected_chart": "horizontal_bar",
+      "description": "가로 막대 차트. 지점별 잔액 TOP 10"
+    },
+    {
+      "id": "VZ-006",
+      "difficulty": "medium",
+      "domain": "CUS",
+      "user_input": "고객 등급별 평균 예금 잔액을 그래프로 비교해줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL"],
+      "expected_chart": "bar",
+      "description": "막대 차트. 등급별 평균 잔액"
+    },
+    {
+      "id": "VZ-007",
+      "difficulty": "medium",
+      "domain": "TRX",
+      "user_input": "채널별 거래 건수 비중을 파이 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_TRX_HST"],
+      "expected_chart": "pie",
+      "description": "파이 차트. CHNL_CD별 비중"
+    },
+    {
+      "id": "VZ-008",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "연체등급별 연체 금액 분포를 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "expected_chart": "bar",
+      "description": "막대 차트. OVDU_GRD_CD별 SUM(OVDU_AMT). TYPE-2: F/Z 미정의 처리"
+    },
+    {
+      "id": "VZ-009",
+      "difficulty": "medium",
+      "domain": "DEP",
+      "user_input": "상품별 계좌 수와 총 잔액을 이중 축 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "expected_chart": "dual_axis_bar",
+      "description": "이중 축 차트. PROD_CD별 COUNT + SUM(BAL_AMT)"
+    },
+    {
+      "id": "VZ-010",
+      "difficulty": "medium",
+      "domain": "CUS",
+      "user_input": "성별에 따른 고객등급 분포를 그래프로 비교해줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO"],
+      "expected_chart": "grouped_bar",
+      "description": "그룹 막대 차트. GENDER_CD × CUST_GRD_CD"
+    },
+    {
+      "id": "VZ-011",
+      "difficulty": "medium",
+      "domain": "CRD",
+      "user_input": "카드 유형별 월 이용금액 합계를 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CARD_INFO"],
+      "expected_chart": "bar",
+      "description": "막대 차트. CARD_TYPE_CD별 SUM(MON_USE_AMT)"
+    },
+    {
+      "id": "VZ-012",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "대출 유형별로 평균 금리를 비교하는 차트 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "expected_chart": "bar",
+      "description": "막대 차트. LOAN_TYPE_CD별 AVG(INT_RATE)"
+    },
+    {
+      "id": "VZ-013",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "고객 등급별 예금, 대출 평균 잔액을 묶은 막대 그래프로 비교해줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO"],
+      "expected_chart": "grouped_bar",
+      "description": "그룹 막대 차트. 등급별 (예금 평균, 대출 평균) 비교. 3테이블 JOIN"
+    },
+    {
+      "id": "VZ-014",
+      "difficulty": "hard",
+      "domain": "LON",
+      "user_input": "지점별 대출 건수와 연체율을 같이 비교할 수 있는 차트 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO", "TB_BRANCH"],
+      "expected_chart": "dual_axis_bar",
+      "description": "이중 축 차트. 지점별 대출건수(막대) + 연체율(라인)"
+    },
+    {
+      "id": "VZ-015",
+      "difficulty": "hard",
+      "domain": "DEP",
+      "user_input": "계좌 잔액 구간별 분포를 히스토그램으로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "expected_chart": "histogram",
+      "description": "히스토그램. BAL_AMT 구간별 빈도"
+    },
+    {
+      "id": "VZ-016",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "연령대별로 선호 채널(거래 비중)을 비교하는 차트 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_TRX_HST"],
+      "expected_chart": "stacked_bar",
+      "description": "누적 막대 차트. 연령대 × 채널 비중. CROSS-DOMAIN JOIN"
+    },
+    {
+      "id": "VZ-017",
+      "difficulty": "hard",
+      "domain": "LON",
+      "user_input": "대출 금리 대비 대출 잔액 관계를 산점도로 그려줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "expected_chart": "scatter",
+      "description": "산점도. INT_RATE vs LOAN_BAL 상관관계"
+    },
+    {
+      "id": "VZ-018",
+      "difficulty": "hard",
+      "domain": "TRX",
+      "user_input": "최근 한 달간 일별 거래 건수 추이를 라인 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_TRX_HST"],
+      "expected_chart": "line",
+      "description": "라인 차트. TRX_DT별 COUNT 시계열"
+    },
+    {
+      "id": "VZ-019",
+      "difficulty": "hard",
+      "domain": "CUS",
+      "user_input": "지점별 고객 수와 예금 총잔액 관계를 버블 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_BRANCH"],
+      "expected_chart": "bubble",
+      "description": "버블 차트. X=고객수, Y=예금총액, 크기=평균잔액"
+    },
+    {
+      "id": "VZ-020",
+      "difficulty": "medium",
+      "domain": "LON",
+      "user_input": "대출 상태별 건수 비중을 도넛 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "expected_chart": "donut",
+      "description": "도넛 차트. LOAN_STAT_CD별 비중. TYPE-2: '0A' 미정의 코드"
+    },
+    {
+      "id": "VZ-MKT-001",
+      "difficulty": "easy",
+      "domain": "MKT",
+      "user_input": "고객별 보유 상품 수(예금/대출/카드) 분포를 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "expected_chart": "bar",
+      "description": "막대 차트. 보유상품수(1개/2개/3개)별 고객수 분포"
+    },
+    {
+      "id": "VZ-MKT-002",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "고객등급별 교차판매 대상(단일상품 보유) 고객 비율을 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "expected_chart": "bar",
+      "description": "막대 차트. 등급별 단일상품 고객 비율 → 교차판매 기회 시각화"
+    },
+    {
+      "id": "VZ-MKT-003",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "정기예금 만기 도래 고객 수를 월별로 차트 그려줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_ACCT_BAL"],
+      "expected_chart": "bar",
+      "description": "막대 차트. 향후 6개월 월별 만기 도래 고객수 → 마케팅 일정 수립"
+    },
+    {
+      "id": "VZ-MKT-004",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "지점별 교차판매 잠재 고객 비율을 차트로 비교해줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_BRANCH"],
+      "expected_chart": "horizontal_bar",
+      "description": "가로 막대 차트. 지점별 단일상품 고객 비율 비교"
+    },
+    {
+      "id": "VZ-MKT-005",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "VIP 승급 직전 고객의 자산 분포를 히스토그램으로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL"],
+      "expected_chart": "histogram",
+      "description": "히스토그램. VIP 기준 근접 고객의 자산 구간별 분포"
+    },
+    {
+      "id": "VZ-MKT-006",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "연령대별로 보유 상품 유형 비중을 누적 막대 그래프로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_LOAN_INFO", "TB_CARD_INFO"],
+      "expected_chart": "stacked_bar",
+      "description": "누적 막대 차트. 연령대 × 상품유형(예금/대출/카드) 비중 → 세대별 마케팅 전략"
+    },
+    {
+      "id": "VZ-MKT-007",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "리파이낸싱 대상 고객의 현재 금리와 시장 평균 금리 차이를 산점도로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_LOAN_INFO"],
+      "expected_chart": "scatter",
+      "description": "산점도. X=대출잔액, Y=현재금리, 기준선=시장평균금리 → 리파이낸싱 기회 시각화"
+    },
+    {
+      "id": "VZ-MKT-008",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "신규 고객의 가입 후 월별 거래 활성화 추이를 라인 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_TRX_HST"],
+      "expected_chart": "line",
+      "description": "라인 차트. 가입 후 1~6개월 월별 평균 거래건수 추이 → 온보딩 효과"
+    },
+    {
+      "id": "VZ-MKT-009",
+      "difficulty": "hard",
+      "domain": "MKT",
+      "user_input": "이탈 위험 고객과 안정 고객의 거래 패턴 차이를 비교 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CUST_INFO", "TB_ACCT_BAL", "TB_TRX_HST"],
+      "expected_chart": "grouped_bar",
+      "description": "그룹 막대 차트. 이탈위험 vs 안정 그룹의 월평균 거래건수, 잔액 비교"
+    },
+    {
+      "id": "VZ-MKT-010",
+      "difficulty": "medium",
+      "domain": "MKT",
+      "user_input": "카드 업그레이드 대상 고객의 월 이용금액 분포를 차트로 보여줘",
+      "intent": "data_visualization",
+      "expected_tables": ["TB_CARD_INFO"],
+      "expected_chart": "histogram",
+      "description": "히스토그램. 체크카드 고이용 고객의 월 이용금액 구간별 분포"
+    }
+  ]
+}
