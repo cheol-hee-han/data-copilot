@@ -161,7 +161,7 @@ user-invocable: true
 
 # 산출물 위치
 
-- 검증 스크립트: `standalone/scripts/verify_test_data.py`
+- 검증 스크립트: `devtools/scripts/verify_test_data.py`
 - 검증 보고서: `docs/reports/data-verification-report.md`
 
 # 인자 사용법

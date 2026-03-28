@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Copilot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: #1a56db;
+            color: white;
+            padding: 16px 24px;
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header .subtitle {
+            font-size: 13px;
+            font-weight: 400;
+            opacity: 0.85;
+        }
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .message.user {
+            align-self: flex-end;
+            background: #1a56db;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .message.assistant {
+            align-self: flex-start;
+            background: white;
+            color: #1f2937;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .message.status {
+            align-self: center;
+            background: #fef3c7;
+            color: #92400e;
+            font-size: 13px;
+            padding: 8px 16px;
+        }
+        .message.error {
+            align-self: center;
+            background: #fee2e2;
+            color: #991b1b;
+            font-size: 13px;
+            padding: 8px 16px;
+        }
+        .input-area {
+            padding: 16px 20px;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            gap: 10px;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+        }
+        .input-area input:focus {
+            border-color: #1a56db;
+            box-shadow: 0 0 0 3px rgba(26,86,219,0.1);
+        }
+        .input-area button {
+            padding: 12px 24px;
+            background: #1a56db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .input-area button:hover { background: #1e40af; }
+        .input-area button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .welcome {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+        .welcome h2 { color: #1f2937; margin-bottom: 8px; }
+        .welcome .examples {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+        }
+        .welcome .example-btn {
+            padding: 8px 16px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #1e40af;
+            font-size: 13px;
+        }
+        .welcome .example-btn:hover { background: #dbeafe; }
+        /* 시각화 컨테이너 */
+        .viz-container {
+            margin-top: 12px;
+            padding: 16px;
+            background: #fafbfc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .viz-container svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .viz-title {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 8px;
+        }
+        .viz-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+        }
+        .viz-actions button {
+            padding: 4px 12px;
+            font-size: 12px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #1e40af;
+        }
+        .viz-actions button:hover { background: #dbeafe; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        Data Copilot
+        <span class="subtitle">자연어 기반 데이터 추출/분석 AI 에이전트</span>
+    </div>
+
+    <div class="chat-container" id="chatContainer">
+        <div class="welcome">
+            <h2>안녕하세요! Data Copilot입니다</h2>
+            <p>데이터 추출이나 분석이 필요하시면 자연어로 요청해주세요.</p>
+            <div class="examples">
+                <button class="example-btn" onclick="sendExample(this)">
+                    이번 달 신규 고객 수 알려줘
+                </button>
+                <button class="example-btn" onclick="sendExample(this)">
+                    대출 유형별 건수와 금액 보여줘
+                </button>
+                <button class="example-btn" onclick="sendExample(this)">
+                    최근 12개월 연체율 추이 분석해줘
+                </button>
+                <button class="example-btn" onclick="sendExample(this)">
+                    지점별 고객 수 상위 5개 보여줘
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="input-area">
+        <input
+            type="text"
+            id="messageInput"
+            placeholder="데이터 요청을 입력하세요..."
+            onkeypress="if(event.key==='Enter')sendMessage()"
+        >
+        <button id="sendBtn" onclick="sendMessage()">전송</button>
+    </div>
+
+    <script>
+        const sessionId = 'session-' + Date.now();
+        const wsUrl = `ws://${window.location.host}/ws/${sessionId}`;
+        let ws = null;
+        let reconnectAttempts = 0;
+
+        function connectWebSocket() {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket 연결됨');
+                reconnectAttempts = 0;
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                const msgType =
+                    data.type === 'response' ? 'assistant' : data.type;
+                addMessage(msgType, data.message, data.visualization || null);
+                document.getElementById('sendBtn').disabled = false;
+                document.getElementById('messageInput').disabled = false;
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket 연결 종료');
+                if (reconnectAttempts < 5) {
+                    setTimeout(
+                        connectWebSocket,
+                        1000 * Math.pow(2, reconnectAttempts)
+                    );
+                    reconnectAttempts++;
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket 오류:', error);
+            };
+        }
+
+        function sanitizeSVG(svgCode) {
+            // SVG 보안 새니타이징: XSS 벡터 제거
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgCode, 'image/svg+xml');
+            const svg = doc.querySelector('svg');
+            if (!svg) return '';
+
+            // 위험 요소 제거
+            const dangerous = svg.querySelectorAll(
+                'script, foreignObject, iframe, embed, object'
+            );
+            dangerous.forEach(el => el.remove());
+
+            // 모든 요소에서 이벤트 핸들러 속성 제거
+            const allElements = svg.querySelectorAll('*');
+            allElements.forEach(el => {
+                const attrs = Array.from(el.attributes);
+                attrs.forEach(attr => {
+                    const name = attr.name.toLowerCase();
+                    if (name.startsWith('on') ||
+                        attr.value.includes('javascript:')) {
+                        el.removeAttribute(attr.name);
+                    }
+                });
+                // xlink:href에 javascript: 차단
+                const href = el.getAttribute('href') ||
+                             el.getAttribute('xlink:href');
+                if (href && href.trim().toLowerCase()
+                        .startsWith('javascript:')) {
+                    el.removeAttribute('href');
+                    el.removeAttribute('xlink:href');
+                }
+            });
+
+            return svg.outerHTML;
+        }
+
+        function downloadSVG(btn) {
+            const container = btn.closest('.viz-container');
+            const svg = container.querySelector('svg');
+            if (!svg) return;
+            const blob = new Blob(
+                [svg.outerHTML],
+                { type: 'image/svg+xml' }
+            );
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'chart.svg';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function addMessage(type, content, visualization) {
+            const container = document.getElementById('chatContainer');
+            const welcome = container.querySelector('.welcome');
+            if (welcome) welcome.remove();
+
+            const msg = document.createElement('div');
+            msg.className = `message ${type}`;
+            msg.textContent = content;
+            container.appendChild(msg);
+
+            // 시각화가 있으면 차트 렌더링
+            if (visualization && visualization.code) {
+                const vizDiv = document.createElement('div');
+                vizDiv.className = 'viz-container';
+
+                if (visualization.title) {
+                    const titleDiv = document.createElement('div');
+                    titleDiv.className = 'viz-title';
+                    titleDiv.textContent = visualization.title;
+                    vizDiv.appendChild(titleDiv);
+                }
+
+                const svgWrapper = document.createElement('div');
+                svgWrapper.innerHTML = sanitizeSVG(visualization.code);
+                vizDiv.appendChild(svgWrapper);
+
+                // 다운로드 버튼
+                const actions = document.createElement('div');
+                actions.className = 'viz-actions';
+                actions.innerHTML =
+                    '<button onclick="downloadSVG(this)">SVG 다운로드</button>';
+                vizDiv.appendChild(actions);
+
+                container.appendChild(vizDiv);
+            }
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            addMessage('user', text);
+            ws.send(text);
+            input.value = '';
+            document.getElementById('sendBtn').disabled = true;
+            document.getElementById('messageInput').disabled = true;
+        }
+
+        function sendExample(btn) {
+            document.getElementById('messageInput').value =
+                btn.textContent.trim();
+            sendMessage();
+        }
+
+        connectWebSocket();
+    </script>
+</body>
+</html>

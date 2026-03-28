@@ -1,0 +1,28 @@
+{
+  "_comment": "glossary + dpasset_table 조인 — 용어사전 조회",
+  "_note": "$match 단계는 코드에서 동적으로 구성 (text 검색 / 용어명 exact match)",
+  "lookup": {
+    "$lookup": {
+      "from": "${table_meta_collection}",
+      "localField": "table_ids",
+      "foreignField": "_id",
+      "as": "tables"
+    }
+  },
+  "unwind": {
+    "$unwind": {
+      "path": "$tables",
+      "preserveNullAndEmptyArrays": true
+    }
+  },
+  "project": {
+    "$project": {
+      "_id": 0,
+      "name": "$name",
+      "synonyms": "$synonyms",
+      "glossary_definition": "$glossary_definition",
+      "table_name": "$tables.name",
+      "table_description": "$tables.desc"
+    }
+  }
+}

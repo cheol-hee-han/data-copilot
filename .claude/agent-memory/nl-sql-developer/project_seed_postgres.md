@@ -1,6 +1,6 @@
 ---
 name: seed_postgres 전면 재작성 완료
-description: standalone/scripts/seed_postgres.py의 신규 명명규칙 적용 및 572개 테이블 DDL 자동생성 구조
+description: devtools/scripts/seed_postgres.py의 신규 명명규칙 적용 및 572개 테이블 DDL 자동생성 구조
 type: project
 ---
 

@@ -1,0 +1,68 @@
+
+============================================================================
+  Full Pipeline E2E 테스트 보고서
+============================================================================
+
+## NON_DATA
+------------------------------------------------------------
+  [OK] A-01: 안녕하세요
+    intent=casual_talk, sql=N, valid=N, exec=N, rows=0, llm=2calls, 4621.0ms
+
+  [OK] A-02: 메타 질문
+    intent=meta_question, sql=N, valid=N, exec=N, rows=0, llm=2calls, 1935.5ms
+
+## SIMPLE_EXTRACT
+------------------------------------------------------------
+  [!!] B-01: 전체 고객 수
+    intent=data_extraction, sql=N, valid=N, exec=N, rows=0, llm=11calls, 114118.2ms
+    FAILED: sql_generated, has_count, sql_validated
+
+  [!!] B-02: 이번 달 신규 여신
+    intent=data_extraction, sql=N, valid=N, exec=N, rows=0, llm=9calls, 137265.3ms
+    FAILED: sql_generated, has_date_condition, has_count
+
+  [!!] B-03: 고객별 잔액 합계
+    intent=data_extraction, sql=N, valid=N, exec=N, rows=0, llm=7calls, 119868.6ms
+    FAILED: sql_generated, has_group_by, has_sum
+
+  [!!] B-04: 지점별 수신 잔액
+    intent=data_extraction, sql=N, valid=N, exec=N, rows=0, llm=3calls, 46227.2ms
+    FAILED: sql_generated, has_join, has_group_by
+
+## COMPLEX
+------------------------------------------------------------
+  [!!] D-02: 1억 이상 대출
+    intent=data_extraction, sql=N, valid=N, exec=N, rows=0, llm=1calls, 3732.4ms
+    FAILED: sql_generated, correct_amount
+
+## EDGE
+------------------------------------------------------------
+  [!!] E-01: PII 마스킹
+    intent=unknown, sql=N, valid=N, exec=N, rows=0, llm=0calls, 900.4ms
+    FAILED: sql_generated, has_masking
+
+  [!!] E-02: 대용량 방어
+    intent=unknown, sql=N, valid=N, exec=N, rows=0, llm=0calls, 905.9ms
+    FAILED: has_limit, has_date_condition
+
+  [OK] E-03: 테이블 미발견
+    intent=unknown, sql=N, valid=N, exec=N, rows=0, llm=0calls, 895.7ms
+
+## ANALYSIS
+------------------------------------------------------------
+  [!!] F-01: 지점별 분석
+    intent=unknown, sql=N, valid=N, exec=N, rows=0, llm=0calls, 965.3ms
+    FAILED: intent_analysis, sql_generated
+
+============================================================================
+  TOTAL: 11 | PASS: 3 (27%) | FAIL: 8
+  AVG LATENCY: 39221ms
+  TOTAL LLM CALLS: 35
+============================================================================
+
+## TRACE ANALYZER 자동 분석
+------------------------------------------------------------
+=== 배치 분석 결과 (0건) ===
+성공률: 0% (0/0)
+
+심각도별 발견 사항:

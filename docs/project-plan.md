@@ -181,7 +181,7 @@ project-planner ──→ pipeline-designer ──→ design-critic
 - [ ] 프롬프트 인젝션 방어 검증 (영어 + 한국어 패턴)
 - [ ] 유니코드 정규화 우회 검증
 - [ ] 산출물: `docs/design-reviews/20260321-security-audit.md`
-- [ ] **파일 소유권**: `src/utils/security.py`, `src/agents/nodes/preprocessor.py`(보안 부분만)
+- [ ] **파일 소유권**: `src/utils/security.py`, `src/agents/nodes/interpret/preprocessor.py`(보안 부분만)
 
 ### 게이트 1: Walking Skeleton 검증
 - [ ] `python -m src.agents.graph.runner "이번 달 신규 고객 수"` → Mock 결과 반환
@@ -332,7 +332,7 @@ project-planner ──→ pipeline-designer ──→ design-critic
 | 에이전트 | 작업 | 파일 소유권 |
 |---------|------|-----------|
 | **data-analyst** | 통계 엔진 (요약통계, 추이감지, Z-score 이상치, 비교분석), 템플릿 차트 생성기 (bar/line/pie SVG) | `src/agents/nodes/ (analyzer)` |
-| **output-formatter** | 금액 단위 변환, 코드값→한국어, 마크다운 표, 엑셀 내보내기, 프론트엔드 SVG 렌더링·새니타이징 | `src/agents/nodes/formatter.py`, `src/main.py` (HTML 부분) |
+| **output-formatter** | 금액 단위 변환, 코드값→한국어, 마크다운 표, 엑셀 내보내기, 프론트엔드 SVG 렌더링·새니타이징 | `src/agents/nodes/present/formatter.py`, `src/main.py` (HTML 부분) |
 | **prompt-engineer** | 분석 프롬프트 최적화, action_items 도출, 시각화 판단(VISUALIZATION_JUDGMENT) + SVG 생성(VISUALIZATION_SVG_GENERATION) 프롬프트 | `src/agents/nodes/prompts/system_prompts.py` |
 
 **Step 4-2: nl-sql-developer** (← 4-1 완료 후)
@@ -446,7 +446,7 @@ project-planner ──→ pipeline-designer ──→ design-critic
 | `src/services/domain/finance_terms.py` | domain-researcher | 단독 소유 |
 | `src/agents/nodes/prompts/system_prompts.py` | prompt-engineer | 단독 소유 |
 | `src/utils/security.py` | security-guard | 단독 소유 |
-| `src/agents/nodes/analyzer.py` | data-analyst | 단독 소유 |
+| `src/agents/nodes/present/analyzer.py` | data-analyst | 단독 소유 |
 | `evaluation/`, `tests/` | test-generator | sql-evaluator는 평가 실행만 |
 | `docs/*.md` | doc-writer | 다른 에이전트는 초안만 작성 가능 |
 

@@ -12,6 +12,7 @@
   - search_context_assembler: 병렬 다중 소스 검색 결과 조립·통합
   - search_query_builder: 멀티소스 검색 쿼리 빌더
   - similar_table_resolver: 유사 테이블 구분·검증·추천
-  - table_meta_enricher: LLM 기반 테이블 메타 설명 보강
+  - confidence_scorer: 에이전틱 코어 확신도 계산 + 행동 판정
+  - sql_hint_extractor: sqlglot 기반 SQL 구조적 힌트 추출
   - search_query_embedder / reranker: 벡터 인프라
 """

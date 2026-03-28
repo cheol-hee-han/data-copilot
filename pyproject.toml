@@ -31,6 +31,9 @@ dependencies = [
     
     # MongoDB (테이블 메타 + 코드 메타 + 비즈 메타)
     "motor>=3.6.0",
+
+    # Neo4j (온톨로지 그래프: 테이블 관계, JOIN 경로, 계수산출식)
+    "neo4j>=5.20.0",
     
     # ── Embedding (BGE-M3) & Reranker (BGE-Reranker-v2-m3) ──
     "FlagEmbedding>=1.3.0",
@@ -90,6 +93,13 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "live_llm: LLM API 키가 필요한 테스트",
+    "live_infra: 실제 인프라(ES/PostgreSQL/Qdrant)가 필요한 테스트",
+    "real_e2e: Docker 데이터소스 + LLM API가 필요한 E2E 테스트",
+]
+# 기본 실행: auto/ 만 수행 (CI). manual/ 은 -m 또는 경로 지정으로 실행
+addopts = "--ignore=tests/manual"
 
 [tool.mypy]
 python_version = "3.12"

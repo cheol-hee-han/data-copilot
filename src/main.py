@@ -29,14 +29,17 @@ session_id는 영숫자/하이픈/밑줄만 허용하여 경로 순회 및 주�
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.agents.models.user_messages import ERR_GENERIC, format_error
@@ -96,6 +99,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# static/vendor/ 디렉터리에서 로컬 번들 JS/CSS 서빙
+_vendor_dir = Path(__file__).parent.parent / "static" / "vendor"
+if _vendor_dir.exists():
+    app.mount(
+        "/vendor",
+        StaticFiles(directory=str(_vendor_dir)),
+        name="vendor",
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -165,7 +177,11 @@ async def _run_ws_pipeline(
     session_id: str,
     websocket: WebSocket,
 ) -> None:
-    """WebSocket 메시지에 대해 파이프라인을 실행하고 응답을 전송한다."""
+    """WebSocket 메시지에 대해 파이프라인을 실행하고 응답을 전송한다.
+
+    on_event 콜백을 통해 파이프라인 실행 중 실시간 진행 상황을 전송하고,
+    완료 후 시각화·통찰·다운로드 가능 알림을 분리 전송한다.
+    """
     store = get_session_store()
 
     await store.append_history(
@@ -173,16 +189,20 @@ async def _run_ws_pipeline(
         {"role": "user", "content": mask_pii(data)},
     )
 
-    await websocket.send_json({
-        "type": "status",
-        "message": "요청을 처리하고 있습니다...",
-    })
+    async def on_event(msg: dict[str, Any]) -> None:
+        """파이프라인 진행 이벤트를 WebSocket으로 전송한다."""
+        await websocket.send_json(msg)
 
     pipeline_result = await run_pipeline(
         data,
         session_id,
-        conversation_history=await store.get_history(session_id),
-        clarification_state=await store.get_clarification(session_id),
+        conversation_history=await store.get_history(
+            session_id,
+        ),
+        clarification_state=await store.get_clarification(
+            session_id,
+        ),
+        on_event=on_event,
     )
 
     if pipeline_result.awaiting_clarification:
@@ -190,8 +210,12 @@ async def _run_ws_pipeline(
             session_id,
             {
                 "awaiting": True,
-                "question": pipeline_result.clarification_question,
-                "preprocessed_input": pipeline_result.preprocessed_input,
+                "question": (
+                    pipeline_result.clarification_question
+                ),
+                "preprocessed_input": (
+                    pipeline_result.preprocessed_input
+                ),
                 "turns": pipeline_result.clarification_turns,
             },
         )
@@ -203,19 +227,61 @@ async def _run_ws_pipeline(
         {"role": "assistant", "content": masked_response},
     )
 
-    response_payload: dict[str, Any] = {
-        "type": "response",
-        "message": masked_response,
-    }
-    if pipeline_result.visualization.has_visualization:
-        response_payload["visualization"] = {
-            "type": "svg",
-            "code": pipeline_result.visualization.svg_code,
-            "chart_type": pipeline_result.visualization.chart_type.value,
-            "title": pipeline_result.visualization.title,
+    # 시각화 분리 전송 (텍스트 응답보다 먼저)
+    viz = pipeline_result.visualization
+    sql_res = pipeline_result.sql_result
+    if viz.has_visualization:
+        viz_msg: dict[str, Any] = {
+            "type": "viz",
+            "title": viz.title,
+            "code": viz.svg_code,
+            "chart_type": viz.chart_type.value,
         }
+        # 차트 원본 데이터 테이블 (UI에서 "데이터 보기" 토글)
+        if sql_res and sql_res.columns and sql_res.rows:
+            viz_msg["table_data"] = {
+                "columns": sql_res.columns,
+                "rows": sql_res.rows[:100],
+            }
+        await websocket.send_json(viz_msg)
 
-    await websocket.send_json(response_payload)
+    # 스트리밍 응답 전송 (start → chunk → end)
+    await websocket.send_json({
+        "type": "stream",
+        "action": "start",
+        "label": "답변 작성 중",
+    })
+    await websocket.send_json({
+        "type": "stream",
+        "action": "chunk",
+        "text": masked_response,
+    })
+
+    # 통찰(insight) — runner에서 State 접근 시점에 구성됨
+    await websocket.send_json({
+        "type": "stream",
+        "action": "end",
+        "insight": pipeline_result.insight,
+    })
+
+    # 다운로드 가능 알림 (SQL 결과가 있는 경우)
+    result_stats = pipeline_result.insight.get(
+        "result_stats", {},
+    )
+    row_count = result_stats.get("row_count", 0)
+    if (
+        not pipeline_result.awaiting_clarification
+        and row_count > 0
+    ):
+        _cache_sql_result(
+            session_id, pipeline_result.sql_result,
+        )
+        await websocket.send_json({
+            "type": "download_ready",
+            "session_id": session_id,
+            "row_count": row_count,
+            "formats": ["csv", "json"],
+        })
 
 
 @app.websocket("/ws/{session_id}")
@@ -381,6 +447,97 @@ async def query_endpoint(request: QueryRequest):
             status_code=500,
             detail=ERR_GENERIC,
         ) from e
+
+
+# 세션별 최근 SQL 결과 캐시 (다운로드용, 메모리 관리)
+_sql_result_cache: dict[str, dict[str, Any]] = {}
+_MAX_CACHE = 100
+
+
+def _cache_sql_result(
+    session_id: str,
+    sql_result: Any,
+) -> None:
+    """다운로드를 위해 세션의 SQL 결과를 캐시한다."""
+    if sql_result is None:
+        return
+    if len(_sql_result_cache) >= _MAX_CACHE:
+        # 가장 오래된 항목 제거
+        oldest = next(iter(_sql_result_cache))
+        del _sql_result_cache[oldest]
+    _sql_result_cache[session_id] = {
+        "columns": (
+            sql_result.columns
+            if hasattr(sql_result, "columns")
+            else []
+        ),
+        "rows": (
+            sql_result.rows
+            if hasattr(sql_result, "rows")
+            else []
+        ),
+    }
+
+
+class DownloadRequest(BaseModel):
+    """데이터 다운로드 요청 모델."""
+
+    session_id: str = Field(
+        ..., description="세션 ID",
+    )
+    format: Literal["csv", "json"] = Field(
+        default="csv",
+        description="다운로드 포맷",
+    )
+
+
+@app.post(
+    "/api/download",
+    responses={
+        404: {"description": "다운로드할 데이터가 없음"},
+    },
+)
+async def download_data(request: DownloadRequest):
+    """최근 조회 결과를 파일로 다운로드한다."""
+    cached = _sql_result_cache.get(request.session_id)
+    if not cached or not cached["rows"]:
+        raise HTTPException(
+            status_code=404,
+            detail="다운로드할 데이터가 없습니다.",
+        )
+
+    columns = cached["columns"]
+    rows = cached["rows"]
+
+    if request.format == "json":
+        return {
+            "columns": columns,
+            "rows": rows,
+            "row_count": len(rows),
+        }
+
+    # CSV 생성
+    buf = io.StringIO()
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=columns,
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+    content = buf.getvalue().encode("utf-8-sig")
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                "attachment; "
+                "filename=data-copilot-export.csv"
+            ),
+        },
+    )
 
 
 def _get_embedded_html() -> str:

@@ -19,7 +19,7 @@ type: project
 - `_make_masked()` 개선 — 구분자(하이픈·공백) 보존, 숫자만 마스킹
 - `validate_sql_safety()` — WITH(CTE) 허용, 시간지연·파일I/O·주석 패턴 추가
 
-### src/agents/nodes/preprocessor.py
+### src/agents/nodes/interpret/preprocessor.py
 - SQL 인젝션 패턴 4개 → 13개 (블록주석, 서브쿼리 내 DML, 시간지연, 파일I/O 등)
 - `--` 패턴을 줄끝 한정에서 위치 무관으로 수정
 - `detect_prompt_injection()` 호출 추가 (기존 누락)

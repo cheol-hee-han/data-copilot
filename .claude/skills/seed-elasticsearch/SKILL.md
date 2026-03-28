@@ -139,7 +139,7 @@ ElasticSearch 메타데이터 시딩 전문가. 에이전트가 참조하는 테
 - PG 스키마 추출은 `docker exec dc-postgres psql -U postgres` 사용
 - 실행 명령:
   ```bash
-  PYTHONIOENCODING=utf-8 python standalone/scripts/seed_elasticsearch.py
+  PYTHONIOENCODING=utf-8 python devtools/scripts/seed_elasticsearch.py
   ```
 
 ## 스크립트 아키텍처
@@ -152,8 +152,8 @@ ElasticSearch 메타데이터 시딩 전문가. 에이전트가 참조하는 테
 
 - `seed_elasticsearch.py`는 핵심 인덱스(table_meta, column_meta, code_meta) + 기본 report_sql(10건)/term_dict(20건) 적재
 - 추가 증강은 별도 스크립트로 분리:
-  - `standalone/scripts/augment_report_sql.py` — report_sql 140건 추가 (총 150건)
-  - `standalone/scripts/augment_term_dict.py` — term_dict 180건 추가 (총 200건)
+  - `devtools/scripts/augment_report_sql.py` — report_sql 140건 추가 (총 150건)
+  - `devtools/scripts/augment_term_dict.py` — term_dict 180건 추가 (총 200건)
 - 증강 스크립트는 기존 인덱스를 **삭제하지 않고 upsert** 방식으로 추가
 - 실행 순서: seed_elasticsearch.py → augment_report_sql.py → augment_term_dict.py
 
@@ -176,8 +176,8 @@ ElasticSearch 메타데이터 시딩 전문가. 에이전트가 참조하는 테
 
 # 산출물 위치
 
-- 시딩 스크립트: `standalone/scripts/seed_elasticsearch.py`
-- 증강 스크립트: `standalone/scripts/augment_report_sql.py`, `standalone/scripts/augment_term_dict.py`
+- 시딩 스크립트: `devtools/scripts/seed_elasticsearch.py`
+- 증강 스크립트: `devtools/scripts/augment_report_sql.py`, `devtools/scripts/augment_term_dict.py`
 
 # 인자 사용법
 

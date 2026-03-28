@@ -4,7 +4,7 @@
 > 커스터마이징이 필요한 항목을 분석·정리한 문서.
 >
 > 분석 기준일: 2026-03-20
-> 대상: src/, src/agents/nodes/prompts/, evaluation/, standalone/scripts/, standalone/docker/ 전체 코드베이스
+> 대상: src/, src/agents/nodes/prompts/, evaluation/, devtools/scripts/, devtools/docker/ 전체 코드베이스
 
 ---
 
@@ -40,7 +40,7 @@
 | `src/config.py:10-14` | `anthropic` + `claude-sonnet-4-20250514` | 폐쇄망 내부 LLM (vLLM, TGI 등)으로 교체. `openai_compatible` 프로바이더 + 내부 엔드포인트 URL 지정 |
 | `src/utils/llm/client.py:163-174` | OpenAI compatible 클라이언트의 `default_headers`에 `HTTP-Referer`, `X-OpenRouter-Title` 하드코딩 | 내부 LLM 게이트웨이에 맞는 헤더로 변경 또는 제거 |
 
-**정확도 영향**: 모든 노드(의도분류, SQL생성, 분석, 포맷팅, 테이블보강)가 LLM에 의존한다. 소형 모델 전환 시 **모든 프롬프트의 few-shot 예제 수·CoT 깊이 재조정**이 필요하다.
+**정확도 영향**: 모든 노드(의도분류, SQL생성, 분석, 포맷팅, 테이블보강)가 LLM에 의존한다. 폐쇄망 타겟 모델(Solar Pro 2 70B / Qwen3.5 397B / GPT OSS 120B)은 추론 가능한 중대형 모델이지만, Claude/GPT-4 대비 성능 차이가 있으므로 **프롬프트 명확성·구조화·JSON 출력 안정성** 측면의 재조정이 필요하다.
 
 **환경변수 예시**:
 ```env
@@ -57,7 +57,7 @@ LLM_MODEL=내부모델명
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
 | `src/connectors/qdrant_connector.py:18` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (HuggingFace 다운로드) | 폐쇄망에서는 모델 파일을 **로컬 경로로 사전 배포** |
-| `standalone/scripts/seed_qdrant.py:28-31` | 동일 모델, fastembed 사용 | fastembed의 모델 캐시 디렉토리를 내부 경로로 설정하거나 오프라인 모델 로딩 구현 |
+| `devtools/scripts/seed_qdrant.py:28-31` | 동일 모델, fastembed 사용 | fastembed의 모델 캐시 디렉토리를 내부 경로로 설정하거나 오프라인 모델 로딩 구현 |
 
 **정확도 영향**: 임베딩 모델이 업무 매뉴얼(biz_manual 500건) + SQL 이력(sql_history 10,000건) 검색 품질을 직접 좌우한다. 모델 교체 시 **전체 컬렉션 재임베딩** 필수. 한국어 성능이 낮은 모델로 교체하면 업무 매뉴얼 RAG 정확도가 급락한다.
 
@@ -71,18 +71,18 @@ LLM_MODEL=내부모델명
 
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
-| `src/agents/nodes/prompts/system_prompts.py` 전체 (8개 프롬프트) | Claude Sonnet급 모델 기준 설계 | 내부 소형 LLM(7B~70B급)은 **출력 형식 준수율이 크게 떨어짐** → 프롬프트별 조정 필요 |
+| `src/agents/nodes/prompts/system_prompts.py` 전체 (8개 프롬프트) | Claude Sonnet급 모델 기준 설계 | 폐쇄망 오픈소스 모델(Solar Pro 2 70B / Qwen3.5 397B / GPT OSS 120B)은 추론 가능하지만 **출력 형식 준수율·JSON 안정성**에 차이가 있으므로 프롬프트별 조정 필요 |
 
 ### 프롬프트별 재튜닝 포인트
 
-| 프롬프트 | 줄 번호 | 현재 설계 | 소형 모델 전환 시 조정 방향 |
+| 프롬프트 | 줄 번호 | 현재 설계 | 오픈소스 모델 전환 시 조정 방향 |
 |---------|---------|-----------|---------------------------|
 | `INTENT_CLASSIFICATION` | L24-72 | 4-way 분류 + 신뢰도 2줄 포맷 | few-shot 예제 추가 또는 JSON 출력으로 변경 |
 | `CLARIFICATION` | L78-121 | 3개 선택지 자연어 생성 | 템플릿 기반 생성으로 단순화 |
 | `SQL_GENERATION_RULES` | L127-213 | CoT 5단계 + 절대규칙 10개 | 규칙 수 축소 또는 `SQL_MAX_RETRY` 상향 |
 | `RESULT_FORMATTING` | L228-281 | 자연어 보고서 변환 | 포맷 규칙 단순화, 예제 추가 |
 | `DATA_ANALYSIS` | L287-323 | JSON-only 출력 | 마크다운 코드블록 파싱 로직 강화 |
-| `TABLE_DESCRIPTION_ENRICHMENT` | L329-394 | 3관점 LLM 보강 | 소형 모델에서 품질 저하 → 비활성화 고려 |
+| `TABLE_DESCRIPTION_ENRICHMENT` | L329-394 | 3관점 LLM 보강 | 모델별 품질 검증 후 few-shot 보강 또는 비활성화 고려 |
 | `VISUALIZATION_JUDGMENT` | L400-443 | 2줄 포맷 판단 | 포맷 실패 빈도 증가 대비 폴백 강화 |
 | `VISUALIZATION_SVG_GENERATION` | L449-495 | LLM 직접 SVG 생성 | 템플릿 기반 `chart_generator.py`로 직접 폴백 비율 증가 |
 
@@ -92,7 +92,7 @@ LLM_MODEL=내부모델명
 
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
-| `src/config.py:53` | `llm_parse_max_retry: int = 2` | 소형 모델은 포맷 준수율이 낮아 **3~5회로 상향** 필요 |
+| `src/config.py:53` | `llm_parse_max_retry: int = 2` | 오픈소스 모델의 포맷 준수율에 따라 **3~5회로 상향** 검토 |
 | `src/utils/llm/retry.py` | 재시도 시 이전 응답 + 포맷 힌트 주입 | 내부 모델의 특성에 맞는 포맷 힌트 재작성 |
 
 **환경변수**:
@@ -106,8 +106,8 @@ LLM_PARSE_MAX_RETRY=4
 
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
-| `standalone/docker/elasticsearch/Dockerfile` | `analysis-nori` 플러그인 온라인 설치 | 폐쇄망에서는 **nori 플러그인 오프라인 설치** (zip 파일 사전 배포) |
-| `standalone/scripts/seed_elasticsearch.py` | `korean` analyzer 적용 | 커스텀 nori 분석기 설정(사용자 사전, 동의어 필터) 추가 검토 |
+| `devtools/docker/elasticsearch/Dockerfile` | `analysis-nori` 플러그인 온라인 설치 | 폐쇄망에서는 **nori 플러그인 오프라인 설치** (zip 파일 사전 배포) |
+| `devtools/scripts/seed_elasticsearch.py` | `korean` analyzer 적용 | 커스텀 nori 분석기 설정(사용자 사전, 동의어 필터) 추가 검토 |
 
 **정확도 영향**: nori 미적용 시 한글 검색 정확도 급락 (적용 전/후 비교):
 
@@ -264,7 +264,7 @@ _CATEGORY_TO_DOMAIN_CD = {
 |------|-----------|-------------------|
 | `evaluation/golden_set/golden_queries.json` | 18건 벤치마크 (샘플 테이블 기준) | 실제 DB 기반 **골든 쿼리 전면 재작성** |
 | `evaluation/golden_set/test_queries.json` | 90건 테스트 (샘플 기준) | 실제 업무 시나리오 기반 재작성 |
-| `evaluation/evaluator.py` | 다차원 평가 (intent, table, pattern, syntax) | 실제 DB에서 **SQL 실행 결과 비교(execution accuracy)** 평가 차원 추가 가능 |
+| `devtools/evaluation/evaluator.py` | 다차원 평가 (intent, table, pattern, syntax) | 실제 DB에서 **SQL 실행 결과 비교(execution accuracy)** 평가 차원 추가 가능 |
 
 ### 재작성 대상 필드
 
@@ -283,7 +283,7 @@ _CATEGORY_TO_DOMAIN_CD = {
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
 | `src/connectors/qdrant_connector.py:21-95` | `DUMMY_MANUALS` 5건 (샘플 업무 매뉴얼) | 실제 은행 **업무 매뉴얼·규정집·계수산출식** 문서를 Qdrant에 적재 |
-| `standalone/scripts/seed_qdrant.py` + `qdrant_data_generators` | 생성기 기반 500+건 | 실제 문서 기반 데이터 적재 스크립트 재작성 |
+| `devtools/scripts/seed_qdrant.py` + `qdrant_data_generators` | 생성기 기반 500+건 | 실제 문서 기반 데이터 적재 스크립트 재작성 |
 
 **정확도 영향**: 금융지표 질의 시 정확한 산출식 참조 여부가 SQL 정확도를 결정한다. `financial-domain.md` 규칙에 따라 산출식이 불확실한 상태로 SQL을 생성하지 않으므로, 산출식 데이터가 없으면 해당 유형의 질의가 모두 실패한다.
 
@@ -316,8 +316,8 @@ LANGSMITH_ENABLED=false
 
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
-| `standalone/scripts/seed_elasticsearch.py` | 샘플 8개 테이블 메타 | 실제 정보계 DB의 **전체 테이블 레이아웃(DDL)을 ES에 적재** |
-| `standalone/scripts/seed_postgres.py` | 샘플 테스트 데이터 | 실제 DB 연결로 교체 (시딩 불필요, 읽기 전용 접근) |
+| `devtools/scripts/seed_elasticsearch.py` | 샘플 8개 테이블 메타 | 실제 정보계 DB의 **전체 테이블 레이아웃(DDL)을 ES에 적재** |
+| `devtools/scripts/seed_postgres.py` | 샘플 테스트 데이터 | 실제 DB 연결로 교체 (시딩 불필요, 읽기 전용 접근) |
 
 ### ES 인덱스 적재 대상
 
@@ -345,8 +345,8 @@ font-family="'Noto Sans KR','NanumGothic',sans-serif"
 
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
-| `standalone/docker/docker-compose.dev.yml` | PostgreSQL 16, ES 8.15, Qdrant 1.12.6, Redis 이미지 | 폐쇄망 내부 레지스트리에서 pull 가능하도록 **이미지 사전 빌드·배포** |
-| `standalone/docker/elasticsearch/Dockerfile` | nori 플러그인 온라인 설치 | **빌드 시점에 플러그인 포함된 커스텀 이미지** 사전 준비 |
+| `devtools/docker/docker-compose.dev.yml` | PostgreSQL 16, ES 8.15, Qdrant 1.12.6, Redis 이미지 | 폐쇄망 내부 레지스트리에서 pull 가능하도록 **이미지 사전 빌드·배포** |
+| `devtools/docker/elasticsearch/Dockerfile` | nori 플러그인 온라인 설치 | **빌드 시점에 플러그인 포함된 커스텀 이미지** 사전 준비 |
 | `pyproject.toml` | pip 패키지 의존성 | 내부 PyPI 미러 또는 **오프라인 wheel 번들** 준비 |
 
 ### 사전 준비 체크리스트

@@ -7,7 +7,7 @@ data_analyzer의 시각화 파이프라인에서 LLM SVG 생성 실패 시 호�
 원형 차트(PIE_CHART)의 세 가지 차트 유형을 지원하며,
 SQLResult에서 첫 번째 문자열 컬럼을 레이블, 첫 번째 숫자 컬럼을 값으로 자동 감지한다.
 
-resources/visualization/chart_config.yaml 이 존재하면 폰트·색상 설정을
+resources/domain/chart_config.yaml 이 존재하면 폰트·색상 설정을
 외부 파일에서 로드한다. 파일이 없으면 기본 설정(맑은 고딕, 7색 팔레트)을 사용한다.
 
 핵심 함수:
@@ -40,13 +40,13 @@ _DEFAULT_COLORS = [
 _DEFAULT_FONT = "'Malgun Gothic','맑은 고딕',sans-serif"
 
 
-# ── resources/visualization/chart_config.yaml 로드 ──
+# ── resources/domain/chart_config.yaml 로드 ──
 
 def _load_chart_config() -> tuple[list[str], str]:
     """차트 설정을 로드한다. (colors, font_family)"""
     from src.utils.resource_loader import load_yaml
 
-    data = load_yaml("visualization/chart_config.yaml", None)
+    data = load_yaml("domain/chart_config.yaml", None)
     if data is None:
         return _DEFAULT_COLORS, _DEFAULT_FONT
 

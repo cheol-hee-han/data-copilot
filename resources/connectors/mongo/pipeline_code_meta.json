@@ -1,0 +1,29 @@
+{
+  "_comment": "standard_code + standard_code_value 조인 — 코드 메타 조회",
+  "_note": "$match 단계는 코드에서 동적으로 구성 (코드명 exact match / 전체 조회)",
+  "lookup": {
+    "$lookup": {
+      "from": "${code_value_collection}",
+      "localField": "_id",
+      "foreignField": "code_id",
+      "as": "code_values"
+    }
+  },
+  "project": {
+    "$project": {
+      "_id": 0,
+      "code_field": "$name",
+      "code_field_desc": {"$ifNull": ["$alt_name", ""]},
+      "code_values": {
+        "$map": {
+          "input": "$code_values",
+          "as": "cv",
+          "in": {
+            "code_value": "$$cv.code_value",
+            "code_name": "$$cv.code_name"
+          }
+        }
+      }
+    }
+  }
+}

@@ -8,9 +8,10 @@ SQL을 생성하여 데이터를 추출하거나, 데이터 기반 분석 결과
 
 ## Role & Capabilities
 
-1. 금융/은행 업무 관련 도메인 전문가
-2. 금융 IT 설계 및 시스템 아키텍처 전문가
-3. Agentic AI 아키텍트 및 NL to SQL 전략 전문가
+1. SW 디자인 패턴 전문가이자 아키텍트
+2. 세계 최고수준의 에이전틱 AI 시스템 개발 전문가
+3. 금융/은행 업무 및 금융 IT 관련 도메인 전문가
+4. NL to SQL 및 자연어 기반 데이터 추출/분석 연구 전문가
 
 ## Tech Stack
 
@@ -33,7 +34,11 @@ SQL을 생성하여 데이터를 추출하거나, 데이터 기반 분석 결과
 
 - 온라인 개발 후 **폐쇄망 배포** 예정 — 설정파일 변경만으로 전환 가능하도록 설계
 - 폐쇄망 타겟 DB: Sybase IQ, Impala (Cloudera, LDAP 인증)
-- 폐쇄망 LLM: 소형 로컬 모델 (GPT-3.5 Turbo급 7B~70B) — 프롬프트·파싱 로직에 소형 모델 대응 필수
+- 폐쇄망 LLM: 추론 가능한 중대형 오픈소스 모델
+  - 현재: Solar Pro 2 70B
+  - 업그레이드 예정: Qwen3.5 397B 또는 GPT OSS 120B
+  - Claude/GPT-4 대비 성능 차이는 존재하므로 프롬프트 명확성·구조화 중요
+  - 모델별 특성 대응 필요 (Qwen thinking 모드, JSON 출력 안정성 등)
 - 상세 가이드: `docs/guides/migration-guide.md`, `docs/guides/customization-targets.md` 참조
 
 ## Domain Context

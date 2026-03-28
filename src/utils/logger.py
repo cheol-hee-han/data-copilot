@@ -21,6 +21,7 @@ from typing import Any
 import structlog
 
 from src.config import settings
+from src.utils.timezone import now_stamp
 
 # 로그 디렉토리
 _LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
@@ -125,12 +126,8 @@ def _file_renderer(
         key2:
           멀티라인 값
     """
-    # 시간 포맷: yyyy-mm-dd HH:MM:SS
+    # 시간 포맷: yyyy-mm-dd HH:MM:SS.SSS (KST)
     timestamp = event_dict.pop("timestamp", "")
-    if isinstance(timestamp, str) and len(timestamp) > 19:
-        # ISO 포맷에서 초까지만 추출
-        timestamp = timestamp[:19].replace("T", " ")
-        # Z 나 +00:00 제거는 슬라이싱으로 이미 처리됨
 
     level = event_dict.pop("log_level", "info").upper()
     event = event_dict.pop("event", "")
@@ -226,6 +223,16 @@ def _file_logging_processor(
     return event_dict
 
 
+def _kst_timestamper(
+    logger: Any,
+    name: str,
+    event_dict: dict[str, Any],
+) -> dict[str, Any]:
+    """KST 타임스탬프를 주입하는 structlog 프로세서."""
+    event_dict["timestamp"] = now_stamp()
+    return event_dict
+
+
 def setup_logging() -> None:
     """structlog 기반 로깅 초기화 (콘솔 + 파일)."""
     global _file_writer
@@ -246,7 +253,7 @@ def setup_logging() -> None:
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
+            _kst_timestamper,
             # 파일에 가독성 포맷으로 별도 기록
             _file_logging_processor,
             # 콘솔에 컬러 출력

@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import random
 import re
-from datetime import date, timedelta
+from datetime import timedelta
+
+from src.utils.timezone import today_kst
 from typing import Any
 
 
@@ -38,163 +40,202 @@ from typing import Any
 def _col(
     name: str,
     dtype: str,
-    desc: str,
+    description: str,
+    alt_name: str = "",
+    is_pk: bool = False,
+    pii: bool = False,
     **flags: Any,
 ) -> dict[str, Any]:
-    """컬럼 메타 dict 를 간결하게 생성한다."""
+    """컬럼 메타 dict 를 간결하게 생성한다.
+
+    pipeline_table_meta.json 스키마 기준:
+      name, alt_name, type, description, is_pk
+    pii 플래그는 보안 마스킹 전용으로 별도 유지한다.
+    """
     col: dict[str, Any] = {
         "name": name,
+        "alt_name": alt_name,
         "type": dtype,
-        "desc": desc,
+        "description": description,
+        "is_pk": is_pk,
     }
+    if pii:
+        col["pii"] = True
     col.update(flags)
     return col
 
 
 DUMMY_TABLE_META: list[dict[str, Any]] = [
     {
+        "name": "TB_CUST_INFO",
+        "alt_name": "고객기본정보",
+        "description": "고객 기본 정보 테이블",
+        # 하위 호환: context_explorer, planner가 table_name/table_description 참조
         "table_name": "TB_CUST_INFO",
         "table_description": "고객 기본 정보 테이블",
-        "schema": "DW",
-        "update_cycle": "일배치",
+        "schema_name": "DW",
         "columns": [
             _col("CUST_NO", "VARCHAR(20)",
-                 "고객번호", pk=True),
+                 "고객번호", alt_name="고객번호", is_pk=True),
             _col("CUST_NM", "VARCHAR(100)",
-                 "고객명", pii=True),
+                 "고객명", alt_name="고객명", pii=True),
             _col("REG_DT", "DATE",
-                 "등록일자"),
+                 "등록일자", alt_name="등록일자"),
             _col("CUST_TYPE_CD", "VARCHAR(2)",
-                 "고객유형코드 (01:개인, 02:기업)"),
+                 "고객유형코드 (01:개인, 02:기업)",
+                 alt_name="고객유형코드"),
             _col("BRCH_CD", "VARCHAR(10)",
-                 "관리지점코드"),
+                 "관리지점코드", alt_name="관리지점코드"),
             _col("GENDER_CD", "CHAR(1)",
-                 "성별코드 (M/F)"),
+                 "성별코드 (M/F)", alt_name="성별코드"),
             _col("AGE_GRP_CD", "VARCHAR(2)",
-                 "연령대코드 (20:20대, 30:30대 ...)"),
+                 "연령대코드 (20:20대, 30:30대 ...)",
+                 alt_name="연령대코드"),
             _col("CUST_GRADE_CD", "VARCHAR(10)",
-                 "고객등급코드 (VIP, Gold, Silver, General)"),
+                 "고객등급코드 (VIP, Gold, Silver, General)",
+                 alt_name="고객등급코드"),
         ],
     },
     {
+        "name": "TB_LOAN_INFO",
+        "alt_name": "여신정보",
+        "description": "여신(대출) 정보 테이블",
         "table_name": "TB_LOAN_INFO",
         "table_description": "여신(대출) 정보 테이블",
-        "schema": "DW",
-        "update_cycle": "일배치",
+        "schema_name": "DW",
         "columns": [
             _col("LOAN_NO", "VARCHAR(20)",
-                 "대출번호", pk=True),
+                 "대출번호", alt_name="대출번호", is_pk=True),
             _col("CUST_NO", "VARCHAR(20)",
-                 "고객번호", fk="TB_CUST_INFO.CUST_NO"),
+                 "고객번호", alt_name="고객번호",
+                 fk="TB_CUST_INFO.CUST_NO"),
             _col("LOAN_AMT", "NUMERIC(18,0)",
-                 "대출금액(원)"),
+                 "대출금액(원)", alt_name="대출금액"),
             _col("LOAN_BAL", "NUMERIC(18,0)",
-                 "대출잔액(원)"),
+                 "대출잔액(원)", alt_name="대출잔액"),
             _col("LOAN_DT", "DATE",
-                 "대출실행일자"),
+                 "대출실행일자", alt_name="대출실행일자"),
             _col("MTRTY_DT", "DATE",
-                 "만기일자"),
+                 "만기일자", alt_name="만기일자"),
             _col("INT_RATE", "NUMERIC(5,2)",
-                 "적용금리(%)"),
+                 "적용금리(%)", alt_name="적용금리"),
             _col("LOAN_TYPE_CD", "VARCHAR(2)",
-                 "대출유형코드 (01:신용, 02:담보, 03:보증)"),
+                 "대출유형코드 (01:신용, 02:담보, 03:보증)",
+                 alt_name="대출유형코드"),
             _col("OVERDUE_YN", "CHAR(1)",
-                 "연체여부 (Y/N)"),
+                 "연체여부 (Y/N)", alt_name="연체여부"),
             _col("OVERDUE_DAYS", "INTEGER",
-                 "연체일수"),
+                 "연체일수", alt_name="연체일수"),
             _col("OVERDUE_AMT", "NUMERIC(18,0)",
-                 "연체금액(원)"),
+                 "연체금액(원)", alt_name="연체금액"),
         ],
     },
     {
+        "name": "TB_DEPOSIT_INFO",
+        "alt_name": "수신예금정보",
+        "description": "수신(예금) 정보 테이블",
         "table_name": "TB_DEPOSIT_INFO",
         "table_description": "수신(예금) 정보 테이블",
-        "schema": "DW",
-        "update_cycle": "일배치",
+        "schema_name": "DW",
         "columns": [
             _col("ACCT_NO", "VARCHAR(20)",
-                 "계좌번호", pk=True, pii=True),
+                 "계좌번호", alt_name="계좌번호",
+                 is_pk=True, pii=True),
             _col("CUST_NO", "VARCHAR(20)",
-                 "고객번호", fk="TB_CUST_INFO.CUST_NO"),
+                 "고객번호", alt_name="고객번호",
+                 fk="TB_CUST_INFO.CUST_NO"),
             _col("ACCT_BAL", "NUMERIC(18,0)",
-                 "계좌잔액(원)"),
+                 "계좌잔액(원)", alt_name="계좌잔액"),
             _col("OPEN_DT", "DATE",
-                 "개설일자"),
+                 "개설일자", alt_name="개설일자"),
             _col("PROD_CD", "VARCHAR(10)",
-                 "상품코드"),
+                 "상품코드", alt_name="상품코드"),
             _col("PROD_NM", "VARCHAR(100)",
-                 "상품명"),
+                 "상품명", alt_name="상품명"),
             _col("INT_RATE", "NUMERIC(5,4)",
-                 "적용금리"),
+                 "적용금리", alt_name="적용금리"),
             _col("ACCT_STATUS_CD", "VARCHAR(2)",
-                 "계좌상태코드 (01:정상, 02:해지, 03:휴면)"),
+                 "계좌상태코드 (01:정상, 02:해지, 03:휴면)",
+                 alt_name="계좌상태코드"),
         ],
     },
     {
+        "name": "TB_TRANSACTION",
+        "alt_name": "거래내역",
+        "description": (
+            "거래 내역 테이블"
+            " (대용량, 반드시 날짜 조건 필요)"
+        ),
         "table_name": "TB_TRANSACTION",
         "table_description": (
             "거래 내역 테이블"
             " (대용량, 반드시 날짜 조건 필요)"
         ),
-        "schema": "DW",
-        "update_cycle": "실시간",
+        "schema_name": "DW",
         "columns": [
             _col("TXN_NO", "VARCHAR(30)",
-                 "거래번호", pk=True),
+                 "거래번호", alt_name="거래번호", is_pk=True),
             _col("ACCT_NO", "VARCHAR(20)",
-                 "계좌번호", pii=True),
+                 "계좌번호", alt_name="계좌번호", pii=True),
             _col("TXN_DT", "DATE",
-                 "거래일자"),
+                 "거래일자", alt_name="거래일자"),
             _col("TXN_TM", "VARCHAR(6)",
-                 "거래시각(HHMMSS)"),
+                 "거래시각(HHMMSS)", alt_name="거래시각"),
             _col("TXN_AMT", "NUMERIC(18,0)",
-                 "거래금액(원)"),
+                 "거래금액(원)", alt_name="거래금액"),
             _col("TXN_TYPE_CD", "VARCHAR(2)",
-                 "거래유형코드 (01:입금, 02:출금, 03:이체)"),
+                 "거래유형코드 (01:입금, 02:출금, 03:이체)",
+                 alt_name="거래유형코드"),
             _col("BRCH_CD", "VARCHAR(10)",
-                 "거래지점코드"),
+                 "거래지점코드", alt_name="거래지점코드"),
         ],
     },
     {
+        "name": "TB_BRANCH_INFO",
+        "alt_name": "지점정보",
+        "description": "지점 정보 테이블",
         "table_name": "TB_BRANCH_INFO",
         "table_description": "지점 정보 테이블",
-        "schema": "DW",
-        "update_cycle": "월배치",
+        "schema_name": "DW",
         "columns": [
             _col("BRCH_CD", "VARCHAR(10)",
-                 "지점코드", pk=True),
+                 "지점코드", alt_name="지점코드", is_pk=True),
             _col("BRCH_NM", "VARCHAR(100)",
-                 "지점명"),
+                 "지점명", alt_name="지점명"),
             _col("REGION_CD", "VARCHAR(4)",
-                 "지역코드"),
+                 "지역코드", alt_name="지역코드"),
             _col("REGION_NM", "VARCHAR(50)",
-                 "지역명"),
+                 "지역명", alt_name="지역명"),
         ],
     },
     {
+        "name": "TB_LOAN_OVERDUE_STAT",
+        "alt_name": "여신연체통계",
+        "description": (
+            "여신 연체 통계 테이블 (월말 기준 집계)"
+        ),
         "table_name": "TB_LOAN_OVERDUE_STAT",
         "table_description": (
             "여신 연체 통계 테이블 (월말 기준 집계)"
         ),
-        "schema": "DW",
-        "update_cycle": "월배치",
+        "schema_name": "DW",
         "columns": [
             _col("BASE_YM", "VARCHAR(6)",
-                 "기준년월 (YYYYMM)"),
+                 "기준년월 (YYYYMM)", alt_name="기준년월"),
             _col("BRCH_CD", "VARCHAR(10)",
-                 "지점코드"),
+                 "지점코드", alt_name="지점코드"),
             _col("LOAN_TYPE_CD", "VARCHAR(2)",
-                 "대출유형코드"),
+                 "대출유형코드", alt_name="대출유형코드"),
             _col("TOTAL_LOAN_CNT", "INTEGER",
-                 "총 대출건수"),
+                 "총 대출건수", alt_name="총대출건수"),
             _col("TOTAL_LOAN_AMT", "NUMERIC(18,0)",
-                 "총 대출금액(원)"),
+                 "총 대출금액(원)", alt_name="총대출금액"),
             _col("OVERDUE_CNT", "INTEGER",
-                 "연체건수"),
+                 "연체건수", alt_name="연체건수"),
             _col("OVERDUE_AMT", "NUMERIC(18,0)",
-                 "연체금액(원)"),
+                 "연체금액(원)", alt_name="연체금액"),
             _col("OVERDUE_RATE", "NUMERIC(5,2)",
-                 "연체율(%)"),
+                 "연체율(%)", alt_name="연체율"),
         ],
     },
 ]
@@ -393,7 +434,7 @@ def _gen_value_for_alias(alias: str) -> Any:
         return random.choice(_BRANCH_NAMES)
 
     if _is_date_alias(alias):
-        today = date.today()
+        today = today_kst()
         d = today.replace(day=1) - timedelta(
             days=30 * random.randint(0, 11),
         )
@@ -702,18 +743,27 @@ DUMMY_QDRANT_SQL_HISTORY = [
 def search_dummy_table_meta(
     query: str,
 ) -> list[dict[str, Any]]:
-    """키워드 매칭 기반 Dummy 테이블 메타 검색."""
+    """키워드 매칭 기반 Dummy 테이블 메타 검색.
+
+    name, alt_name, description 및 각 컬럼의 description,
+    alt_name을 대상으로 키워드 매칭을 수행한다.
+    """
     query_lower = query.lower()
     results = []
     for table in DUMMY_TABLE_META:
-        searchable = (
-            f"{table['table_name']} "
-            f"{table['table_description']}"
-        ).lower()
-        searchable += " ".join(
-            c.get("desc", "")
+        table_text = " ".join([
+            table.get("name", ""),
+            table.get("alt_name", ""),
+            table.get("description", ""),
+        ]).lower()
+        col_text = " ".join(
+            " ".join([
+                c.get("description", ""),
+                c.get("alt_name", ""),
+            ])
             for c in table["columns"]
         ).lower()
+        searchable = table_text + " " + col_text
         if any(
             word in searchable
             for word in query_lower.split()

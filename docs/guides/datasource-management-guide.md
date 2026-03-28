@@ -91,10 +91,10 @@
 ├─────────────────────────────────────────────────────────────────────┤
 │ Layer 6: 인프라 (docker)                                            │
 │                                                                     │
-│  standalone/docker/elasticsearch/Dockerfile — nori 플러그인 포함 ES 이미지 │
-│  standalone/docker/docker-compose.dev.yml  — build + image 설정           │
-│  standalone/scripts/seed_elasticsearch.py  — nori analyzer 적용 인덱스    │
-│  standalone/scripts/seed_qdrant.py         — fastembed 임베딩 시딩         │
+│  devtools/docker/elasticsearch/Dockerfile — nori 플러그인 포함 ES 이미지 │
+│  devtools/docker/docker-compose.dev.yml  — build + image 설정           │
+│  devtools/scripts/seed_elasticsearch.py  — nori analyzer 적용 인덱스    │
+│  devtools/scripts/seed_qdrant.py         — fastembed 임베딩 시딩         │
 │  ※ Qdrant 임베딩 모델: paraphrase-multilingual-MiniLM-L12-v2      │
 │  ※ 시딩과 조회에서 반드시 동일 모델 사용 (불일치 시 유사도 엉망)   │
 ├─────────────────────────────────────────────────────────────────────┤

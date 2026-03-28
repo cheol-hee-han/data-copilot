@@ -21,7 +21,6 @@ import asyncio
 import functools
 import json
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,8 +28,29 @@ from pydantic import BaseModel, Field
 
 from src.config import settings
 from src.utils.logger import get_logger
+from src.utils.timezone import now_filesafe, now_stamp
 
 logger = get_logger(__name__)
+
+
+class TimelineEntry(BaseModel):
+    """통합 타임라인 엔트리 — 모든 이벤트를 실행 순서대로 기록."""
+
+    seq: int                          # 글로벌 순번 (1부터)
+    event_type: str                    # node_start | node_end
+                                       # llm_call | tool_call
+                                       # decision
+    node: str                          # 소속 노드 이름
+    parent_seq: int | None = None      # 부모 node_start seq
+    summary: str = ""                  # 한 줄 요약
+    detail: dict[str, Any] = Field(
+        default_factory=dict,
+    )
+    duration_ms: float = 0.0
+    status: str = ""                   # success | error | skipped
+    timestamp: str = Field(
+        default_factory=now_stamp,
+    )
 
 
 class LLMCallRecord(BaseModel):
@@ -38,13 +58,14 @@ class LLMCallRecord(BaseModel):
 
     node: str
     prompt_summary: str = ""  # 프롬프트 요약 (전체 저장은 토큰 낭비)
+    prompt_variables: dict[str, str] = Field(default_factory=dict)
     prompt_tokens: int = 0
     response_text: str = ""
     response_tokens: int = 0
     model: str = ""
     latency_ms: float = 0.0
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=now_stamp,
     )
 
 
@@ -58,7 +79,7 @@ class NodeRecord(BaseModel):
     status: str = "success"  # success, error, skipped
     error_message: str = ""
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=now_stamp,
     )
 
 
@@ -72,7 +93,7 @@ class DecisionRecord(BaseModel):
     confidence: float = 0.0
     reason: str = ""  # 선택 근거
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=now_stamp,
     )
 
 
@@ -85,7 +106,7 @@ class ContextRetrievalRecord(BaseModel):
     results_summary: list[str] = Field(default_factory=list)
     latency_ms: float = 0.0
     timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=now_stamp,
     )
 
 
@@ -120,21 +141,36 @@ class EvaluationTrace(BaseModel):
 
     # 상세 기록
     nodes: list[NodeRecord] = Field(default_factory=list)
-    llm_calls: list[LLMCallRecord] = Field(default_factory=list)
-    decisions: list[DecisionRecord] = Field(default_factory=list)
-    context_retrievals: list[ContextRetrievalRecord] = Field(default_factory=list)
+    llm_calls: list[LLMCallRecord] = Field(
+        default_factory=list,
+    )
+    decisions: list[DecisionRecord] = Field(
+        default_factory=list,
+    )
+    context_retrievals: list[ContextRetrievalRecord] = Field(
+        default_factory=list,
+    )
     sql: SQLRecord = Field(default_factory=SQLRecord)
+
+    # 통합 타임라인 (실행 순서 재현용)
+    timeline: list[TimelineEntry] = Field(
+        default_factory=list,
+    )
 
     # 골든셋 평가 결과 (평가 시에만)
     golden_id: str = ""
     eval_passed: bool | None = None
-    eval_errors: list[str] = Field(default_factory=list)
+    eval_errors: list[str] = Field(
+        default_factory=list,
+    )
 
     # 요약 통계
     total_llm_calls: int = 0
     total_llm_latency_ms: float = 0.0
     total_llm_tokens: int = 0
-    node_path: list[str] = Field(default_factory=list)  # 실행된 노드 순서
+    node_path: list[str] = Field(
+        default_factory=list,
+    )
 
 
 class EvaluationTracker:
@@ -144,11 +180,17 @@ class EvaluationTracker:
     """
 
     def __init__(self, run_id: str = "") -> None:
-        self._run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        self._run_id = run_id or now_filesafe()
         self._trace = EvaluationTrace(run_id=self._run_id)
         self._start_time: float = 0.0
         self._node_timers: dict[str, float] = {}
         self._enabled = settings.eval_tracker_enabled
+        # timeline 지원
+        self._seq: int = 0
+        self._node_start_seq: dict[str, int] = {}
+        # WebSocket 실시간 이벤트 콜백 (runner.py에서 주입)
+        self.on_node_event: Any = None
+        self._explore_count: int = 0
 
     @property
     def trace(self) -> EvaluationTrace:
@@ -159,6 +201,84 @@ class EvaluationTracker:
     def enabled(self) -> bool:
         """트래커 활성화 여부."""
         return self._enabled
+
+    def _next_seq(self) -> int:
+        """글로벌 순번을 발급한다."""
+        self._seq += 1
+        return self._seq
+
+    def _append_timeline(
+        self,
+        event_type: str,
+        node: str,
+        *,
+        summary: str = "",
+        detail: dict[str, Any] | None = None,
+        duration_ms: float = 0.0,
+        status: str = "",
+        parent_seq: int | None = None,
+    ) -> int:
+        """타임라인 엔트리를 추가하고 seq를 반환한다."""
+        seq = self._next_seq()
+        if parent_seq is None:
+            parent_seq = self._node_start_seq.get(node)
+        self._trace.timeline.append(TimelineEntry(
+            seq=seq,
+            event_type=event_type,
+            node=node,
+            parent_seq=parent_seq,
+            summary=summary,
+            detail=detail or {},
+            duration_ms=round(duration_ms, 2),
+            status=status,
+        ))
+        return seq
+
+    async def _emit_node_start(self, node_name: str) -> None:
+        """노드 시작 시 on_node_event 콜백으로 progress를 전송한다."""
+        cb = self.on_node_event
+        if cb is None:
+            return
+        from src.agents.graph.runner import NODE_PROGRESS_MAP
+        if node_name not in NODE_PROGRESS_MAP:
+            return
+
+        if node_name == "reason_explore":
+            self._explore_count += 1
+
+        info = NODE_PROGRESS_MAP[node_name]
+        label = info["label"]
+        if (
+            node_name == "reason_explore"
+            and self._explore_count > 1
+        ):
+            label = (
+                "📂 추가 데이터를 탐색하고 있습니다"
+                f" ({self._explore_count}차)"
+            )
+
+        try:
+            await cb({
+                "type": "progress",
+                "action": "add",
+                "label": label,
+                "thinkingLabel": info["thinking"],
+            })
+        except Exception:
+            pass
+
+    async def _emit_node_done(self, node_name: str) -> None:
+        """노드 완료 시 on_node_event 콜백으로 done을 전송한다."""
+        cb = self.on_node_event
+        if cb is None:
+            return
+        from src.agents.graph.runner import NODE_PROGRESS_MAP
+        if node_name not in NODE_PROGRESS_MAP:
+            return
+        try:
+            await cb({"type": "progress", "action": "done"})
+        except Exception:
+            pass
 
     def inject(self) -> None:
         """contextvars에 자신을 설정한다.
@@ -187,18 +307,22 @@ class EvaluationTracker:
     def _wrap_async(
         self, node_name: str, fn: Callable,
     ) -> Callable:
-        """async 노드 래퍼."""
+        """async 노드 래퍼 — progress 이벤트 전송 포함."""
         from src.utils.tracker.context import set_current_node
 
         @functools.wraps(fn)
         async def wrapper(state: Any) -> Any:
             set_current_node(node_name)
+            await self._emit_node_start(node_name)
             if not self._enabled:
-                return await fn(state)
+                result = await fn(state)
+                await self._emit_node_done(node_name)
+                return result
             self.start_node(node_name)
             try:
                 result = await fn(state)
                 self.end_node(node_name)
+                await self._emit_node_done(node_name)
                 return result
             except Exception as e:
                 self.end_node(
@@ -206,6 +330,7 @@ class EvaluationTracker:
                     status="error",
                     error_message=str(e),
                 )
+                await self._emit_node_done(node_name)
                 raise
         return wrapper
 
@@ -247,7 +372,7 @@ class EvaluationTracker:
         self._trace.user_input = user_input
         self._trace.session_id = session_id
         self._trace.golden_id = golden_id
-        self._trace.start_time = datetime.now(timezone.utc).isoformat()
+        self._trace.start_time = now_stamp()
 
     def start_node(self, node: str) -> None:
         """노드 실행 시작을 기록한다."""
@@ -255,6 +380,12 @@ class EvaluationTracker:
             return
         self._node_timers[node] = time.perf_counter()
         self._trace.node_path.append(node)
+        seq = self._append_timeline(
+            "node_start", node,
+            summary=f"{node} 시작",
+            parent_seq=0,  # 최상위 이벤트
+        )
+        self._node_start_seq[node] = seq
 
     def end_node(
         self,
@@ -269,7 +400,10 @@ class EvaluationTracker:
             return
         duration = 0.0
         if node in self._node_timers:
-            duration = (time.perf_counter() - self._node_timers.pop(node)) * 1000
+            duration = (
+                time.perf_counter()
+                - self._node_timers.pop(node)
+            ) * 1000
 
         self._trace.nodes.append(NodeRecord(
             node=node,
@@ -280,10 +414,26 @@ class EvaluationTracker:
             error_message=error_message,
         ))
 
+        summary = f"{node} 완료"
+        if error_message:
+            summary = f"{node} 오류: {error_message[:60]}"
+        self._append_timeline(
+            "node_end", node,
+            summary=summary,
+            detail={
+                "input": input_summary or {},
+                "output": output_summary or {},
+            },
+            duration_ms=duration,
+            status=status,
+        )
+        self._node_start_seq.pop(node, None)
+
     def track_llm_call(
         self,
         node: str,
         prompt_summary: str = "",
+        prompt_variables: dict[str, str] | None = None,
         response_text: str = "",
         model: str = "",
         prompt_tokens: int = 0,
@@ -295,8 +445,9 @@ class EvaluationTracker:
             return
         self._trace.llm_calls.append(LLMCallRecord(
             node=node,
-            prompt_summary=prompt_summary[:500],  # 요약 길이 제한
-            response_text=response_text[:1000],
+            prompt_summary=prompt_summary[:500],
+            prompt_variables=prompt_variables or {},
+            response_text=response_text,
             model=model,
             prompt_tokens=prompt_tokens,
             response_tokens=response_tokens,
@@ -304,7 +455,21 @@ class EvaluationTracker:
         ))
         self._trace.total_llm_calls += 1
         self._trace.total_llm_latency_ms += latency_ms
-        self._trace.total_llm_tokens += prompt_tokens + response_tokens
+        total = prompt_tokens + response_tokens
+        self._trace.total_llm_tokens += total
+
+        tokens_str = f"{total}tok"
+        self._append_timeline(
+            "llm_call", node,
+            summary=f"LLM({model}) {tokens_str}",
+            detail={
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "response_tokens": response_tokens,
+                "response_preview": response_text[:120],
+            },
+            duration_ms=latency_ms,
+        )
 
     def track_decision(
         self,
@@ -326,6 +491,20 @@ class EvaluationTracker:
             confidence=confidence,
             reason=reason,
         ))
+        self._append_timeline(
+            "decision", node,
+            summary=(
+                f"{decision_type}: {chosen}"
+                f" ({confidence:.0%})"
+            ),
+            detail={
+                "type": decision_type,
+                "chosen": chosen,
+                "alternatives": alternatives or [],
+                "confidence": confidence,
+                "reason": reason,
+            },
+        )
 
     def track_context_retrieval(
         self,
@@ -334,17 +513,51 @@ class EvaluationTracker:
         results_count: int = 0,
         results_summary: list[str] | None = None,
         latency_ms: float = 0.0,
+        status: str = "success",
     ) -> None:
         """컨텍스트 수집 결과를 기록한다."""
         if not self._enabled:
             return
-        self._trace.context_retrievals.append(ContextRetrievalRecord(
-            source=source,
-            query=query[:200],
-            results_count=results_count,
-            results_summary=results_summary or [],
-            latency_ms=round(latency_ms, 2),
-        ))
+        self._trace.context_retrievals.append(
+            ContextRetrievalRecord(
+                source=source,
+                query=query[:200],
+                results_count=results_count,
+                results_summary=results_summary or [],
+                latency_ms=round(latency_ms, 2),
+            )
+        )
+        self._append_timeline(
+            "tool_call",
+            self._current_timeline_node(),
+            summary=(
+                f"{source}('{query[:40]}')"
+                f"→{results_count}건"
+            ),
+            detail={
+                "tool": source,
+                "query": query[:200],
+                "results_count": results_count,
+            },
+            duration_ms=latency_ms,
+            status=status,
+        )
+
+    def _current_timeline_node(self) -> str:
+        """현재 활성 노드 이름을 반환한다."""
+        from src.utils.tracker.context import (
+            get_current_node,
+        )
+        node = get_current_node()
+        if node:
+            return node
+        # fallback: 가장 최근 시작된 노드
+        if self._node_start_seq:
+            return max(
+                self._node_start_seq,
+                key=self._node_start_seq.get,  # type: ignore[arg-type]
+            )
+        return "unknown"
 
     def track_sql(
         self,
@@ -392,7 +605,7 @@ class EvaluationTracker:
         """파이프라인 실행 추적을 종료한다."""
         if not self._enabled:
             return
-        self._trace.end_time = datetime.now(timezone.utc).isoformat()
+        self._trace.end_time = now_stamp()
         if self._start_time:
             self._trace.total_duration_ms = round(
                 (time.perf_counter() - self._start_time) * 1000, 2
@@ -402,29 +615,54 @@ class EvaluationTracker:
         self._trace.final_response_summary = final_response_summary[:500]
         self._trace.error_message = error_message
 
-    def save(self, output_dir: str | None = None) -> Path | None:
-        """트레이스를 JSON 파일로 저장한다.
+    def save(
+        self,
+        output_dir: str | None = None,
+        *,
+        with_report: bool = True,
+    ) -> Path | None:
+        """트레이스를 JSON + Markdown 보고서로 저장한다.
+
+        Args:
+            output_dir: 저장 디렉토리
+            with_report: Mermaid 보고서 동시 생성 여부
 
         Returns:
-            저장된 파일 경로 또는 None (비활성 시)
+            저장된 JSON 파일 경로 또는 None (비활성 시)
         """
         if not self._enabled:
             return None
 
-        base_dir = Path(output_dir or settings.eval_tracker_output_dir)
-        base_dir.mkdir(parents=True, exist_ok=True)
+        base = Path(
+            output_dir or settings.eval_tracker_output_dir
+        )
+        base.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"trace_{self._run_id}_{timestamp}.json"
-        filepath = base_dir / filename
+        ts = now_filesafe()
+        filename = f"trace_{self._run_id}_{ts}.json"
+        filepath = base / filename
 
         data = self._trace.model_dump(mode="json")
         filepath.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
+            json.dumps(
+                data, ensure_ascii=False, indent=2,
+            ),
             encoding="utf-8",
         )
+        logger.info(
+            "평가 트레이스 저장", path=str(filepath),
+        )
 
-        logger.info("평가 트레이스 저장", path=str(filepath))
+        # Markdown 보고서 자동 생성
+        if with_report and self._trace.timeline:
+            from src.utils.tracker.visualizer import (
+                save_report,
+            )
+            report_name = (
+                f"report_{self._run_id}_{ts}.md"
+            )
+            save_report(data, base / report_name)
+
         return filepath
 
     def to_dict(self) -> dict[str, Any]:
@@ -439,8 +677,8 @@ class BatchEvaluationTracker:
     """
 
     def __init__(self, batch_id: str = "") -> None:
-        self._batch_id = batch_id or datetime.now(timezone.utc).strftime(
-            "batch_%Y%m%d_%H%M%S"
+        self._batch_id = (
+            batch_id or f"batch_{now_filesafe()}"
         )
         self._traces: list[EvaluationTrace] = []
         self._start_time: float = 0.0
@@ -515,7 +753,7 @@ class BatchEvaluationTracker:
 
         return {
             "batch_id": self._batch_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_stamp(),
             "total_duration_ms": total_duration,
             "summary": {
                 "total": total,

@@ -1,4 +1,0 @@
-{"decision": "CONTINUE", "query": "재작성된 질의"}
-
-허용되는 decision 값: CONTINUE, NEW, UNSURE
-JSON만 출력하세요. 다른 텍스트는 절대 추가하지 마세요.

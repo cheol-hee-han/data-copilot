@@ -1,357 +1,1420 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Copilot</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f0f2f5;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .header {
-            background: #1a56db;
-            color: white;
-            padding: 16px 24px;
-            font-size: 18px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .header .subtitle {
-            font-size: 13px;
-            font-weight: 400;
-            opacity: 0.85;
-        }
-        .chat-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-        .message {
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: 12px;
-            line-height: 1.6;
-            font-size: 14px;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-        .message.user {
-            align-self: flex-end;
-            background: #1a56db;
-            color: white;
-            border-bottom-right-radius: 4px;
-        }
-        .message.assistant {
-            align-self: flex-start;
-            background: white;
-            color: #1f2937;
-            border-bottom-left-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .message.status {
-            align-self: center;
-            background: #fef3c7;
-            color: #92400e;
-            font-size: 13px;
-            padding: 8px 16px;
-        }
-        .message.error {
-            align-self: center;
-            background: #fee2e2;
-            color: #991b1b;
-            font-size: 13px;
-            padding: 8px 16px;
-        }
-        .input-area {
-            padding: 16px 20px;
-            background: white;
-            border-top: 1px solid #e5e7eb;
-            display: flex;
-            gap: 10px;
-        }
-        .input-area input {
-            flex: 1;
-            padding: 12px 16px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 14px;
-            outline: none;
-        }
-        .input-area input:focus {
-            border-color: #1a56db;
-            box-shadow: 0 0 0 3px rgba(26,86,219,0.1);
-        }
-        .input-area button {
-            padding: 12px 24px;
-            background: #1a56db;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        .input-area button:hover { background: #1e40af; }
-        .input-area button:disabled {
-            background: #9ca3af;
-            cursor: not-allowed;
-        }
-        .welcome {
-            text-align: center;
-            padding: 40px;
-            color: #6b7280;
-        }
-        .welcome h2 { color: #1f2937; margin-bottom: 8px; }
-        .welcome .examples {
-            margin-top: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            align-items: center;
-        }
-        .welcome .example-btn {
-            padding: 8px 16px;
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-            cursor: pointer;
-            color: #1e40af;
-            font-size: 13px;
-        }
-        .welcome .example-btn:hover { background: #dbeafe; }
-        /* 시각화 컨테이너 */
-        .viz-container {
-            margin-top: 12px;
-            padding: 16px;
-            background: #fafbfc;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .viz-container svg {
-            max-width: 100%;
-            height: auto;
-        }
-        .viz-title {
-            font-size: 12px;
-            color: #6b7280;
-            margin-bottom: 8px;
-        }
-        .viz-actions {
-            margin-top: 8px;
-            display: flex;
-            gap: 8px;
-            justify-content: center;
-        }
-        .viz-actions button {
-            padding: 4px 12px;
-            font-size: 12px;
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 4px;
-            cursor: pointer;
-            color: #1e40af;
-        }
-        .viz-actions button:hover { background: #dbeafe; }
-    </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Data Copilot</title>
+<!-- 로컬 번들 (폐쇄망 호환 — 외부 CDN 의존 없음) -->
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/hljs/core.min.js"></script>
+<script src="/vendor/hljs/python.min.js"></script>
+<script src="/vendor/hljs/sql.min.js"></script>
+<script src="/vendor/hljs/javascript.min.js"></script>
+<script src="/vendor/hljs/bash.min.js"></script>
+<script src="/vendor/hljs/json.min.js"></script>
+<link rel="stylesheet" href="/vendor/hljs/github.min.css" id="hljs-light"/>
+<link rel="stylesheet" href="/vendor/hljs/github-dark.min.css" id="hljs-dark" disabled/>
+<style>
+/* ══════════════════════════════════════
+   CSS Variables — 3 themes
+   ══════════════════════════════════════ */
+:root{
+  --bg:#fff;--bg2:#f5f4ef;--bg3:#eeece5;
+  --bg-input:#f5f4ef;--bg-code:#f6f5f0;
+  --bg-accent:#d97757;--bg-accent-hover:#c4623f;
+  --bg-accent-subtle:#fdf4f0;--bg-accent-glow:rgba(217,119,87,.12);
+  --txt:#1a1a1a;--txt2:#666460;--txt3:#a09e9a;--txt-inv:#fff;--txt-accent:#c4623f;
+  --border:#e8e5dc;--border2:#dedad0;--border-accent:#f5d0c0;
+  --sh-sm:0 1px 2px rgba(0,0,0,.06);--sh-md:0 4px 16px rgba(0,0,0,.09);
+  --sh-focus:0 0 0 2px rgba(204,120,92,.22);
+  --r-xs:4px;--r-sm:8px;--r-md:14px;--r-lg:20px;--r-full:9999px;
+  --sans:'Noto Sans KR',-apple-system,system-ui,sans-serif;
+  --mono:'JetBrains Mono','Fira Code',monospace;
+  --ease:cubic-bezier(.16,1,.3,1);--t-fast:120ms;--t:200ms;--t-slow:350ms;
+  --sw:252px;--mx:700px;
+  color-scheme:light;
+}
+[data-theme="dim"]{
+  --bg:#2b2a27;--bg2:#333230;--bg3:#3a3936;
+  --bg-input:#2a2926;--bg-code:#2e2d2a;
+  --bg-accent-subtle:#3d302a;--bg-accent-hover:#e8906e;--bg-accent-glow:rgba(217,119,87,.16);
+  --txt:#e8e6e0;--txt2:#b0ada5;--txt3:#7a7770;--txt-accent:#e8906e;
+  --border:#46443f;--border2:#3a3936;--border-accent:#503d32;
+  --sh-sm:0 1px 3px rgba(0,0,0,.25);--sh-md:0 4px 16px rgba(0,0,0,.35);
+  --sh-focus:0 0 0 2px rgba(217,119,87,.25);
+  color-scheme:dark;
+}
+[data-theme="dark"]{
+  --bg:#0e0e10;--bg2:#19191d;--bg3:#222226;
+  --bg-input:#1e1e22;--bg-code:#1a1a1e;
+  --bg-accent-subtle:#2a1f1a;--bg-accent-glow:rgba(217,119,87,.2);
+  --bg-accent-hover:#e8906e;
+  --txt:#ececef;--txt2:#a0a0a8;--txt3:#5c5c66;--txt-accent:#e8906e;
+  --border:#2c2c31;--border2:#222226;--border-accent:#3d2a22;
+  --sh-sm:0 1px 3px rgba(0,0,0,.4);--sh-md:0 4px 16px rgba(0,0,0,.6);
+  --sh-focus:0 0 0 2px rgba(217,119,87,.3);
+  color-scheme:dark;
+}
+
+/* ══ Reset ══ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:var(--sans);background:var(--bg);color:var(--txt);
+  font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+button,textarea,input,select{font-family:var(--sans)}
+button{cursor:pointer}
+
+/* ══ Layout ══ */
+.app{display:flex;height:100vh;overflow:hidden}
+
+/* ── Sidebar ── */
+.sidebar{width:var(--sw);min-width:var(--sw);background:var(--bg2);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;
+  overflow:hidden;z-index:20;
+  transition:width var(--t) var(--ease),min-width var(--t) var(--ease)}
+.sidebar.collapsed{width:0;min-width:0}
+/* topbar의 열기 버튼: 사이드바가 펼쳐있으면 숨김 */
+.sidebar:not(.collapsed)~.main #togSbOpen{display:none}
+.sb-head{padding:13px 13px 9px;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--txt)}
+.logo-svg{width:22px;height:22px;flex-shrink:0}
+.logo-name{font-size:14px;font-weight:600;white-space:nowrap}
+.new-btn{display:flex;align-items:center;gap:7px;margin:5px 9px;padding:7px 11px;
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);
+  color:var(--txt);font-size:13px;font-weight:500;width:calc(100% - 18px);transition:all var(--t)}
+.new-btn:hover{background:var(--bg3);border-color:var(--border2)}
+.sb-label{padding:9px 13px 3px;font-size:10.5px;font-weight:600;color:var(--txt3);
+  text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.chat-list{flex:1;overflow-y:auto;padding:2px 7px}
+.chat-list::-webkit-scrollbar{width:4px}
+.chat-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.chat-item{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:var(--r-sm);
+  font-size:13px;color:var(--txt2);transition:all var(--t);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;cursor:pointer;border:none;background:none;width:100%;text-align:left}
+.chat-item:hover,.chat-item.active{background:var(--bg3);color:var(--txt)}
+.chat-item svg{flex-shrink:0;opacity:.4}
+.sb-foot{padding:8px 9px;border-top:1px solid var(--border)}
+.set-btn{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:var(--r-sm);
+  font-size:13px;color:var(--txt2);border:none;background:none;width:100%;transition:all var(--t)}
+.set-btn:hover{background:var(--bg3);color:var(--txt)}
+
+/* ── Main ── */
+.main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+
+/* Topbar */
+.topbar{height:50px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 13px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg)}
+.tb-l,.tb-r{display:flex;align-items:center;gap:4px}
+.ic{width:32px;height:32px;border:none;background:none;color:var(--txt2);
+  border-radius:var(--r-xs);display:flex;align-items:center;justify-content:center;
+  transition:all var(--t);flex-shrink:0}
+.ic:hover{background:var(--bg3);color:var(--txt)}
+.model-pill{display:flex;align-items:center;gap:6px;padding:4px 10px;
+  border:1px solid var(--border);border-radius:100px;font-size:13px;font-weight:500;
+  color:var(--txt2);background:none;transition:all var(--t)}
+.model-pill:hover{border-color:var(--border2);color:var(--txt)}
+.mpd{width:6px;height:6px;border-radius:50%;background:var(--bg-accent);flex-shrink:0}
+.header-status{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--txt3);padding-right:4px}
+.status-dot{width:6px;height:6px;border-radius:50%;background:var(--txt3);transition:background var(--t)}
+.status-dot.connected{background:#22c55e}
+.status-dot.connecting{background:#f59e0b;animation:pulseDot 1.4s infinite}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* Theme toggle icon switching */
+.theme-ico-sun,.theme-ico-dim{display:none}
+[data-theme="dim"] .theme-ico-moon{display:none}
+[data-theme="dim"] .theme-ico-dim{display:block}
+[data-theme="dark"] .theme-ico-moon{display:none}
+[data-theme="dark"] .theme-ico-sun{display:block}
+
+/* ══ Chat Container ══ */
+.chat-wrap{flex:1;overflow-y:auto;scroll-behavior:smooth;background:var(--bg);
+  transition:background var(--t-slow) var(--ease)}
+.chat-wrap::-webkit-scrollbar{width:5px}
+.chat-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.chat-inner{max-width:var(--mx);margin:0 auto;padding:24px 24px 12px;display:flex;flex-direction:column;gap:4px}
+
+/* ── Welcome ── */
+.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:52vh;text-align:center;gap:13px;padding:40px 16px;animation:fadeUp .5s var(--ease)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.wlc-logo{width:48px;height:48px;margin-bottom:4px}
+.welcome h2{font-size:19px;font-weight:700;letter-spacing:-.03em}
+.welcome p{font-size:13.5px;color:var(--txt2);max-width:340px}
+.starter-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:9px;width:100%;max-width:440px}
+.sc{padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-sm);
+  text-align:left;font-size:12.5px;color:var(--txt2);line-height:1.5;transition:all var(--t)}
+.sc:hover{border-color:var(--bg-accent);background:var(--bg-accent-subtle);color:var(--txt-accent);
+  transform:translateY(-1px);box-shadow:var(--sh-sm)}
+.sc strong{display:block;color:var(--txt);font-size:12.5px;margin-bottom:2px}
+.sc:hover strong{color:var(--txt-accent)}
+
+/* ══ Message Rows ══ */
+.message-row{display:flex;gap:10px;max-width:var(--mx);width:100%;margin:0 auto;animation:msgIn .3s var(--ease)}
+@keyframes msgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.message-row.user{justify-content:flex-end;padding-left:48px;margin-bottom:6px}
+.message-row.assistant{justify-content:flex-start;margin-bottom:16px}
+.message-row.system{justify-content:center;margin-bottom:6px}
+.msg-avatar{width:28px;height:28px;display:grid;place-items:center;flex-shrink:0;margin-top:3px}
+.msg-avatar svg{width:22px;height:22px}
+.msg-content{max-width:88%;min-width:48px}
+
+/* User bubble */
+.msg-bubble.user-bubble{background:var(--bg3);color:var(--txt);padding:10px 15px;
+  border-radius:var(--r-md);border-bottom-right-radius:var(--r-xs);
+  line-height:1.65;font-size:14px;white-space:pre-wrap;word-break:break-word}
+/* System bubble */
+.msg-bubble.system-bubble{background:var(--bg2);color:var(--txt2);font-size:13px;
+  padding:12px 16px;border-radius:var(--r-sm);border:1px solid var(--border);
+  font-family:var(--mono);line-height:1.7;white-space:pre-wrap;
+  max-height:400px;overflow-y:auto;max-width:var(--mx);width:100%}
+.msg-bubble.system-bubble::-webkit-scrollbar{width:4px}
+.msg-bubble.system-bubble::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* ══ AI Text — Markdown ══ */
+.msg-bubble.bot-bubble{background:transparent;border:none;padding:4px 0;border-radius:0;font-size:14.5px;line-height:1.78;word-break:break-word}
+.bot-bubble p{margin-bottom:12px}
+.bot-bubble p:last-child{margin-bottom:0}
+.bot-bubble h1,.bot-bubble h2,.bot-bubble h3{font-weight:600;margin:18px 0 8px;line-height:1.3}
+.bot-bubble h1{font-size:19px}
+.bot-bubble h2{font-size:16px}
+.bot-bubble h3{font-size:14.5px}
+.bot-bubble ul,.bot-bubble ol{padding-left:22px;margin-bottom:12px}
+.bot-bubble li{margin-bottom:4px}
+.bot-bubble strong{font-weight:600}
+.bot-bubble a{color:var(--txt-accent);text-underline-offset:3px}
+.bot-bubble code:not(pre code){background:var(--bg-code);border:1px solid var(--border);
+  padding:1px 5px;border-radius:4px;font-size:12.5px;font-family:var(--mono)}
+.bot-bubble pre{background:var(--bg-code);border:1px solid var(--border);border-radius:var(--r-sm);
+  padding:14px 16px;margin:12px 0;overflow-x:auto;position:relative}
+.bot-bubble pre code{font-size:13px;font-family:var(--mono);line-height:1.6;
+  background:none;border:none;padding:0}
+.bot-bubble blockquote{border-left:3px solid var(--bg-accent);padding-left:13px;
+  margin:12px 0;color:var(--txt2);font-style:italic}
+.bot-bubble hr{border:none;border-top:1px solid var(--border);margin:16px 0}
+.bot-bubble table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+.bot-bubble th,.bot-bubble td{border:1px solid var(--border);padding:7px 11px;text-align:left}
+.bot-bubble th{background:var(--bg2);font-weight:600}
+
+/* Code copy button */
+.code-wrap{position:relative}
+.code-copy{position:absolute;top:7px;right:8px;padding:2px 9px;background:var(--bg);
+  border:1px solid var(--border);border-radius:var(--r-xs);font-size:11px;
+  color:var(--txt2);opacity:0;transition:opacity var(--t);cursor:pointer}
+.code-wrap:hover .code-copy{opacity:1}
+.code-copy:hover{background:var(--bg3)}
+
+/* Message actions (copy, regen) */
+.msg-actions{display:flex;gap:1px;margin-top:5px;opacity:0;transition:opacity var(--t)}
+.message-row:hover .msg-actions{opacity:1}
+.act-btn{width:28px;height:28px;border:none;background:none;color:var(--txt3);
+  border-radius:var(--r-xs);display:flex;align-items:center;justify-content:center;transition:all var(--t)}
+.act-btn:hover{background:var(--bg3);color:var(--txt)}
+
+/* Streaming cursor */
+.streaming-cursor{display:inline-block;width:2px;height:1.1em;background:var(--bg-accent);
+  margin-left:2px;vertical-align:text-bottom;border-radius:1px;animation:blink .75s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* ══ Thinking Indicator (간결 버전) ══ */
+.thinking-indicator{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-full);
+  animation:fadeUp .3s var(--ease)}
+.thinking-spinner{width:14px;height:14px;border:2px solid var(--border2);
+  border-top-color:var(--bg-accent);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.thinking-label{font-size:13px;font-weight:500;color:var(--txt2)}
+
+/* ══ Progress Steps ══ */
+.progress-block{margin-bottom:6px}
+.progress-summary{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:var(--r-sm);
+  background:var(--bg2);border:1px solid var(--border);cursor:pointer;user-select:none;transition:all var(--t-fast)}
+.progress-summary:hover{background:var(--bg3)}
+.progress-summary .summary-icon{width:16px;height:16px;display:grid;place-items:center;flex-shrink:0}
+.progress-summary .summary-icon svg{width:14px;height:14px}
+.progress-summary .summary-text{flex:1;font-size:12px;color:var(--txt3);font-weight:500}
+.progress-summary .summary-chevron{width:16px;height:16px;display:grid;place-items:center;
+  color:var(--txt3);transition:transform var(--t) var(--ease)}
+.progress-summary .summary-chevron svg{width:14px;height:14px}
+.progress-block.expanded .summary-chevron{transform:rotate(180deg)}
+.progress-detail{overflow:hidden;max-height:0;opacity:0;margin-top:0;
+  transition:max-height var(--t-slow) var(--ease),opacity var(--t) var(--ease),margin var(--t-slow) var(--ease)}
+.progress-block.expanded .progress-detail{max-height:300px;opacity:1;margin-top:6px}
+.progress-detail-inner{display:flex;flex-direction:column;gap:2px;padding:6px 10px;border-left:2px solid var(--border-accent)}
+.progress-live{display:flex;flex-direction:column;gap:2px}
+.progress-step{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--txt2);padding:3px 0}
+.progress-step .step-icon{width:18px;height:18px;display:grid;place-items:center;flex-shrink:0}
+.progress-step.active .step-icon svg{animation:spinStep .9s linear infinite;color:var(--txt-accent)}
+.progress-step.active{color:var(--txt-accent);font-weight:500}
+.progress-step.done{color:var(--txt3)}
+.progress-step.done .step-icon svg{color:#22c55e}
+@keyframes spinStep{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
+/* ══ Visualization ══ */
+.viz-container{margin-top:10px;padding:16px;background:var(--bg2);border:1px solid var(--border);
+  border-radius:var(--r-md);text-align:center;overflow:hidden}
+.viz-container svg{max-width:100%;height:auto}
+.viz-title{font-size:11.5px;color:var(--txt3);margin-bottom:10px;font-weight:500;
+  letter-spacing:.02em;text-transform:uppercase}
+.viz-actions{margin-top:12px;display:flex;gap:8px;justify-content:center}
+.viz-actions button{padding:5px 16px;font-size:11.5px;font-family:var(--sans);
+  background:var(--bg-accent-subtle);border:1px solid var(--border-accent);
+  border-radius:var(--r-full);cursor:pointer;color:var(--txt-accent);font-weight:500;transition:all var(--t-fast)}
+.viz-actions button:hover{background:var(--bg-accent-glow)}
+
+/* Status banner */
+.status-banner{max-width:var(--mx);width:100%;margin:4px auto;padding:8px 14px;
+  border-radius:var(--r-sm);font-size:12.5px;text-align:center;animation:fadeUp .25s var(--ease)}
+.status-banner.status{background:var(--bg-accent-subtle);color:var(--txt-accent)}
+.status-banner.error{background:#fef2f2;color:#991b1b}
+[data-theme="dim"] .status-banner.error{background:#3d2a2a;color:#f87171}
+[data-theme="dark"] .status-banner.error{background:#2a1515;color:#f87171}
+
+/* ══ Input Area ══ */
+.in-area{flex-shrink:0;padding:10px 24px 18px;background:var(--bg)}
+.in-inner{max-width:var(--mx);margin:0 auto;position:relative}
+.in-box{background:var(--bg-input);border:1.5px solid var(--border2);border-radius:var(--r-lg);
+  padding:12px 14px 10px;transition:border-color var(--t),box-shadow var(--t)}
+.in-box:focus-within{border-color:var(--bg-accent);box-shadow:var(--sh-focus)}
+.in-ta{width:100%;background:none;border:none;outline:none;resize:none;font-size:14px;
+  color:var(--txt);line-height:1.6;min-height:24px;max-height:200px;overflow-y:auto;padding:0}
+.in-ta::placeholder{color:var(--txt3)}
+.in-ta::-webkit-scrollbar{width:3px}
+.in-ta::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.in-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.in-left{display:flex;align-items:center;gap:2px}
+.tb{width:28px;height:28px;border:none;background:none;color:var(--txt3);border-radius:var(--r-xs);
+  display:flex;align-items:center;justify-content:center;transition:all var(--t)}
+.tb:hover{background:var(--bg3);color:var(--txt)}
+.send-btn{width:32px;height:32px;border:none;background:var(--bg-accent);color:var(--txt-inv);
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  transition:all var(--t) var(--ease);flex-shrink:0}
+.send-btn:hover:not(:disabled){background:var(--bg-accent-hover);transform:scale(1.06)}
+.send-btn:disabled{background:var(--border2);color:var(--txt3);cursor:not-allowed;transform:none}
+.send-btn.cancel{background:#fef2f2;color:#991b1b;border:1px solid var(--border-accent)}
+[data-theme="dim"] .send-btn.cancel,[data-theme="dark"] .send-btn.cancel{background:#3d2a2a;color:#f87171}
+.send-btn.cancel:hover{opacity:.85;transform:none}
+.in-hint{text-align:center;font-size:11px;color:var(--txt3);margin-top:8px}
+
+/* ══ Command Popup ══ */
+.cmd-popup{position:absolute;bottom:100%;left:0;right:0;margin-bottom:6px;
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);
+  box-shadow:var(--sh-md);overflow:hidden;z-index:20;animation:cmdUp .15s var(--ease)}
+@keyframes cmdUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.cmd-item{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background var(--t-fast)}
+.cmd-item:hover,.cmd-item.active{background:var(--bg3)}
+.cmd-item-icon{width:28px;height:28px;border-radius:var(--r-xs);background:var(--bg2);
+  display:grid;place-items:center;font-size:14px;flex-shrink:0}
+.cmd-item-text{flex:1;min-width:0}
+.cmd-item-name{font-size:13px;font-weight:600;color:var(--txt);font-family:var(--mono)}
+.cmd-item-desc{font-size:11.5px;color:var(--txt3);margin-top:1px}
+.cmd-item-key{font-size:10px;font-family:var(--mono);color:var(--txt-accent);
+  background:var(--bg2);border:1px solid var(--border);padding:2px 6px;border-radius:3px;flex-shrink:0}
+
+/* ══ Modal ══ */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(4px);
+  z-index:100;display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-bg.open{opacity:1;pointer-events:all}
+.modal{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:26px;width:400px;max-width:90vw;box-shadow:var(--sh-md);
+  transform:translateY(10px);transition:transform .2s}
+.modal-bg.open .modal{transform:translateY(0)}
+.modal h2{font-size:15px;font-weight:600;margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.fg{margin-bottom:13px}
+.fl{display:block;font-size:11.5px;font-weight:600;color:var(--txt2);margin-bottom:5px;
+  text-transform:uppercase;letter-spacing:.05em}
+.fi,.fsel{width:100%;padding:8px 11px;background:var(--bg2);border:1.5px solid var(--border2);
+  border-radius:var(--r-sm);font-size:14px;color:var(--txt);outline:none;
+  transition:border-color var(--t),box-shadow var(--t)}
+.fi:focus,.fsel:focus{border-color:var(--bg-accent);box-shadow:var(--sh-focus)}
+.ma{display:flex;gap:7px;margin-top:18px;justify-content:flex-end}
+.mbtn{padding:7px 16px;border-radius:var(--r-sm);font-size:13.5px;font-weight:500;border:none;transition:all var(--t)}
+.mbtn-s{background:var(--bg3);color:var(--txt2)}
+.mbtn-s:hover{background:var(--border2)}
+.mbtn-p{background:var(--bg-accent);color:#fff}
+.mbtn-p:hover{background:var(--bg-accent-hover)}
+
+/* ══ Toast ══ */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
+  background:var(--txt);color:var(--bg);padding:7px 16px;border-radius:100px;
+  font-size:13px;font-weight:500;z-index:300;pointer-events:none;white-space:nowrap;
+  transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
+.toast.show{transform:translateX(-50%) translateY(0)}
+
+/* ══ Insight Panel ══ */
+.insight-slot{max-height:0;overflow:hidden;opacity:0;
+  transition:max-height .4s var(--ease),opacity .3s var(--ease),margin .3s var(--ease)}
+.insight-slot.open{max-height:3000px;opacity:1;margin-top:12px}
+.insight-panel{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-sm);
+  padding:16px;font-size:13px;line-height:1.6}
+.insight-section{margin-bottom:14px}
+.insight-section:last-child{margin-bottom:0}
+.insight-title{font-weight:600;font-size:13px;margin-bottom:6px;color:var(--txt)}
+.insight-body{padding-left:4px}
+.insight-row{display:flex;gap:8px;padding:2px 0}
+.insight-key{color:var(--txt3);min-width:48px;font-weight:500}
+.insight-table{padding:6px 10px;margin-bottom:4px;border-radius:var(--r-xs);font-size:12.5px}
+.insight-table.used{background:var(--bg-accent-subtle);border-left:3px solid #22c55e}
+.insight-table.rejected{background:var(--bg2);border-left:3px solid var(--txt3);opacity:.7}
+.insight-desc{color:var(--txt2);font-size:12px}
+.insight-reason{color:var(--txt2);font-size:12px;margin-top:2px}
+.insight-cols{font-size:11px;color:var(--txt3);margin-top:2px;font-family:var(--mono)}
+.insight-sql-summary{font-weight:500;margin-bottom:4px}
+.insight-join{font-size:12px;color:var(--txt2);margin-bottom:6px}
+.insight-ref{font-size:12.5px;color:var(--txt2);padding:2px 0}
+.insight-conf{font-weight:600;padding:1px 8px;border-radius:var(--r-full);font-size:11.5px}
+.insight-conf.high{background:#dcfce7;color:#166534}
+.insight-conf.mid{background:#fef3c7;color:#92400e}
+.insight-conf.low{background:#fee2e2;color:#991b1b}
+[data-theme="dim"] .insight-conf.high,[data-theme="dark"] .insight-conf.high{background:#14532d;color:#86efac}
+[data-theme="dim"] .insight-conf.mid,[data-theme="dark"] .insight-conf.mid{background:#78350f;color:#fcd34d}
+[data-theme="dim"] .insight-conf.low,[data-theme="dark"] .insight-conf.low{background:#7f1d1d;color:#fca5a5}
+.insight-caveat{font-size:12.5px;color:var(--txt-accent);padding:2px 0}
+.insight-timing{display:flex;justify-content:space-between;padding:2px 0;font-size:12px;color:var(--txt2)}
+.insight-panel details{margin-top:4px}
+.insight-panel summary{cursor:pointer;font-size:12px;color:var(--txt-accent);font-weight:500}
+.insight-panel pre{margin-top:6px;font-size:12px}
+
+/* ══ Download Bar ══ */
+.download-bar{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 12px;
+  background:var(--bg-accent-subtle);border:1px solid var(--border-accent);border-radius:var(--r-sm);
+  animation:fadeUp .3s var(--ease)}
+.download-bar span{font-size:12.5px;color:var(--txt-accent);flex:1}
+.download-bar button{padding:4px 14px;font-size:12px;font-family:var(--sans);font-weight:500;
+  background:var(--bg-accent);color:var(--txt-inv);border:none;border-radius:var(--r-full);
+  cursor:pointer;transition:all var(--t-fast)}
+.download-bar button:hover{background:var(--bg-accent-hover)}
+
+/* ══ Chart Modal ══ */
+.chart-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);
+  z-index:200;display:flex;align-items:center;justify-content:center;animation:fadeUp .2s var(--ease)}
+.chart-modal-inner{background:var(--bg);border-radius:var(--r-lg);padding:16px;
+  width:90vw;max-width:900px;max-height:90vh;overflow:auto;box-shadow:var(--sh-md)}
+.chart-modal-close{float:right;width:32px;height:32px;border:none;background:var(--bg3);
+  color:var(--txt2);border-radius:var(--r-xs);cursor:pointer;font-size:16px;
+  display:flex;align-items:center;justify-content:center}
+.chart-modal-close:hover{background:var(--border2);color:var(--txt)}
+.chart-modal-body{text-align:center;padding:8px 0}
+.chart-modal-body svg{max-width:100%;height:auto}
+
+/* ══ Mobile ══ */
+@media(max-width:640px){
+  .sidebar{position:fixed;left:0;top:0;height:100%;transform:translateX(-100%);transition:transform var(--t)}
+  .sidebar.mobile-open{transform:translateX(0)}
+  .sidebar.collapsed{transform:translateX(-100%)}
+  .chat-inner{padding:14px 12px 8px}
+  .in-area{padding:8px 12px 14px}
+  .starter-grid{grid-template-columns:1fr}
+  .message-row.user{padding-left:32px}
+  .msg-content{max-width:94%}
+}
+</style>
 </head>
 <body>
-    <div class="header">
-        Data Copilot
-        <span class="subtitle">자연어 기반 데이터 추출/분석 AI 에이전트</span>
+<div class="app">
+  <!-- ═══ Sidebar ═══ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-head">
+      <button class="ic" id="togSbBtn" title="사이드바 접기" style="margin-right:4px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <a href="#" class="logo" onclick="return false">
+        <svg class="logo-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757" fill-rule="nonzero"/></svg>
+        <span class="logo-name">Data Copilot</span>
+      </a>
     </div>
+    <button class="new-btn" id="newBtn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      새 대화
+    </button>
+    <div class="sb-label">최근 대화</div>
+    <div class="chat-list" id="chatList"></div>
+    <div class="sb-foot">
+      <button class="set-btn" id="openSetBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        설정
+      </button>
+    </div>
+  </aside>
 
-    <div class="chat-container" id="chatContainer">
-        <div class="welcome">
-            <h2>안녕하세요! Data Copilot입니다</h2>
-            <p>데이터 추출이나 분석이 필요하시면 자연어로 요청해주세요.</p>
-            <div class="examples">
-                <button class="example-btn" onclick="sendExample(this)">
-                    이번 달 신규 고객 수 알려줘
-                </button>
-                <button class="example-btn" onclick="sendExample(this)">
-                    대출 유형별 건수와 금액 보여줘
-                </button>
-                <button class="example-btn" onclick="sendExample(this)">
-                    최근 12개월 연체율 추이 분석해줘
-                </button>
-                <button class="example-btn" onclick="sendExample(this)">
-                    지점별 고객 수 상위 5개 보여줘
-                </button>
-            </div>
+  <!-- ═══ Main ═══ -->
+  <div class="main">
+    <div class="topbar">
+      <div class="tb-l">
+        <button class="ic" id="togSbOpen" title="사이드바 열기">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <div class="model-pill">
+          <span class="mpd"></span>
+          <span>Data Copilot</span>
         </div>
+      </div>
+      <div class="tb-r">
+        <div class="header-status">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusLabel">연결 중…</span>
+        </div>
+        <button class="ic" id="themeBtn" title="테마 전환">
+          <svg class="theme-ico-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="theme-ico-dim" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none" opacity=".35"/></svg>
+          <svg class="theme-ico-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <button class="ic" id="clearBtn" title="대화 초기화">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+        </button>
+      </div>
     </div>
 
-    <div class="input-area">
-        <input
-            type="text"
-            id="messageInput"
-            placeholder="데이터 요청을 입력하세요..."
-            onkeypress="if(event.key==='Enter')sendMessage()"
-        >
-        <button id="sendBtn" onclick="sendMessage()">전송</button>
+    <!-- Chat -->
+    <div class="chat-wrap" id="chatWrap">
+      <div class="chat-inner" id="chatContainer">
+        <div class="welcome" id="welcomeScreen">
+          <svg class="wlc-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757" fill-rule="nonzero"/></svg>
+          <h2>안녕하세요! Data Copilot입니다</h2>
+          <p>데이터 추출이나 분석이 필요하시면 자연어로 요청해주세요.</p>
+          <div class="starter-grid">
+            <button class="sc" onclick="App.sendExample(this)"><strong>📊 신규 고객</strong>이번 달 신규 고객 수 알려줘</button>
+            <button class="sc" onclick="App.sendExample(this)"><strong>💰 대출 현황</strong>대출 유형별 건수와 금액 보여줘</button>
+            <button class="sc" onclick="App.sendExample(this)"><strong>📈 연체율 추이</strong>최근 12개월 연체율 추이 분석해줘</button>
+            <button class="sc" onclick="App.sendExample(this)"><strong>🏢 지점별 분석</strong>지점별 고객 수 상위 5개 보여줘</button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <script>
-        const sessionId = 'session-' + Date.now();
-        const wsUrl = `ws://${window.location.host}/ws/${sessionId}`;
-        let ws = null;
-        let reconnectAttempts = 0;
+    <!-- Input -->
+    <div class="in-area">
+      <div class="in-inner" id="inputWrapper">
+        <div class="in-box">
+          <textarea class="in-ta" id="messageInput" placeholder="데이터 요청을 입력하세요… ( / 로 명령어, Shift+Enter 줄바꿈)" rows="1"></textarea>
+          <div class="in-foot">
+            <div class="in-left"></div>
+            <button class="send-btn" id="sendBtn" disabled title="전송">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="in-hint">AI는 실수할 수 있습니다. 중요한 정보는 확인하세요.</div>
+      </div>
+    </div>
+  </div>
+</div>
 
-        function connectWebSocket() {
-            ws = new WebSocket(wsUrl);
+<!-- ═══ Settings Modal ═══ -->
+<div class="modal-bg" id="setModal">
+  <div class="modal">
+    <h2>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      설정
+    </h2>
+    <div class="fg">
+      <label class="fl">테마</label>
+      <select class="fsel" id="setTheme">
+        <option value="light">라이트</option>
+        <option value="dim">딤 (따뜻한 다크)</option>
+        <option value="dark">다크</option>
+      </select>
+    </div>
+    <div class="fg">
+      <label class="fl">글꼴 크기</label>
+      <select class="fsel" id="setFontSize">
+        <option value="13">작게 (13px)</option>
+        <option value="14" selected>보통 (14px)</option>
+        <option value="15">크게 (15px)</option>
+        <option value="16">아주 크게 (16px)</option>
+      </select>
+    </div>
+    <div class="ma">
+      <button class="mbtn mbtn-s" id="cancelSetBtn">취소</button>
+      <button class="mbtn mbtn-p" id="saveSetBtn">저장</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
 
-            ws.onopen = () => {
-                console.log('WebSocket 연결됨');
-                reconnectAttempts = 0;
-            };
+<script>
+(function(){'use strict';
 
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                const msgType =
-                    data.type === 'response' ? 'assistant' : data.type;
-                addMessage(msgType, data.message, data.visualization || null);
-                document.getElementById('sendBtn').disabled = false;
-                document.getElementById('messageInput').disabled = false;
-            };
+/* ═══════════════════════════════════════
+   SVG Icons
+   ═══════════════════════════════════════ */
+var CS='<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757" fill-rule="nonzero"/></svg>',
+IS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2v4m0 12v4m-7.07-15.07l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>',
+IC='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+IV='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+ICOPY='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+IREGEN='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
 
-            ws.onclose = () => {
-                console.log('WebSocket 연결 종료');
-                if (reconnectAttempts < 5) {
-                    setTimeout(
-                        connectWebSocket,
-                        1000 * Math.pow(2, reconnectAttempts)
-                    );
-                    reconnectAttempts++;
-                }
-            };
+/* ═══════════════════════════════════════
+   1. TM — Theme Manager (light → dim → dark)
+   ═══════════════════════════════════════ */
+var TM=(function(){
+  var K='dc-theme';
+  function init(){
+    try{var s=localStorage.getItem(K);if(s){ap(s);return;}}catch(e){}
+    ap(matchMedia('(prefers-color-scheme:dark)').matches?'dim':'light');
+    matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(e){
+      var sv=null;try{sv=localStorage.getItem(K);}catch(x){}
+      if(!sv)ap(e.matches?'dim':'light');
+    });
+  }
+  function ap(t){
+    document.documentElement.setAttribute('data-theme',t);
+    var isDark=t==='dark'||t==='dim';
+    try{
+      document.getElementById('hljs-light').disabled=isDark;
+      document.getElementById('hljs-dark').disabled=!isDark;
+    }catch(e){}
+  }
+  function get(){return document.documentElement.getAttribute('data-theme')||'light';}
+  function set(t){ap(t);try{localStorage.setItem(K,t);}catch(e){}}
+  function toggle(){var c=get();set(c==='light'?'dim':c==='dim'?'dark':'light');}
+  return{init:init,get:get,set:set,toggle:toggle};
+})();
 
-            ws.onerror = (error) => {
-                console.error('WebSocket 오류:', error);
-            };
+/* ═══════════════════════════════════════
+   2. MS — Message Store
+   ═══════════════════════════════════════ */
+var MS=(function(){
+  var _m=new Map(),_n=0,SK='dc-hist';
+  function create(role,text,x){
+    x=x||{};
+    var id='msg-'+Date.now()+'-'+ ++_n;
+    var msg={id:id,role:role,text:text||'',status:x.status||'done',
+      progress:x.progress||[],visualization:x.visualization||null,
+      showThinking:x.showThinking||false,thinkingLabel:x.thinkingLabel||'',
+      progressCollapsed:false,progressStartTime:null,progressElapsed:null,
+      insight:x.insight||null,downloadReady:x.downloadReady||null,
+      timestamp:Date.now()};
+    _m.set(id,msg);_persist();return msg;
+  }
+  function get(id){return _m.get(id)||null;}
+  function update(id,p){var m=_m.get(id);if(!m)return null;Object.assign(m,p);return m;}
+  function clear(){_m.clear();_n=0;_persist();}
+  function allMessages(){return Array.from(_m.values());}
+  function getSummary(){
+    return allMessages().filter(function(m){return m.role==='user'||(m.role==='assistant'&&m.text);})
+      .map(function(m){return{role:m.role,text:m.text.length>80?m.text.slice(0,80)+'…':m.text,time:m.timestamp};});
+  }
+  function _persist(){
+    try{var d=allMessages().filter(function(m){return m.role==='user'||(m.role==='assistant'&&m.text);})
+      .map(function(m){return{role:m.role,text:m.text,time:m.timestamp};});
+      sessionStorage.setItem(SK,JSON.stringify(d));
+    }catch(e){}
+  }
+  function loadPersisted(){try{var r=sessionStorage.getItem(SK);return r?JSON.parse(r):[];}catch(e){return[];}}
+  return{create:create,get:get,update:update,clear:clear,allMessages:allMessages,getSummary:getSummary,loadPersisted:loadPersisted};
+})();
+
+/* ═══════════════════════════════════════
+   3. RD — Renderer (Markdown 지원)
+   ═══════════════════════════════════════ */
+var RD=(function(){
+  function chat(){return document.getElementById('chatContainer');}
+  function showWel(){var w=document.getElementById('welcomeScreen');if(w)w.style.display='';}
+  function hideWel(){var w=document.getElementById('welcomeScreen');if(w)w.style.display='none';}
+  function clearChat(){
+    chat().querySelectorAll('.message-row,.status-banner').forEach(function(r){r.remove();});
+    showWel();
+  }
+  function ensureDOM(msg){
+    var row=chat().querySelector('[data-id="'+msg.id+'"]');
+    if(row)return row;
+    hideWel();
+    row=document.createElement('div');
+    row.className='message-row '+msg.role;
+    row.dataset.id=msg.id;
+    if(msg.role==='assistant'){
+      row.innerHTML='<div class="msg-avatar">'+CS+'</div><div class="msg-content">'
+        +'<div class="thinking-slot"></div><div class="progress-block-slot"></div>'
+        +'<div class="msg-bubble bot-bubble"></div><div class="viz-slot"></div>'
+        +'<div class="download-slot"></div>'
+        +'<div class="msg-actions">'
+        +'<button class="act-btn" data-act="copy" title="복사">'+ICOPY+'</button>'
+        +'<button class="act-btn" data-act="regen" title="재생성">'+IREGEN+'</button>'
+        +'<button class="act-btn" data-act="insight" title="분석 과정 보기">💡</button>'
+        +'</div>'
+        +'<div class="insight-slot"></div>'
+        +'</div>';
+      row.querySelectorAll('.act-btn').forEach(function(b){
+        b.addEventListener('click',function(){
+          if(b.dataset.act==='copy'){
+            var raw=row.querySelector('.bot-bubble');
+            if(raw)navigator.clipboard.writeText(raw._rawText||raw.textContent).then(function(){toast('복사됨');}).catch(function(){toast('복사 실패');});
+          }else if(b.dataset.act==='regen'){App.regen();}
+          else if(b.dataset.act==='insight'){
+            var slot=row.querySelector('.insight-slot');
+            if(slot)slot.classList.toggle('open');
+          }
+        });
+      });
+    }else if(msg.role==='system'){
+      row.innerHTML='<div class="msg-content" style="margin:0 auto"><div class="msg-bubble system-bubble"></div></div>';
+    }else{
+      row.innerHTML='<div class="msg-content" style="margin-left:auto"><div class="msg-bubble user-bubble"></div></div>';
+    }
+    chat().appendChild(row);
+    return row;
+  }
+  function render(msg){
+    var row=ensureDOM(msg),bub=row.querySelector('.msg-bubble');
+    if(msg.role==='assistant'){
+      if(msg.status==='streaming'){
+        bub.innerHTML=mdRender(msg.text)+'<span class="streaming-cursor"></span>';
+      }else{
+        bub.innerHTML=mdRender(msg.text);
+        bub._rawText=msg.text;
+        if(msg.text)attachCodeCopy(bub);
+      }
+    }else{
+      if(msg.status==='streaming'){
+        bub.innerHTML=esc(msg.text)+'<span class="streaming-cursor"></span>';
+      }else{
+        bub.textContent=msg.text;
+      }
+    }
+    bub.style.display=(!msg.text&&msg.showThinking)?'none':'';
+    if(msg.role!=='assistant'){autoScroll();return;}
+    renderTh(row,msg);
+    renderPB(row,msg);
+    if(msg.visualization)renderViz(row,msg.visualization);
+    if(msg.insight)renderInsight(row,msg);
+    if(msg.downloadReady)renderDownload(row,msg);
+    autoScroll();
+  }
+  function renderTh(row,msg){
+    var slot=row.querySelector('.thinking-slot');
+    if(!msg.showThinking){slot.innerHTML='';return;}
+    if(!slot.querySelector('.thinking-indicator')){
+      slot.innerHTML='<div class="thinking-indicator">'
+        +'<div class="thinking-spinner"></div>'
+        +'<span class="thinking-label"></span></div>';
+    }
+    slot.querySelector('.thinking-label').textContent=msg.thinkingLabel||'처리 중…';
+  }
+  function renderPB(row,msg){
+    var slot=row.querySelector('.progress-block-slot');
+    if(!msg.progress||!msg.progress.length){slot.innerHTML='';return;}
+    if(msg.progressCollapsed){
+      var block=slot.querySelector('.progress-block');
+      if(!block){
+        slot.innerHTML='';block=document.createElement('div');block.className='progress-block';
+        block.innerHTML='<div class="progress-summary"><div class="summary-icon">'+CS+'</div><span class="summary-text"></span><div class="summary-chevron">'+IV+'</div></div><div class="progress-detail"><div class="progress-detail-inner"></div></div>';
+        block.querySelector('.progress-summary').addEventListener('click',function(){block.classList.toggle('expanded');});
+        slot.appendChild(block);
+      }
+      var el=msg.progressElapsed,es=el!=null?' · '+el.toFixed(1)+'초':'';
+      var dc=msg.progress.filter(function(s){return s.status==='done';}).length;
+      block.querySelector('.summary-text').textContent='분석 완료 ('+dc+'단계'+es+')';
+      block.querySelector('.progress-detail-inner').innerHTML=msg.progress.map(function(s){
+        var d=s.status==='done';
+        return '<div class="progress-step '+(d?'done':'active')+'"><span class="step-icon">'+(d?IC:IS)+'</span><span>'+esc(s.label)+'</span></div>';
+      }).join('');
+      return;
+    }
+    var live=slot.querySelector('.progress-live');
+    if(!live){slot.innerHTML='';live=document.createElement('div');live.className='progress-live';slot.appendChild(live);}
+    live.innerHTML=msg.progress.map(function(s){
+      var d=s.status==='done';
+      return '<div class="progress-step '+(d?'done':'active')+'"><span class="step-icon">'+(d?IC:IS)+'</span><span>'+esc(s.label)+'</span></div>';
+    }).join('');
+  }
+  function renderViz(row,viz){
+    var slot=row.querySelector('.viz-slot');if(!slot)return;
+    var vc=slot.querySelector('.viz-container');
+    if(!vc){
+      vc=document.createElement('div');vc.className='viz-container';
+      vc.innerHTML='<div class="viz-title"></div><div class="viz-svg-slot"></div>'
+        +'<div class="viz-actions">'
+        +'<button onclick="App.expandChart(this)">🔍 확대</button>'
+        +'<button onclick="App.downloadSVG(this)">SVG</button>'
+        +'<button onclick="App.downloadPNG(this)">PNG</button>'
+        +'<button onclick="App.copyChart(this)">📋 복사</button>'
+        +'</div>';
+      slot.appendChild(vc);
+    }
+    if(viz.title)vc.querySelector('.viz-title').textContent=viz.title;
+    if(viz.code)vc.querySelector('.viz-svg-slot').innerHTML=sanitizeSVG(viz.code);
+    if(viz.table_data&&viz.table_data.columns){
+      var existing=vc.querySelector('.viz-table-toggle');
+      if(!existing){
+        var tBtn=document.createElement('button');
+        tBtn.className='viz-table-toggle';tBtn.textContent='📋 데이터 보기';
+        tBtn.style.cssText='margin-top:8px;padding:4px 12px;font-size:11.5px;font-family:var(--sans);background:var(--bg3);border:1px solid var(--border);border-radius:var(--r-full);cursor:pointer;color:var(--txt2)';
+        var tbl=document.createElement('div');tbl.className='viz-table-data';tbl.style.display='none';
+        tbl.style.cssText+='margin-top:8px;max-height:200px;overflow:auto;font-size:12px';
+        var th='<table style="width:100%;border-collapse:collapse"><thead><tr>'
+          +viz.table_data.columns.map(function(c){return '<th style="border:1px solid var(--border);padding:4px 8px;background:var(--bg3);font-size:11px">'+esc(c)+'</th>';}).join('')
+          +'</tr></thead><tbody>'
+          +viz.table_data.rows.map(function(r){
+            return '<tr>'+viz.table_data.columns.map(function(c){return '<td style="border:1px solid var(--border);padding:3px 8px;font-size:11px">'+esc(String(r[c]!=null?r[c]:''))+'</td>';}).join('')+'</tr>';
+          }).join('')
+          +'</tbody></table>';
+        tbl.innerHTML=th;
+        tBtn.addEventListener('click',function(){
+          var v=tbl.style.display==='none';
+          tbl.style.display=v?'block':'none';
+          tBtn.textContent=v?'📋 데이터 숨기기':'📋 데이터 보기';
+        });
+        vc.querySelector('.viz-actions').before(tBtn);
+        vc.querySelector('.viz-actions').before(tbl);
+      }
+    }
+  }
+  function renderInsight(row,msg){
+    var slot=row.querySelector('.insight-slot');
+    if(!slot||!msg.insight)return;
+    if(slot.querySelector('.insight-panel'))return;
+    var ins=msg.insight;
+    var h='<div class="insight-panel">';
+    /* 질문 해석 */
+    var qi=ins.query_interpretation;
+    if(qi){
+      h+='<div class="insight-section"><div class="insight-title">📋 질문 해석</div><div class="insight-body">';
+      if(qi.period)h+='<div class="insight-row"><span class="insight-key">기간</span>'+esc(qi.period)+'</div>';
+      if(qi.target)h+='<div class="insight-row"><span class="insight-key">대상</span>'+esc(qi.target)+'</div>';
+      if(qi.metric)h+='<div class="insight-row"><span class="insight-key">지표</span>'+esc(qi.metric)+'</div>';
+      h+='</div></div>';
+    }
+    /* 사용한 테이블 */
+    if((ins.tables_used&&ins.tables_used.length)||(ins.tables_rejected&&ins.tables_rejected.length)){
+      h+='<div class="insight-section"><div class="insight-title">🗂️ 사용한 데이터</div><div class="insight-body">';
+      (ins.tables_used||[]).forEach(function(t){
+        h+='<div class="insight-table used"><strong>✅ '+esc(t.name)+'</strong> <span class="insight-desc">'+esc(t.desc||'')+'</span>';
+        if(t.reason)h+='<div class="insight-reason">'+esc(t.reason)+'</div>';
+        if(t.columns&&t.columns.length)h+='<div class="insight-cols">'+t.columns.map(esc).join(', ')+'</div>';
+        h+='</div>';
+      });
+      (ins.tables_rejected||[]).forEach(function(t){
+        h+='<div class="insight-table rejected"><strong>❌ '+esc(t.name)+'</strong> <span class="insight-desc">'+esc(t.desc||'')+'</span>';
+        if(t.reason)h+='<div class="insight-reason">'+esc(t.reason)+'</div>';
+        h+='</div>';
+      });
+      h+='</div></div>';
+    }
+    /* SQL */
+    if(ins.sql_code){
+      h+='<div class="insight-section"><div class="insight-title">🔗 조회 조건</div><div class="insight-body">';
+      if(ins.sql_summary)h+='<div class="insight-sql-summary">'+esc(ins.sql_summary)+'</div>';
+      if(ins.join_path)h+='<div class="insight-join">'+esc(ins.join_path)+'</div>';
+      h+='<details><summary>SQL 보기</summary><pre><code class="language-sql">'+esc(ins.sql_code)+'</code></pre></details>';
+      h+='</div></div>';
+    }
+    /* 참고 자료 */
+    if(ins.references&&ins.references.length){
+      h+='<div class="insight-section"><div class="insight-title">📚 참고한 자료</div><div class="insight-body">';
+      ins.references.forEach(function(r){h+='<div class="insight-ref">• '+esc(r.title)+': '+esc(r.detail)+'</div>';});
+      h+='</div></div>';
+    }
+    /* 신뢰도 */
+    var conf=ins.confidence||'보통';
+    var cc=conf==='높음'?'high':conf==='보통'?'mid':'low';
+    h+='<div class="insight-section"><div class="insight-title">🎯 신뢰도: <span class="insight-conf '+cc+'">'+esc(conf)+'</span></div>';
+    if(ins.caveats&&ins.caveats.length){
+      h+='<div class="insight-body">';
+      ins.caveats.forEach(function(c){h+='<div class="insight-caveat">⚠️ '+esc(c)+'</div>';});
+      h+='</div>';
+    }
+    h+='</div>';
+    /* 처리 시간 */
+    if(ins.total_elapsed!=null){
+      h+='<div class="insight-section"><div class="insight-title">⏱️ 처리 시간: '+ins.total_elapsed.toFixed(1)+'초';
+      if(ins.step_timings)h+=' ('+ins.step_timings.length+'단계)';
+      h+='</div>';
+      if(ins.step_timings&&ins.step_timings.length){
+        h+='<details><summary>상세 보기</summary><div class="insight-body">';
+        ins.step_timings.forEach(function(s){
+          h+='<div class="insight-timing"><span>'+esc(s.label)+'</span><span>'+s.elapsed.toFixed(1)+'초</span></div>';
+        });
+        h+='</div></details>';
+      }
+      h+='</div>';
+    }
+    h+='</div>';
+    slot.innerHTML=h;
+  }
+  function renderDownload(row,msg){
+    var slot=row.querySelector('.download-slot');
+    if(!slot||!msg.downloadReady)return;
+    if(slot.querySelector('.download-bar'))return;
+    var dr=msg.downloadReady;
+    var bar=document.createElement('div');bar.className='download-bar';
+    var span=document.createElement('span');
+    span.textContent='\ud83d\udce5 조회 결과 '+parseInt(dr.row_count,10)+'건';
+    var dbtn=document.createElement('button');dbtn.textContent='CSV 다운로드';
+    dbtn.addEventListener('click',function(){App.downloadCSV(dr.session_id);});
+    bar.appendChild(span);bar.appendChild(dbtn);
+    slot.appendChild(bar);
+  }
+  function showBanner(type,text){
+    hideWel();
+    var el=document.createElement('div');el.className='status-banner '+type;el.textContent=text;
+    chat().appendChild(el);autoScroll();
+    setTimeout(function(){el.remove();},5000);
+  }
+  function attachCodeCopy(container){
+    container.querySelectorAll('pre').forEach(function(pre){
+      if(pre.closest('.code-wrap'))return;
+      var w=document.createElement('div');w.className='code-wrap';
+      pre.parentNode.insertBefore(w,pre);w.appendChild(pre);
+      var b=document.createElement('button');b.className='code-copy';b.textContent='복사';
+      b.onclick=function(){
+        var code=pre.querySelector('code')?pre.querySelector('code').innerText:pre.innerText;
+        navigator.clipboard.writeText(code).then(function(){b.textContent='✓ 복사됨';setTimeout(function(){b.textContent='복사';},2000);});
+      };
+      w.appendChild(b);
+    });
+  }
+  return{ensureDOM:ensureDOM,render:render,showBanner:showBanner,hideWel:hideWel,showWel:showWel,clearChat:clearChat};
+})();
+
+/* ═══════════════════════════════════════
+   4. SE — Stream Engine
+   ═══════════════════════════════════════ */
+var SE=(function(){
+  var _a=new Map();
+  function streamText(id,full,opts){
+    opts=opts||{};cancel(id);
+    var st={cancelled:false};_a.set(id,st);
+    var cs=opts.chunkSize||3,iv=opts.interval||20;
+    return new Promise(function(res){
+      var p=0,msg=MS.get(id);
+      if(!msg){res();return;}
+      msg.text='';msg.status='streaming';
+      (function tick(){
+        if(st.cancelled||p>=full.length){
+          msg.text=st.cancelled?msg.text:full;msg.status='done';
+          RD.render(msg);_a.delete(id);res();return;
         }
+        p+=cs;msg.text=full.slice(0,p);RD.render(msg);setTimeout(tick,iv);
+      })();
+    });
+  }
+  function appendChunk(id,ch){var m=MS.get(id);if(!m)return;m.text+=ch;m.status='streaming';RD.render(m);}
+  function finalize(id){var m=MS.get(id);if(!m)return;m.status='done';m.showThinking=false;RD.render(m);}
+  function cancel(id){var s=_a.get(id);if(s)s.cancelled=true;}
+  function cancelAll(){_a.forEach(function(s){s.cancelled=true;});}
+  return{streamText:streamText,appendChunk:appendChunk,finalize:finalize,cancel:cancel,cancelAll:cancelAll};
+})();
 
-        function sanitizeSVG(svgCode) {
-            // SVG 보안 새니타이징: XSS 벡터 제거
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(svgCode, 'image/svg+xml');
-            const svg = doc.querySelector('svg');
-            if (!svg) return '';
+/* ═══════════════════════════════════════
+   5. ED — Event Dispatcher
+   ═══════════════════════════════════════ */
+var ED=(function(){
+  var _cur=null,_last=null,_bt=null;
+  function _cbt(){if(_bt){clearTimeout(_bt);_bt=null;}}
+  function _sbt(){_cbt();_bt=setTimeout(function(){if(!_cur)return;RD.showBanner('error','서버 응답이 지연되고 있습니다.');_ffc();IC2.setBusy(false);},30000);}
+  function _ffc(){
+    if(!_cur)return;
+    var p=MS.get(_cur);
+    if(p){SE.cancel(_cur);p.status='done';p.showThinking=false;
+      if(p.progress.length){p.progress.forEach(function(s){s.status='done';});
+        p.progressCollapsed=true;p.progressElapsed=p.progressStartTime?(Date.now()-p.progressStartTime)/1000:null;}
+      RD.render(p);
+    }_cur=null;
+  }
+  function handle(data){
+    _cbt();
+    switch(data.type){
+      case 'response':return handleLegacy(data);
+      case 'stream':return handleStream(data);
+      case 'progress':return handleProgress(data);
+      case 'viz':return handleViz(data);
+      case 'download_ready':return handleDownloadReady(data);
+      case 'status':return RD.showBanner('status',data.message||'');
+      case 'error':return handleError(data);
+      default:if(data.message)return handleLegacy(data);
+    }
+  }
+  async function handleLegacy(data){
+    _ffc();
+    var msg=MS.create('assistant','',{status:'streaming',showThinking:true,thinkingLabel:'데이터 분석 중'});
+    msg.progressStartTime=Date.now();_cur=msg.id;
+    RD.ensureDOM(msg);RD.render(msg);IC2.setBusy(true);
+    var steps=[{label:'🔍 데이터 조회 중…',delay:500},{label:'🧠 분석 중…',delay:600},{label:'📊 결과 정리 중…',delay:500}];
+    for(var i=0;i<steps.length;i++){
+      await sleep(steps[i].delay);if(_cur!==msg.id)return;
+      var last=msg.progress[msg.progress.length-1];
+      if(last&&last.status==='active')last.status='done';
+      msg.progress.push({label:steps[i].label,status:'active'});RD.render(msg);
+    }
+    await sleep(250);if(_cur!==msg.id)return;
+    msg.progress.forEach(function(s){s.status='done';});msg.showThinking=false;RD.render(msg);
+    await SE.streamText(msg.id,data.message||'');
+    if(_cur!==msg.id)return;
+    msg.progressElapsed=(Date.now()-msg.progressStartTime)/1000;msg.progressCollapsed=true;RD.render(msg);
+    if(data.visualization){msg.visualization=data.visualization;RD.render(msg);}
+    if(data.insight){msg.insight=data.insight;RD.render(msg);}
+    SB.saveCurrentMessage('assistant',data.message||'');
+    _last=_cur;_cur=null;_cbt();IC2.setBusy(false);
+  }
+  function handleStream(data){
+    if(data.action==='start'){
+      /* 이미 progress로 생성된 메시지가 있으면 재사용 */
+      if(_cur){
+        var existing=MS.get(_cur);
+        if(existing){existing.thinkingLabel=data.label||'답변 작성 중';RD.render(existing);}
+      }else{
+        var msg=MS.create('assistant','',{status:'streaming',showThinking:true,thinkingLabel:data.label||'답변 작성 중'});
+        msg.progressStartTime=Date.now();_cur=msg.id;RD.ensureDOM(msg);RD.render(msg);IC2.setBusy(true);
+      }
+      return;
+    }
+    if(data.action==='chunk'&&_cur){
+      var m=MS.get(_cur);
+      if(m&&m.showThinking){
+        m.showThinking=false;
+        /* progress가 없으면 완료 표시 추가 */
+        if(m.progress.length){m.progress.forEach(function(s){s.status='done';});m.progressCollapsed=true;}
+        RD.render(m);
+      }
+      SE.appendChunk(_cur,data.text||'');return;
+    }
+    if(data.action==='end'&&_cur){
+      var m2=MS.get(_cur);
+      if(m2){SE.finalize(_cur);
+        if(m2.progress.length){m2.progressElapsed=(Date.now()-(m2.progressStartTime||Date.now()))/1000;m2.progressCollapsed=true;RD.render(m2);}
+        if(data.insight){m2.insight=data.insight;RD.render(m2);}
+        SB.saveCurrentMessage('assistant',m2.text);
+      }
+      _last=_cur;_cur=null;_cbt();IC2.setBusy(false);
+    }
+  }
+  function handleProgress(data){
+    /* progress가 stream:start보다 먼저 오면 메시지를 자동 생성 */
+    if(!_cur){
+      var msg=MS.create('assistant','',{status:'streaming',showThinking:true,thinkingLabel:data.thinkingLabel||'처리 중…'});
+      msg.progressStartTime=Date.now();_cur=msg.id;
+      RD.ensureDOM(msg);RD.render(msg);IC2.setBusy(true);
+    }
+    var msg=MS.get(_cur);if(!msg)return;
+    if(data.action==='add'){var last=msg.progress[msg.progress.length-1];if(last&&last.status==='active')last.status='done';msg.progress.push({label:data.label,status:'active'});}
+    else if(data.action==='done'){var l=msg.progress[msg.progress.length-1];if(l)l.status='done';}
+    else if(data.action==='set'){msg.progress=(data.steps||[]).map(function(s){return{label:s.label,status:s.status||'active'};});}
+    if(data.thinkingLabel!==undefined){msg.thinkingLabel=data.thinkingLabel;msg.showThinking=true;}
+    RD.render(msg);
+  }
+  function handleViz(data){
+    var id=data.messageId||_cur;if(!id)return;
+    var msg=MS.get(id);if(!msg)return;
+    msg.visualization=msg.visualization||{};
+    if(data.title)msg.visualization.title=data.title;
+    if(data.code)msg.visualization.code=data.code;
+    RD.render(msg);
+  }
+  function handleError(data){
+    RD.showBanner('error',data.message||'오류가 발생했습니다.');
+    _ffc();_cbt();IC2.setBusy(false);
+  }
+  function handleDownloadReady(data){
+    var id=_cur||_last;
+    if(!id)return;
+    var msg=MS.get(id);
+    if(!msg)return;
+    msg.downloadReady={session_id:data.session_id,row_count:data.row_count||0,formats:data.formats||['csv']};
+    RD.render(msg);
+  }
+  function getCurrentId(){return _cur;}
+  function startBusyTimer(){_sbt();}
+  return{handle:handle,getCurrentId:getCurrentId,startBusyTimer:startBusyTimer};
+})();
 
-            // 위험 요소 제거
-            const dangerous = svg.querySelectorAll(
-                'script, foreignObject, iframe, embed, object'
-            );
-            dangerous.forEach(el => el.remove());
+/* ═══════════════════════════════════════
+   6. IC2 — Input Controller
+   ═══════════════════════════════════════ */
+var IC2=(function(){
+  function setBusy(b){
+    var inp=document.getElementById('messageInput'),
+        btn=document.getElementById('sendBtn');
+    inp.disabled=b;
+    if(b){
+      btn.disabled=false;btn.classList.add('cancel');
+      btn.innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
+    }else{
+      btn.classList.remove('cancel');
+      btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+      btn.disabled=!inp.value.trim();
+      inp.focus();
+    }
+  }
+  return{setBusy:setBusy};
+})();
 
-            // 모든 요소에서 이벤트 핸들러 속성 제거
-            const allElements = svg.querySelectorAll('*');
-            allElements.forEach(el => {
-                const attrs = Array.from(el.attributes);
-                attrs.forEach(attr => {
-                    const name = attr.name.toLowerCase();
-                    if (name.startsWith('on') ||
-                        attr.value.includes('javascript:')) {
-                        el.removeAttribute(attr.name);
-                    }
-                });
-                // xlink:href에 javascript: 차단
-                const href = el.getAttribute('href') ||
-                             el.getAttribute('xlink:href');
-                if (href && href.trim().toLowerCase()
-                        .startsWith('javascript:')) {
-                    el.removeAttribute('href');
-                    el.removeAttribute('xlink:href');
-                }
-            });
+/* ═══════════════════════════════════════
+   7. CN — WebSocket Connection
+   ═══════════════════════════════════════ */
+var CN=(function(){
+  var sid='session-'+Date.now(),ws=null,att=0;
+  function url(){return(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/'+sid;}
+  function connect(){
+    setStatus('connecting');
+    ws=new WebSocket(url());
+    ws.onopen=function(){att=0;setStatus('connected');};
+    ws.onmessage=function(e){try{ED.handle(JSON.parse(e.data));}catch(err){console.error(err);}};
+    ws.onclose=function(){setStatus('disconnected');if(att<5){setTimeout(connect,1000*Math.pow(2,att));att++;}else{RD.showBanner('error','서버 연결이 끊어졌습니다. 페이지를 새로고침해 주세요.');}};
+    ws.onerror=function(err){console.error('[WS]',err);};
+  }
+  function send(t){if(ws&&ws.readyState===1){ws.send(t);return true;}return false;}
+  function reconnect(){if(ws)ws.close();sid='session-'+Date.now();att=0;connect();}
+  function setStatus(s){
+    var d=document.getElementById('statusDot'),l=document.getElementById('statusLabel');
+    d.className='status-dot';
+    if(s==='connected'){d.classList.add('connected');l.textContent='연결됨';}
+    else if(s==='connecting'){d.classList.add('connecting');l.textContent='연결 중…';}
+    else{l.textContent='연결 끊김';}
+  }
+  return{connect:connect,send:send,reconnect:reconnect};
+})();
 
-            return svg.outerHTML;
-        }
+/* ═══════════════════════════════════════
+   8. CM — Command Manager (/ 자동완성)
+   ═══════════════════════════════════════ */
+var CM=(function(){
+  var CMDS=[
+    {name:'/reset',desc:'대화 초기화 — 현재 대화를 모두 지웁니다',icon:'↺'},
+    {name:'/history',desc:'대화 기록 — 이번 세션의 대화 요약을 표시합니다',icon:'⏱'}
+  ];
+  var _popup=null,_idx=0,_flt=[];
+  function inp(){return document.getElementById('messageInput');}
+  function wrap(){return document.getElementById('inputWrapper');}
+  function init(){
+    inp().addEventListener('input',_onInput);
+    inp().addEventListener('keydown',_onKey);
+    document.addEventListener('click',function(e){if(_popup&&!wrap().contains(e.target))_hide();});
+  }
+  function _onInput(){
+    var v=inp().value;
+    if(!v.startsWith('/')||v.includes(' ')){_hide();return;}
+    var q=v.toLowerCase();
+    _flt=CMDS.filter(function(c){return c.name.startsWith(q)&&c.name!==q;});
+    if(v==='/'){_flt=CMDS.slice();}
+    if(_flt.length===0){_hide();return;}
+    _idx=0;_show();
+  }
+  function _onKey(e){
+    if(!_popup){
+      if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();App.sendMessage();}
+      return;
+    }
+    if(e.key==='Tab'||e.key==='Enter'){e.preventDefault();_select();return;}
+    if(e.key==='ArrowDown'){e.preventDefault();_idx=(_idx+1)%_flt.length;_renderItems();return;}
+    if(e.key==='ArrowUp'){e.preventDefault();_idx=(_idx-1+_flt.length)%_flt.length;_renderItems();return;}
+    if(e.key==='Escape'){_hide();}
+  }
+  function _select(){var cmd=_flt[_idx];if(!cmd)return;inp().value=cmd.name;_hide();inp().focus();}
+  function _show(){if(!_popup){_popup=document.createElement('div');_popup.className='cmd-popup';wrap().appendChild(_popup);}_renderItems();}
+  function _renderItems(){
+    if(!_popup)return;
+    _popup.innerHTML=_flt.map(function(c,i){
+      return '<div class="cmd-item'+(i===_idx?' active':'')+'" data-idx="'+i+'"><div class="cmd-item-icon">'+c.icon+'</div><div class="cmd-item-text"><div class="cmd-item-name">'+esc(c.name)+'</div><div class="cmd-item-desc">'+esc(c.desc)+'</div></div><span class="cmd-item-key">Tab</span></div>';
+    }).join('');
+    _popup.querySelectorAll('.cmd-item').forEach(function(el){
+      el.addEventListener('mouseenter',function(){_idx=parseInt(el.dataset.idx);_renderItems();});
+      el.addEventListener('click',function(){_idx=parseInt(el.dataset.idx);_select();});
+    });
+  }
+  function _hide(){if(_popup){_popup.remove();_popup=null;}}
+  function tryExec(text){
+    var cmd=text.trim().toLowerCase();
+    if(cmd==='/reset'){_execReset();return true;}
+    if(cmd==='/history'){_execHistory();return true;}
+    return false;
+  }
+  function _execReset(){
+    SE.cancelAll();MS.clear();RD.clearChat();IC2.setBusy(false);
+    CN.send('/reset');
+    RD.showBanner('status','대화가 초기화되었습니다.');
+    SB.onReset();
+  }
+  function _execHistory(){
+    RD.hideWel();
+    var hist=MS.getSummary();
+    if(hist.length===0){var stored=MS.loadPersisted();
+      if(stored.length===0){RD.render(MS.create('system','대화 기록이 없습니다.'));return;}
+      _renderHL(stored);return;
+    }
+    _renderHL(hist);
+  }
+  function _renderHL(list){
+    var lines=list.map(function(m){var t=new Date(m.time);var ts=String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+      var who=m.role==='user'?'🧑':'🤖';return '['+ts+'] '+who+' '+m.text;});
+    RD.render(MS.create('system','── 대화 기록 ('+list.length+'건) ──\n'+lines.join('\n')));
+  }
+  return{init:init,tryExec:tryExec};
+})();
 
-        function downloadSVG(btn) {
-            const container = btn.closest('.viz-container');
-            const svg = container.querySelector('svg');
-            if (!svg) return;
-            const blob = new Blob(
-                [svg.outerHTML],
-                { type: 'image/svg+xml' }
-            );
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'chart.svg';
-            a.click();
-            URL.revokeObjectURL(url);
-        }
+/* ═══════════════════════════════════════
+   9. SB — Sidebar Manager
+   ═══════════════════════════════════════ */
+var SB=(function(){
+  var K='dc-sessions',_sessions=[],_active=null;
+  function init(){
+    try{_sessions=JSON.parse(localStorage.getItem(K)||'[]');}catch(e){_sessions=[];}
+    renderList();
+  }
+  function newSession(){
+    var s={id:'s-'+Date.now(),title:'새 대화',msgs:[],ts:Date.now()};
+    _sessions.unshift(s);_active=s.id;_save();renderList();return s;
+  }
+  function ensureSession(){if(!_active)newSession();}
+  function updateTitle(text){
+    if(!_active)return;
+    var s=_find(_active);
+    if(s&&s.title==='새 대화'&&text){s.title=text.slice(0,30)+(text.length>30?'…':'');_save();renderList();}
+  }
+  function saveCurrentMessage(role,text){
+    if(!_active)return;var s=_find(_active);
+    if(s){s.msgs.push({role:role,text:text.length>200?text.slice(0,200)+'…':text,time:Date.now()});_save();}
+  }
+  function loadSession(id){
+    var s=_find(id);if(!s)return;
+    _active=s.id;renderList();
+    SE.cancelAll();MS.clear();
+    RD.clearChat();RD.hideWel();
+    if(!s.msgs.length){RD.showWel();return;}
+    s.msgs.forEach(function(m){RD.render(MS.create(m.role,m.text));});
+  }
+  function onReset(){
+    _active=null;renderList();
+  }
+  function onNewChat(){
+    SE.cancelAll();MS.clear();RD.clearChat();IC2.setBusy(false);
+    _active=null;renderList();
+    CN.reconnect();
+  }
+  function renderList(){
+    var el=document.getElementById('chatList');
+    if(!_sessions.length){el.innerHTML='<div style="padding:9px;font-size:12.5px;color:var(--txt3)">대화 기록 없음</div>';return;}
+    el.innerHTML=_sessions.map(function(s){
+      return '<button class="chat-item'+(s.id===_active?' active':'')+'" data-id="'+s.id+'">'
+        +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
+        +esc(s.title)+'</button>';
+    }).join('');
+    el.querySelectorAll('.chat-item').forEach(function(b){
+      b.addEventListener('click',function(){loadSession(b.dataset.id);});
+    });
+  }
+  function _find(id){return _sessions.find(function(x){return x.id===id;});}
+  function _save(){try{localStorage.setItem(K,JSON.stringify(_sessions.slice(0,20)));}catch(e){}}
+  return{init:init,newSession:newSession,ensureSession:ensureSession,updateTitle:updateTitle,
+    saveCurrentMessage:saveCurrentMessage,onReset:onReset,onNewChat:onNewChat,renderList:renderList};
+})();
 
-        function addMessage(type, content, visualization) {
-            const container = document.getElementById('chatContainer');
-            const welcome = container.querySelector('.welcome');
-            if (welcome) welcome.remove();
+/* ═══════════════════════════════════════
+   Utils
+   ═══════════════════════════════════════ */
+function sanitizeSVG(code){
+  var doc=new DOMParser().parseFromString(code,'image/svg+xml');
+  var svg=doc.querySelector('svg');if(!svg)return '';
+  svg.querySelectorAll('script,foreignObject,iframe,embed,object').forEach(function(e){e.remove();});
+  svg.querySelectorAll('*').forEach(function(el){
+    Array.from(el.attributes).forEach(function(a){
+      if(a.name.toLowerCase().startsWith('on')||a.value.includes('javascript:'))el.removeAttribute(a.name);
+    });
+    ['href','xlink:href'].forEach(function(attr){var v=el.getAttribute(attr);if(v&&v.trim().toLowerCase().startsWith('javascript:'))el.removeAttribute(attr);});
+  });
+  return svg.outerHTML;
+}
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+function autoScroll(){var c=document.getElementById('chatWrap');if(c.scrollHeight-c.scrollTop-c.clientHeight<160)c.scrollTop=c.scrollHeight;}
+function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},1800);}
+function mdRender(text){
+  if(!text)return '';
+  try{
+    var html=marked.parse(text);
+    /* XSS 방어: script, iframe, on* 이벤트 핸들러 제거 */
+    var doc=new DOMParser().parseFromString(html,'text/html');
+    doc.querySelectorAll('script,iframe,embed,object,style').forEach(function(e){e.remove();});
+    doc.querySelectorAll('*').forEach(function(el){
+      Array.from(el.attributes).forEach(function(a){
+        if(a.name.toLowerCase().startsWith('on')||a.value.toLowerCase().includes('javascript:'))el.removeAttribute(a.name);
+      });
+    });
+    return doc.body.innerHTML;
+  }catch(e){return esc(text);}
+}
+function resizeTA(){var ta=document.getElementById('messageInput');ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,200)+'px';}
+function _svgToPNG(svgEl,cb){
+  var canvas=document.createElement('canvas');
+  var rect=svgEl.getBoundingClientRect();
+  var scale=2;
+  canvas.width=rect.width*scale;canvas.height=rect.height*scale;
+  var ctx=canvas.getContext('2d');ctx.scale(scale,scale);
+  var img=new Image();
+  var svgData=new XMLSerializer().serializeToString(svgEl);
+  img.onload=function(){
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img,0,0);cb(canvas.toDataURL('image/png'));
+  };
+  img.onerror=function(){toast('이미지 변환 실패');};
+  img.src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svgData)));
+}
 
-            const msg = document.createElement('div');
-            msg.className = `message ${type}`;
-            msg.textContent = content;
-            container.appendChild(msg);
+/* ═══════════════════════════════════════
+   App — Public API
+   ═══════════════════════════════════════ */
+window.App={
+  sendMessage:function(){
+    var inp=document.getElementById('messageInput');
+    var t=inp.value.trim();if(!t)return;
+    if(CM.tryExec(t)){inp.value='';resizeTA();return;}
+    SB.ensureSession();
+    RD.render(MS.create('user',t));
+    SB.updateTitle(t);
+    SB.saveCurrentMessage('user',t);
+    inp.value='';resizeTA();
+    document.getElementById('sendBtn').disabled=true;
+    if(!CN.send(t)){RD.showBanner('error','서버에 연결되어 있지 않습니다.');return;}
+    IC2.setBusy(true);ED.startBusyTimer();
+  },
+  sendExample:function(btn){
+    var strong=btn.querySelector('strong');
+    var text=strong?btn.textContent.replace(strong.textContent,'').trim():btn.textContent.trim();
+    document.getElementById('messageInput').value=text;
+    this.sendMessage();
+  },
+  cancelStream:function(){
+    SE.cancelAll();
+    var id=ED.getCurrentId();
+    if(id){MS.update(id,{status:'done',showThinking:false,progressCollapsed:true});
+      var m=MS.get(id);if(m){m.progressElapsed=m.progressStartTime?(Date.now()-m.progressStartTime)/1000:null;RD.render(m);}
+    }
+    IC2.setBusy(false);
+  },
+  regen:function(){
+    var msgs=MS.allMessages();
+    var lastUser=null;
+    for(var i=msgs.length-1;i>=0;i--){if(msgs[i].role==='user'){lastUser=msgs[i];break;}}
+    if(!lastUser)return;
+    CN.send(lastUser.text);IC2.setBusy(true);ED.startBusyTimer();
+  },
+  downloadSVG:function(btn){
+    var svg=btn.closest('.viz-container');svg=svg?svg.querySelector('svg'):null;if(!svg)return;
+    var b=new Blob([svg.outerHTML],{type:'image/svg+xml'});var u=URL.createObjectURL(b);
+    var a=document.createElement('a');a.href=u;a.download='data-copilot-chart.svg';a.click();URL.revokeObjectURL(u);
+  },
+  downloadPNG:function(btn){
+    var svgEl=btn.closest('.viz-container');svgEl=svgEl?svgEl.querySelector('svg'):null;
+    if(!svgEl)return;
+    _svgToPNG(svgEl,function(dataUrl){
+      var a=document.createElement('a');a.download='data-copilot-chart.png';a.href=dataUrl;a.click();
+    });
+  },
+  expandChart:function(btn){
+    var svgEl=btn.closest('.viz-container');svgEl=svgEl?svgEl.querySelector('svg'):null;
+    if(!svgEl)return;
+    var modal=document.createElement('div');modal.className='chart-modal';
+    var inner=document.createElement('div');inner.className='chart-modal-inner';
+    var closeBtn=document.createElement('button');closeBtn.className='chart-modal-close';
+    closeBtn.textContent='\u00d7';
+    closeBtn.addEventListener('click',function(){modal.remove();});
+    var body=document.createElement('div');body.className='chart-modal-body';
+    body.appendChild(svgEl.cloneNode(true));
+    inner.appendChild(closeBtn);inner.appendChild(body);modal.appendChild(inner);
+    modal.addEventListener('click',function(e){if(e.target===modal)modal.remove();});
+    document.body.appendChild(modal);
+  },
+  copyChart:function(btn){
+    var svgEl=btn.closest('.viz-container');svgEl=svgEl?svgEl.querySelector('svg'):null;
+    if(!svgEl)return;
+    _svgToPNG(svgEl,function(dataUrl){
+      fetch(dataUrl).then(function(r){return r.blob();}).then(function(blob){
+        navigator.clipboard.write([new ClipboardItem({'image/png':blob})]).then(function(){toast('차트가 복사되었습니다');}).catch(function(){toast('복사 실패');});
+      });
+    });
+  },
+  downloadCSV:function(sessionId){
+    fetch('/api/download',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:sessionId,format:'csv'})
+    }).then(function(r){
+      if(!r.ok)throw new Error('다운로드 실패');
+      return r.blob();
+    }).then(function(blob){
+      var u=URL.createObjectURL(blob);
+      var a=document.createElement('a');a.href=u;a.download='data-copilot-export.csv';a.click();
+      URL.revokeObjectURL(u);
+      toast('다운로드 완료');
+    }).catch(function(err){toast('다운로드 실패: '+err.message);});
+  }
+};
 
-            // 시각화가 있으면 차트 렌더링
-            if (visualization && visualization.code) {
-                const vizDiv = document.createElement('div');
-                vizDiv.className = 'viz-container';
+/* ═══════════════════════════════════════
+   Init
+   ═══════════════════════════════════════ */
+(function init(){
+  /* Marked + Highlight.js 설정 (CDN 미로드 시에도 나머지 기능이 동작하도록 격리) */
+  try{
+    if(typeof hljs!=='undefined'){
+      hljs.configure({languages:['python','sql','javascript','bash','json']});
+    }
+    if(typeof marked!=='undefined'){
+      marked.setOptions({
+        highlight:function(code,lang){
+          if(typeof hljs==='undefined')return code;
+          if(lang&&hljs.getLanguage(lang))return hljs.highlight(code,{language:lang}).value;
+          return hljs.highlightAuto(code).value;
+        },
+        breaks:true,gfm:true
+      });
+    }
+  }catch(e){console.warn('marked/hljs 설정 실패:',e);}
 
-                if (visualization.title) {
-                    const titleDiv = document.createElement('div');
-                    titleDiv.className = 'viz-title';
-                    titleDiv.textContent = visualization.title;
-                    vizDiv.appendChild(titleDiv);
-                }
+  /* 모듈 초기화 */
+  TM.init();
+  SB.init();
+  CM.init();
+  CN.connect();
 
-                const svgWrapper = document.createElement('div');
-                svgWrapper.innerHTML = sanitizeSVG(visualization.code);
-                vizDiv.appendChild(svgWrapper);
+  /* 이벤트 바인딩 */
+  var inp=document.getElementById('messageInput'),
+      btn=document.getElementById('sendBtn');
 
-                // 다운로드 버튼
-                const actions = document.createElement('div');
-                actions.className = 'viz-actions';
-                actions.innerHTML =
-                    '<button onclick="downloadSVG(this)">SVG 다운로드</button>';
-                vizDiv.appendChild(actions);
+  inp.addEventListener('input',function(){resizeTA();btn.disabled=!inp.value.trim()||btn.classList.contains('cancel');});
+  /* textarea Enter=전송, Shift+Enter=개행 (CM.init의 keydown과 별도로 직접 바인딩) */
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();App.sendMessage();}
+  });
+  btn.addEventListener('click',function(){btn.classList.contains('cancel')?App.cancelStream():App.sendMessage();});
+  document.getElementById('newBtn').addEventListener('click',function(){SB.onNewChat();});
+  document.getElementById('clearBtn').addEventListener('click',function(){SB.onNewChat();});
+  document.getElementById('togSbBtn').addEventListener('click',function(){document.getElementById('sidebar').classList.add('collapsed');});
+  document.getElementById('togSbOpen').addEventListener('click',function(){document.getElementById('sidebar').classList.remove('collapsed');});
+  document.getElementById('themeBtn').addEventListener('click',function(){TM.toggle();});
 
-                container.appendChild(vizDiv);
-            }
+  /* 설정 모달 */
+  document.getElementById('openSetBtn').addEventListener('click',function(){
+    document.getElementById('setTheme').value=TM.get();
+    try{document.getElementById('setFontSize').value=localStorage.getItem('dc-fontsize')||'14';}catch(e){}
+    document.getElementById('setModal').classList.add('open');
+  });
+  document.getElementById('cancelSetBtn').addEventListener('click',function(){document.getElementById('setModal').classList.remove('open');});
+  document.getElementById('saveSetBtn').addEventListener('click',function(){
+    TM.set(document.getElementById('setTheme').value);
+    var fs=document.getElementById('setFontSize').value;
+    document.documentElement.style.fontSize=fs+'px';
+    try{localStorage.setItem('dc-fontsize',fs);}catch(e){}
+    document.getElementById('setModal').classList.remove('open');
+    toast('설정 저장됨');
+  });
+  document.getElementById('setModal').addEventListener('click',function(e){if(e.target.id==='setModal')document.getElementById('setModal').classList.remove('open');});
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){
+      var modal=document.getElementById('setModal');
+      if(modal.classList.contains('open')){modal.classList.remove('open');return;}
+      var chartModal=document.querySelector('.chart-modal');
+      if(chartModal)chartModal.remove();
+    }
+  });
 
-            container.scrollTop = container.scrollHeight;
-        }
+  /* 저장된 폰트 크기 적용 */
+  try{var fs=localStorage.getItem('dc-fontsize');if(fs)document.documentElement.style.fontSize=fs+'px';}catch(e){}
+})();
 
-        function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const text = input.value.trim();
-            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-
-            addMessage('user', text);
-            ws.send(text);
-            input.value = '';
-            document.getElementById('sendBtn').disabled = true;
-            document.getElementById('messageInput').disabled = true;
-        }
-
-        function sendExample(btn) {
-            document.getElementById('messageInput').value =
-                btn.textContent.trim();
-            sendMessage();
-        }
-
-        connectWebSocket();
-    </script>
+})();
+</script>
 </body>
 </html>

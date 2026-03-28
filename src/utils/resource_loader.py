@@ -126,7 +126,8 @@ def load_es_query(name: str, query: str) -> dict[str, Any]:
     _comment 키는 제거한다.
 
     Args:
-        name: resources/ 하위 상대 경로 (예: "elasticsearch/table_meta_query.json")
+        name: resources/ 하위 상대 경로
+            (예: "connectors/elasticsearch/table_meta_query.json")
         query: 검색어 (템플릿의 {query}를 치환)
     """
     raw = load_text_required(name)
@@ -134,6 +135,48 @@ def load_es_query(name: str, query: str) -> dict[str, Any]:
     data = json.loads(replaced)
     data.pop("_comment", None)
     return data
+
+
+# ── MongoDB 파이프라인 ──
+
+def load_mongo_pipeline(name: str) -> dict[str, Any]:
+    """MongoDB aggregation pipeline 템플릿을 로드한다.
+
+    _comment, _note 키는 제거한다.
+    ${변수} 플레이스홀더는 호출 시점에 치환이 필요하다.
+
+    Args:
+        name: resources/ 하위 상대 경로
+            (예: "connectors/mongo/pipeline_table_meta.json")
+    """
+    raw = load_text_required(name)
+    data = json.loads(raw)
+    data.pop("_comment", None)
+    data.pop("_note", None)
+    return data
+
+
+# ── Neo4j Cypher ──
+
+def load_cypher(name: str, **replacements: str) -> str:
+    """Cypher 쿼리 파일을 로드하고 플레이스홀더를 치환한다.
+
+    // 주석 행은 제거한다. {key} 형식의 플레이스홀더를 치환한다.
+
+    Args:
+        name: resources/ 하위 상대 경로
+            (예: "connectors/neo4j/cypher_join_paths.cypher")
+        **replacements: 플레이스홀더 치환 (예: max_hops="4")
+    """
+    raw = load_text_required(name)
+    lines = [
+        line for line in raw.splitlines()
+        if not line.lstrip().startswith("//")
+    ]
+    cypher = "\n".join(lines).strip()
+    for key, value in replacements.items():
+        cypher = cypher.replace(f"{{{key}}}", str(value))
+    return cypher
 
 
 # ── YAML ──

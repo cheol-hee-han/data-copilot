@@ -32,6 +32,7 @@ from src.agents.models.normalization import VALID_QUERY_CATEGORIES
 from src.config import settings
 from src.models.enums import IntentType
 from src.utils.llm import ParseError, get_llm_client, llm_call_with_parse_retry
+from src.utils.tracker import record_prompt_variables
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -76,6 +77,8 @@ async def classify_with_gate(
             messages=[{"role": "user", "content": user_prompt}],
         )
 
+        record_prompt_variables({"query": query})
+
         if not response.content:
             raise ValueError("Intent Gate 응답이 비어있습니다")
 
@@ -110,21 +113,18 @@ async def classify_legacy(
     query: str,
     *,
     system_prompt: str,
-    format_hint: str,
 ) -> IntentResult:
     """기존 의도 분류 로직 (정규화 비활성화 시 사용).
 
     Args:
         query: 전처리된 사용자 입력.
         system_prompt: 의도 분류 시스템 프롬프트.
-        format_hint: 포맷 교정 힌트.
     """
     try:
         _, (intent, confidence) = await llm_call_with_parse_retry(
             system=system_prompt,
             messages=[{"role": "user", "content": query}],
             parse_fn=_parse_intent_response,
-            format_hint=format_hint,
             max_tokens=50,
             timeout=settings.llm_default_timeout,
             node_name="의도분류",

@@ -1,0 +1,95 @@
+생성된 SQL이 사용자의 질의 의도를 정확하게 반영하는지 검증하세요.
+
+## 용어 정의
+
+- 지식 항목(knowledge item): 탐색에서 확인한 용어-DB 표현 매핑. CONFIRMED 상태만 SQL에 사용되어야 함.
+
+## 사용자 질의
+
+{original_query}
+
+## 질의 분해
+
+- measure (측정값): {measures}
+- filters (조건): {filters}
+- group_by (그룹): {group_by}
+- order_limit (정렬/제한): {order_limit}
+
+## 생성된 SQL
+
+```sql
+{generated_sql}
+```
+
+## 확인된 지식 항목 (CONFIRMED)
+
+{confirmed_terms}
+
+## 실패한 접근 방식 (이 패턴이 반복되면 FAIL)
+
+{dead_ends}
+
+## 검증 기준
+
+다음 7개 항목을 각각 판단하세요:
+
+1. **measure 반영**: 사용자가 요청한 측정값이 SQL에 적절한 집계함수로 표현되었는가?
+2. **filter 반영**: 사용자가 언급한 조건이 WHERE 절에 반영되었는가?
+3. **group_by 반영**: 사용자가 요청한 그룹핑 기준이 GROUP BY에 반영되었는가?
+4. **order_limit 반영**: 사용자가 요청한 정렬/제한이 ORDER BY / LIMIT에 반영되었는가?
+5. **미확인 값 사용**: CONFIRMED되지 않은 코드값이나 컬럼명을 사용하지 않았는가?
+6. **dead_end 반복**: 이전에 실패한 접근 패턴(테이블, 조인 방식)을 반복하지 않았는가?
+7. **논리적 정합성**: SQL의 전체 로직이 사용자 질의의 의도와 부합하는가?
+
+## 판단 기준
+
+- 7개 항목 모두 통과 → **PASS**
+- 1~2개 항목 실패이고 SQL 수정으로 해소 가능 → **FAIL_SEMANTIC_LOCAL**
+  (어떤 항목이 실패했고, 어떻게 수정해야 하는지 구체적으로 명시)
+- 테이블 선택 자체가 부적절하거나 접근 방식이 근본적으로 틀림 → **FAIL_STRUCTURAL**
+
+## 출력 형식
+
+```json
+{
+  "verdict": "PASS",
+  "checks": {
+    "measure_reflected": {"pass": true, "detail": ""},
+    "filters_reflected": {"pass": true, "detail": ""},
+    "group_by_reflected": {"pass": true, "detail": ""},
+    "order_limit_reflected": {"pass": true, "detail": ""},
+    "no_unconfirmed_values": {"pass": true, "detail": ""},
+    "no_dead_end_repeat": {"pass": true, "detail": ""},
+    "logical_consistency": {"pass": true, "detail": ""}
+  },
+  "fix_instruction": ""
+}
+```
+
+실패한 항목의 detail에 구체적인 문제를 기술하고,
+fix_instruction에 수정 방법을 명시하세요. PASS면 fix_instruction은 빈 문자열.
+
+## 예시
+
+입력:
+- 질의: "지점별 이번 달 신규 고객 수"
+- 분해: measures=[COUNT], group_by=[지점], time=이번 달
+- SQL: SELECT BRANCH_CD, COUNT(*) FROM TB_CUST_INFO WHERE STATUS_CD = '01' GROUP BY BRANCH_CD
+- 확인된 지식: STATUS_CD '01'=정상, BRANCH_CD=지점코드
+
+출력:
+```json
+{
+  "verdict": "FAIL_SEMANTIC_LOCAL",
+  "checks": {
+    "measure_reflected": {"pass": true, "detail": "COUNT(*) 사용 — 적절"},
+    "filters_reflected": {"pass": false, "detail": "날짜 조건(이번 달)이 WHERE에 없음"},
+    "group_by_reflected": {"pass": true, "detail": "BRANCH_CD로 GROUP BY — 적절"},
+    "order_limit_reflected": {"pass": true, "detail": "특별한 정렬 요청 없음"},
+    "no_unconfirmed_values": {"pass": true, "detail": "STATUS_CD '01'은 CONFIRMED"},
+    "no_dead_end_repeat": {"pass": true, "detail": ""},
+    "logical_consistency": {"pass": false, "detail": "시간 조건 누락으로 전체 기간 집계됨"}
+  },
+  "fix_instruction": "WHERE 절에 REG_DT >= '20260301' AND REG_DT <= '20260331' 날짜 조건을 추가하세요"
+}
+```

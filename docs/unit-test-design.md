@@ -1,7 +1,17 @@
 # NL-to-SQL 파이프라인 단위 테스트 설계서
 
-> 최종 갱신: 2026-03-22
-> 작성 목적: 파이프라인 전 구간의 답변 정확도·품질에 영향을 미치는 13개 핵심 구간에 대한 단위 테스트 전략 및 모듈 설계를 문서화한다.
+> 최종 갱신: 2026-03-25
+> 작성 목적: 파이프라인 전 구간의 답변 정확도·품질에 영향을 미치는 핵심 구간에 대한 단위 테스트 전략 및 모듈 설계를 문서화한다.
+
+> **⚠️ 구조 변경 사항 (2026-03-25)**
+>
+> - 테스트 디렉토리가 `tests/auto/` (CI 자동) + `tests/manual/` (수동)로 재구성됨
+> - 하위에 `unit/`, `e2e/` 구분 적용
+> - 삭제된 모듈: `context_collector`, `context_enricher`, `sql_generator`(노드), `sql_validator`(노드), `search_context_assembler`, `sql_prompt_assembler`, `table_meta_enricher`
+> - 해당 모듈의 테스트(`test_context_collection.py`, `test_sql_generator.py`, `test_table_enricher.py`)도 삭제됨
+> - `conftest.py`가 `tests/conftest.py` (루트)로 이동
+> - 실행 명령: `pytest tests/auto/` (기본), `pytest tests/manual/` (인프라 필요)
+> - 상세: `docs/project-structure.md` 테스트 섹션 참조
 
 ---
 
@@ -36,19 +46,19 @@ Data Copilot은 사용자의 자연어 질의를 SQL로 변환하여 데이터�
 
 | # | 구간 | 소스 파일 | 정확도 영향 | 테스트 모듈 |
 |---|------|-----------|------------|------------|
-| 1 | 입력 전처리 | `src/agents/nodes/preprocessor.py` | HIGH | `test_preprocess_node.py` |
+| 1 | 입력 전처리 | `src/agents/nodes/interpret/preprocessor.py` | HIGH | `test_preprocess_node.py` |
 | 2 | 보안 유틸리티 | `src/utils/security.py` | HIGH | `test_security_utils.py` |
-| 3 | 의도 분류 | `src/agents/nodes/intent_classifier.py` | CRITICAL | `test_classify_intent.py` |
-| 4 | 질의 정규화 | `src/agents/nodes/query_normalizer.py` | CRITICAL | `test_normalize_query.py` |
+| 3 | 의도 분류 | `src/agents/nodes/interpret/intent_classifier.py` | CRITICAL | `test_classify_intent.py` |
+| 4 | 질의 정규화 | `src/agents/nodes/interpret/query_normalizer.py` | CRITICAL | `test_normalize_query.py` |
 | 5 | 검색 쿼리 전략 | `src/services/search_query_builder.py` | HIGH | `test_search_query_builder.py` |
 | 6 | 컨텍스트 수집 | `src/services/search_context_assembler.py` | CRITICAL | `test_context_collection.py` |
 | 7 | 테이블 선택 검증 | `src/services/similar_table_resolver.py` | HIGH | `test_table_selection.py` |
 | 8 | SQL 생성 | `src/agents/nodes/sql_generator.py` | CRITICAL | `test_generate_sql.py` |
 | 9 | SQL 검증 | `src/agents/nodes/sql_validator.py` | CRITICAL | `test_validate_sql.py` |
-| 10 | SQL 실행 | `src/agents/nodes/sql_executor.py` | MEDIUM | `test_execute_sql.py` |
-| 11 | 데이터 분석 | `src/agents/nodes/analyzer.py` | MEDIUM | `test_analyze_data.py` |
-| 12 | 결과 포맷팅 | `src/agents/nodes/formatter.py` | MEDIUM | `test_format_response.py` |
-| 13 | 명확화 질문 | `src/agents/nodes/clarifier.py` | MEDIUM | `test_clarify_node.py` |
+| 10 | SQL 실행 | `src/agents/nodes/present/sql_executor.py` | MEDIUM | `test_execute_sql.py` |
+| 11 | 데이터 분석 | `src/agents/nodes/present/analyzer.py` | MEDIUM | `test_analyze_data.py` |
+| 12 | 결과 포맷팅 | `src/agents/nodes/present/formatter.py` | MEDIUM | `test_format_response.py` |
+| 13 | 명확화 질문 | `src/agents/nodes/interpret/clarifier.py` | MEDIUM | `test_clarify_node.py` |
 
 ---
 

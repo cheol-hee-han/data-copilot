@@ -1,20 +1,17 @@
-"""ElasticSearch 커넥터 — 메타데이터 및 보고서 SQL 검색 게이트웨이.
+"""ElasticSearch 커넥터 — 보고서 SQL 검색 전용 게이트웨이.
 
-3개의 ES 인덱스(table_meta, report_sql, code_meta)에 대한 검색을 통합 제공한다.
-table_meta는 multi_match 전체 필드 검색으로 테이블/컬럼 레이아웃을 조회하고,
-report_sql은 동일한 multi_match 전략으로 기존 보고서 SQL과 요건을 참조하며,
-code_meta는 특정 코드 필드에 대한 match 검색으로 코드값 정의를 반환한다.
-search() 메서드에서 search_type 파라미터로 3가지 검색을 라우팅한다.
-ES 쿼리 body 템플릿은 resources/elasticsearch/*_query.json 에서 로드한다.
+ES 인덱스(report_sql)에 대한 보고서 SQL/요건 검색을 제공한다.
+테이블/컬럼 메타, 코드 메타 검색은 MongoDB로 일원화되었으며,
+ES의 table_meta, code_meta 메서드는 하위 호환용으로 보존한다.
 
 핵심 함수/클래스:
-    - ElasticSearchConnector: SearchConnector 구현체, 3종 인덱스 검색 통합 관리
-    - search_table_meta: 테이블/컬럼 메타정보 검색 (multi_match)
-    - search_report_sql: 보고서 SQL 및 요건 검색 (multi_match)
-    - search_code_meta: 코드값 정의 검색 (match)
+    - ElasticSearchConnector: SearchConnector 구현체
+    - search_report_sql: 보고서 SQL 및 요건 검색 (multi_match) — 주 용도
+    - search_table_meta: (하위 호환용 보존, 파이프라인에서 미사용)
+    - search_code_meta: (하위 호환용 보존, 파이프라인에서 미사용)
 
 Dummy 모드: use_dummy=True(기본값)일 때 ES 연결 없이 dummy_data 모듈의
-샘플 데이터(은행 도메인 테이블 6종, 보고서 3종, 코드 7종)를 키워드 매칭으로 반환한다.
+샘플 데이터를 키워드 매칭으로 반환한다.
 폐쇄망 배포 시 ES 호스트/포트/인증 정보를 settings에서 전환하면 실제 연결로 동작한다.
 """
 
@@ -103,7 +100,7 @@ class ElasticSearchConnector(SearchConnector):
         from src.utils.resource_loader import load_es_query
 
         body = load_es_query(
-            "elasticsearch/table_meta_query.json",
+            "connectors/elasticsearch/table_meta_query.json",
             query,
         )
         body["size"] = settings.es_table_meta_size
@@ -140,7 +137,7 @@ class ElasticSearchConnector(SearchConnector):
         from src.utils.resource_loader import load_es_query
 
         body = load_es_query(
-            "elasticsearch/report_sql_query.json",
+            "connectors/elasticsearch/report_sql_query.json",
             query,
         )
         body["size"] = settings.es_report_sql_size
@@ -177,7 +174,7 @@ class ElasticSearchConnector(SearchConnector):
         from src.utils.resource_loader import load_es_query
 
         body = load_es_query(
-            "elasticsearch/code_meta_query.json",
+            "connectors/elasticsearch/code_meta_query.json",
             query,
         )
         body["size"] = settings.es_code_meta_size

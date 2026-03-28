@@ -1,0 +1,124 @@
+# 로컬 개발/테스트용 인프라 (폐쇄망 동일 구성)
+# 사용법: docker compose -f standalone/docker/docker-compose.dev.yml up -d
+
+services:
+  # ── PostgreSQL (정보계 DB + SQL 이력 DB) ──
+  postgres:
+    image: postgres:16-alpine
+    container_name: dc-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_INITDB_ARGS: "--auth-host=trust"
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./scripts/init_postgres.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./scripts:/scripts:ro
+      - ./docs:/docs:ro
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── ElasticSearch (테이블 메타 + 보고서 SQL + 코드 메타) ──
+  elasticsearch:
+    build:
+      context: ./elasticsearch
+      dockerfile: Dockerfile
+    image: dc-elasticsearch:8.15.0-nori
+    container_name: dc-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=elastic_pass
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:elastic_pass http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Qdrant (업무 매뉴얼 벡터 스토어) ──
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    container_name: dc-qdrant
+    ports:
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── MongoDB (테이블 메타 + 코드 메타 + 비즈 메타) ──
+  mongodb:
+    image: mongo:8.0.6
+    container_name: dc-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongoadmin
+      MONGO_INITDB_ROOT_PASSWORD: mongo_pass
+      MONGO_INITDB_DATABASE: meta_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "-u", "mongoadmin", "-p", "mongo_pass", "--authenticationDatabase", "admin", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Neo4j (온톨로지 그래프: 테이블 관계, JOIN 경로, 계수산출식) ──
+  neo4j:
+    image: neo4j:5-community
+    container_name: dc-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/neo4j_pass
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1g
+      NEO4J_server_memory_pagecache_size: 512m
+      NEO4J_db_transaction_timeout: 30s
+    ports:
+      - "7474:7474"   # HTTP (Browser)
+      - "7687:7687"   # Bolt (Driver)
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p neo4j_pass 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis (세션 캐시 + 명확화 상태) ──
+  redis:
+    image: redis:7-alpine
+    container_name: dc-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pg_data:
+  es_data:
+  qdrant_data:
+  mongo_data:
+  neo4j_data:
+  redis_data:

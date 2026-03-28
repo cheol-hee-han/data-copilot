@@ -1,0 +1,82 @@
+아래 확인된 지식만 사용해서 SELECT SQL을 작성하세요.
+추측이나 가정으로 컬럼명이나 코드값을 사용하지 마세요.
+CONFIRMED/PROBABLE 상태의 지식 항목만 사용하세요. UNRESOLVED/CANDIDATE 상태의 값은 절대 사용하지 마세요.
+
+## 용어 정의
+
+- 지식 항목(knowledge item): 탐색에서 확인한 용어-DB 표현 매핑. CONFIRMED 상태만 SQL에 사용 가능.
+
+## 사용자 질의
+
+{original_query}
+
+## 질의 분해
+
+- measure (측정값): {measures}
+- filters (조건): {filters}
+- group_by (그룹): {group_by}
+- order_limit (정렬/제한): {order_limit}
+
+## 확인된 지식 항목 (CONFIRMED — 이것만 사용하세요)
+
+{confirmed_terms}
+
+## 사용할 테이블
+
+{tables}
+
+## 테이블 조인 경로
+
+{join_path}
+
+## 유사 질의의 구조적 힌트 (참고용)
+
+{structural_hints}
+
+## 참고 활용사례 SQL (구조 템플릿으로만 활용, 그대로 복사 금지)
+
+{reference_sqls}
+
+## 실패한 접근 방식 (반복 금지)
+
+{dead_ends}
+
+## SQL 작성 규칙
+
+1. SELECT 문만 작성하세요. INSERT/UPDATE/DELETE/DROP/TRUNCATE/ALTER 절대 금지.
+2. 다중 쿼리(세미콜론으로 여러 SQL 연결) 금지. 단일 SELECT만 작성하세요.
+3. 시스템 카탈로그(information_schema, pg_catalog, pg_*) 접근 금지.
+4. 직접 노출 금지 컬럼: 주민등록번호, 계좌번호, 카드번호, 비밀번호, CVC — 이 컬럼은 SELECT에 포함하지 마세요.
+5. 마스킹 필수 컬럼: 전화번호, 이메일, 생년월일, 주소 — 조회 시 반드시 마스킹 함수를 적용하세요.
+6. 결과 행 수 제한: 특별한 지시가 없으면 LIMIT 10000을 추가하세요.
+7. 대용량 테이블(이벤트 로그 등)에는 반드시 날짜 조건을 포함하세요.
+8. 날짜 조건은 구조적 힌트의 날짜 포맷을 따르세요.
+9. 코드값은 확인된 지식 항목만 사용하세요. 추측하지 마세요.
+
+## 출력 형식
+
+SQL만 출력하세요. 설명은 explanation 필드에 작성하세요.
+
+```json
+{
+  "sql": "SELECT ...",
+  "explanation": "이 SQL이 어떤 로직인지 한 줄 설명"
+}
+```
+
+## 예시
+
+입력:
+- 질의: "지점별 이번 달 신규 고객 수"
+- 확인된 지식: REG_DT(가입일, YYYYMMDD), BRANCH_CD(지점코드), STATUS_CD '01'=정상
+- 테이블: TB_CUST_INFO (columns: CUST_NO, REG_DT, BRANCH_CD, STATUS_CD)
+- 조인: 단일 테이블
+- 날짜 힌트: REG_DT, YYYYMMDD 형식
+
+출력:
+```json
+{
+  "sql": "SELECT BRANCH_CD, COUNT(*) AS CNT FROM TB_CUST_INFO WHERE REG_DT >= '20260301' AND REG_DT <= '20260331' AND STATUS_CD = '01' GROUP BY BRANCH_CD ORDER BY CNT DESC LIMIT 10000",
+  "explanation": "TB_CUST_INFO에서 이번 달(2026년 3월) 가입일 기준, 정상 상태 고객을 지점별로 집계"
+}
+```

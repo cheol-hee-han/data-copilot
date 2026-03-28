@@ -1,11 +1,13 @@
 """LLM 응답 포맷 파싱 재시도 유틸리티.
 
 소형/로컬 LLM이 지정된 출력 포맷을 준수하지 못할 경우,
-이전 응답과 포맷 교정 힌트를 포함하여 재시도한다.
+이전 실패 응답을 대화에 포함하여 재시도한다.
+출력 형식은 system 프롬프트에 이미 명시되어 있으므로
+별도 format_hint 없이 "형식을 지켜달라"는 교정 메시지만 추가한다.
 
 재시도 전략:
     1차: 원본 프롬프트로 LLM 호출
-    2차~: 이전 실패 응답 + 포맷 교정 메시지를 대화에 추가하여 재호출
+    2차~: 이전 실패 응답 + 교정 메시지를 대화에 추가하여 재호출
     최종 실패: ParseError 를 raise 하거나 호출자가 폴백 처리
 
 사용 예시:
@@ -13,7 +15,6 @@
         system="...",
         messages=[{"role": "user", "content": "..."}],
         parse_fn=_parse_intent_response,
-        format_hint="반드시 다음 형식으로만 응답하세요:\\nINTENT: ...\\nCONFIDENCE: ...",
     )
 """
 
@@ -47,7 +48,6 @@ async def llm_call_with_parse_retry(
     system: str,
     messages: list[dict[str, str]],
     parse_fn: Callable[[str], T],
-    format_hint: str,
     max_tokens: int | None = None,
     timeout: float | None = None,
     max_retries: int | None = None,
@@ -60,7 +60,6 @@ async def llm_call_with_parse_retry(
         messages: 사용자 메시지 리스트.
         parse_fn: LLM 응답 텍스트를 파싱하는 함수.
             성공 시 파싱 결과를 반환, 실패 시 ValueError 를 raise 해야 한다.
-        format_hint: 재시도 시 LLM 에게 전달할 포맷 교정 메시지.
         max_tokens: 최대 생성 토큰 수.
         timeout: LLM 호출 타임아웃 (초).
         max_retries: 최대 재시도 횟수. None 이면 settings.llm_parse_max_retry 사용.
@@ -128,7 +127,7 @@ async def llm_call_with_parse_retry(
             # 빈 응답도 재시도 대상
             if attempt < max_retries:
                 current_messages = _append_correction(
-                    current_messages, last_text, format_hint,
+                    current_messages, last_text,
                 )
             continue
 
@@ -156,7 +155,7 @@ async def llm_call_with_parse_retry(
             )
             if attempt < max_retries:
                 current_messages = _append_correction(
-                    current_messages, last_text, format_hint,
+                    current_messages, last_text,
                 )
 
     # 세부 노드명 복원
@@ -169,28 +168,29 @@ async def llm_call_with_parse_retry(
     )
 
 
+_CORRECTION_MSG = (
+    "위 응답이 시스템 프롬프트에 지정된 출력 형식과 다릅니다. "
+    "시스템 프롬프트의 [출력 형식] 섹션을 다시 확인하고, "
+    "해당 형식만 정확히 출력하세요. "
+    "형식 외의 텍스트는 절대 추가하지 마세요."
+)
+
+
 def _append_correction(
     messages: list[dict[str, str]],
     failed_response: str,
-    format_hint: str,
 ) -> list[dict[str, str]]:
-    """실패한 응답과 포맷 교정 힌트를 대화에 추가한다.
+    """실패한 응답과 교정 요청을 대화에 추가한다.
 
     LLM 이 자신의 이전 응답을 보고 올바른 형식으로 교정하도록 유도한다.
+    출력 형식은 system 프롬프트에 이미 명시되어 있으므로
+    별도 힌트 없이 교정 요청만 추가한다.
     """
     corrected = list(messages)
 
-    # 이전 LLM 응답을 assistant 메시지로 추가
     if failed_response:
         corrected.append({"role": "assistant", "content": failed_response})
 
-    # 포맷 교정 요청을 user 메시지로 추가
-    correction_msg = (
-        "위 응답이 지정된 출력 형식과 다릅니다. "
-        "다음 형식을 정확히 지켜서 다시 응답해주세요. "
-        "형식 외의 텍스트는 절대 추가하지 마세요.\n\n"
-        f"{format_hint}"
-    )
-    corrected.append({"role": "user", "content": correction_msg})
+    corrected.append({"role": "user", "content": _CORRECTION_MSG})
 
     return corrected

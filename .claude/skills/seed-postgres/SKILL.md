@@ -120,11 +120,11 @@ PostgreSQL 테스트 데이터 시딩 전문가. 정보계 업무 테이블과 �
 ## 실행 환경
 
 - **postgres 컨테이너(dc-postgres)에는 Python이 없음** — `docker exec dc-postgres pip install` 불가
-- **호스트에서 직접 실행**: `python standalone/scripts/seed_postgres.py`
+- **호스트에서 직접 실행**: `python devtools/scripts/seed_postgres.py`
 - 연결 정보: `INFO_DB_HOST=localhost`, `PG_SEED_USER=postgres`, `PG_SEED_PASSWORD=postgres`
 - 실행 명령:
   ```bash
-  PYTHONIOENCODING=utf-8 PG_SEED_USER=postgres PG_SEED_PASSWORD=postgres python standalone/scripts/seed_postgres.py
+  PYTHONIOENCODING=utf-8 PG_SEED_USER=postgres PG_SEED_PASSWORD=postgres python devtools/scripts/seed_postgres.py
   ```
 
 ## Windows 인코딩 이슈
@@ -169,8 +169,8 @@ PostgreSQL 테스트 데이터 시딩 전문가. 정보계 업무 테이블과 �
 
 # 산출물 위치
 
-- 시딩 스크립트: `standalone/scripts/seed_postgres.py`
-- DDL: `standalone/scripts/ddl/`
+- 시딩 스크립트: `devtools/scripts/seed_postgres.py`
+- DDL: `devtools/scripts/ddl/`
 
 # 인자 사용법
 

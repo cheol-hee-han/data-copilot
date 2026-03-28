@@ -13,7 +13,7 @@
 - **효과**: 동형 문자(homograph) 기반 SQL 인젝션 우회 차단
 
 ### 1.2 SQL 인젝션 다층 방어 (13개 패턴)
-- **위치**: `src/agents/nodes/preprocessor.py` → `_COMPILED_SUSPICIOUS`
+- **위치**: `src/agents/nodes/interpret/preprocessor.py` → `_COMPILED_SUSPICIOUS`
 - **전략**: 세미콜론 연쇄 DML, SQL 주석(--/\*/\*), UNION SELECT, 시간지연 함수(SLEEP/PG_SLEEP), 파일 I/O(LOAD_FILE), 시스템 카탈로그(pg\_\*, information_schema), 확장 프로시저(xp\_\*) 등
 - **특이점**: 유니코드 정규화 *후* 패턴 검사 → 전각 우회 사전 차단
 
@@ -27,7 +27,7 @@
 - **적용**: 로그 기록 전, 사용자 응답 전 이중 적용
 
 ### 1.5 입력 길이 제한
-- **위치**: `src/agents/nodes/preprocessor.py` → `MAX_INPUT_LENGTH = 500`
+- **위치**: `src/agents/nodes/interpret/preprocessor.py` → `MAX_INPUT_LENGTH = 500`
 - **전략**: 과도한 입력 차단, 명확화 합성 시에도 1,000자 제한
 
 ---
@@ -51,7 +51,7 @@
 - **효과**: GPT-3.5급 소형 모델에서도 포맷 준수율 향상
 
 ### 2.3 UNKNOWN 폴백
-- **위치**: `src/agents/nodes/intent_classifier.py`
+- **위치**: `src/agents/nodes/interpret/intent_classifier.py`
 - **전략**: 파싱 최종 실패 시 IntentType.UNKNOWN, confidence=0.0으로 안전하게 폴백
 
 ---
@@ -59,7 +59,7 @@
 ## 3. 명확화 (Clarification)
 
 ### 3.1 대화 히스토리 활용 질문 생성
-- **위치**: `src/agents/nodes/clarifier.py` → `_build_messages()`
+- **위치**: `src/agents/nodes/interpret/clarifier.py` → `_build_messages()`
 - **전략**: 최근 4턴 대화 이력을 LLM에 전달하여 중복 질문 방지, 문맥 유지
 
 ### 3.2 선택지 형태 질문
@@ -68,7 +68,7 @@
 - **예시**: "1) 이번 달 신규 고객 유입 현황, 2) 이번 달 여신 실행 현황, 3) 수신 잔액 현황, 4) 다른 데이터"
 
 ### 3.3 멀티턴 합성
-- **위치**: `src/agents/nodes/preprocessor.py` → `_handle_clarification_response()`
+- **위치**: `src/agents/nodes/interpret/preprocessor.py` → `_handle_clarification_response()`
 - **전략**: 원래 질의 + 명확화 응답을 "\[원래 질의\]\n추가 조건: \[응답\]" 형태로 합성
 - **제한**: 최대 2회 라운드 (`CLARIFICATION_MAX_TURNS = 2`) → 무한 루프 방지
 
@@ -228,7 +228,7 @@
 - **효과**: LLM이 이전 실패 원인을 명시적으로 인지한 채 재생성
 
 ### 8.4 이중 방어 (Double Defense)
-- **위치**: `src/agents/nodes/sql_executor.py` + `src/utils/security.py`
+- **위치**: `src/agents/nodes/present/sql_executor.py` + `src/utils/security.py`
 - **전략**: sql_validator와 독립적으로 `validate_sql_safety()` 재검증
 - **효과**: 검증 우회 시도 차단 (단일 검증 실패 보정)
 
@@ -251,7 +251,7 @@
 ## 10. SQL 실행
 
 ### 10.1 행 수 제한
-- **위치**: `src/agents/nodes/sql_executor.py`
+- **위치**: `src/agents/nodes/present/sql_executor.py`
 - **전략**: `settings.max_query_rows` (기본 10,000) 초과 시 truncation 플래그 설정
 - **효과**: 메모리 폭발 방지, 대용량 덤프 차단
 
@@ -273,11 +273,11 @@
   - 코드값 → 한국어 의미 변환 (01=개인, 02=기업)
 
 ### 11.2 결과 행수 제한 (프롬프트용)
-- **위치**: `src/agents/nodes/formatter.py` → `_format_result_for_prompt()`
+- **위치**: `src/agents/nodes/present/formatter.py` → `_format_result_for_prompt()`
 - **전략**: 최대 50행만 LLM에 전달 + 전체 건수 주석
 
 ### 11.3 추론 과정 투명성 (Trace)
-- **위치**: `src/agents/state/state.py` (add_trace, format_trace_summary) + `src/agents/nodes/formatter.py`
+- **위치**: `src/agents/state/state.py` (add_trace, format_trace_summary) + `src/agents/nodes/present/formatter.py`
 - **전략**: 각 노드의 결정(의도분류, 테이블선택, SQL생성)을 \<details\> 접이식으로 응답 끝에 첨부
 - **효과**: 사용자가 결과의 근거를 확인 가능, 디버깅 용이
 
@@ -291,11 +291,11 @@
 - **출력**: JSON (summary, insights, statistics, action_items)
 
 ### 12.2 기본 통계 자동 산출
-- **위치**: `src/agents/nodes/analyzer.py`
+- **위치**: `src/agents/nodes/present/analyzer.py`
 - **전략**: 합계·평균·최소·최대·건수 자동 계산, 추세 감지(상승/하락/횡보), Z-score 이상치 탐지(2σ)
 
 ### 12.3 시각화 3단계 폴백
-- **위치**: `src/agents/nodes/analyzer.py`
+- **위치**: `src/agents/nodes/present/analyzer.py`
 - **전략**:
   1. LLM이 차트 필요성 판단 (VISUALIZATION_JUDGMENT)
   2. 필요 시 LLM이 SVG 직접 생성 (VISUALIZATION_SVG_GENERATION)
@@ -357,7 +357,7 @@
 ## 15. ES 한글 검색 최적화
 
 ### 15.1 nori analyzer 적용
-- **위치**: `standalone/docker/elasticsearch/Dockerfile`, `standalone/scripts/seed_elasticsearch.py`
+- **위치**: `devtools/docker/elasticsearch/Dockerfile`, `devtools/scripts/seed_elasticsearch.py`
 - **전략**: ES 커스텀 이미지에 `analysis-nori` 플러그인 포함, 모든 text 필드에 `korean` analyzer 적용
 - **효과**: "여신정보(잔액)" → \["여신", "정보", "잔액"\] 토큰화 → 한글 검색 정상화
 
@@ -406,12 +406,12 @@
 ## 18. 평가 프레임워크
 
 ### 18.1 다차원 평가
-- **위치**: `evaluation/evaluator.py`
+- **위치**: `devtools/evaluation/evaluator.py`
 - **기준**: Intent match AND Table match AND (Pattern OR Syntax) AND No rejected tables
 - **가중치**: 실행결과 일치(45%) > 의미적 일치(35%) > 구성요소 일치(20%)
 
 ### 18.2 배치 평가 리포팅
-- **위치**: `evaluation/run_evaluation.py`, `src/utils/tracker/evaluation.py`
+- **위치**: `devtools/evaluation/run_evaluation.py`, `src/utils/tracker/evaluation.py`
 - **지표**: pass rate, 의도분류 정확도, SQL 재시도 통계, 노드별 레이턴시, LLM 호출 횟수/토큰
 - **실패 분석**: 오류 카테고리별 분류, 실행 경로 분포, 병목 노드 식별
 

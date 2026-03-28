@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     qdrant_collection_name: str = "biz_manual"
     # sql_history 벡터 검색
     qdrant_sql_history_collection: str = "sql_history"
-    qdrant_sql_history_top_k: int = 10  # Reranker 후 최종 반환 건수
-    qdrant_sql_history_prefetch_limit: int = 50  # 하이브리드 검색 후보 수
+    qdrant_sql_history_top_k: int = 5  # Reranker 후 최종 반환 건수
+    qdrant_sql_history_prefetch_limit: int = 20  # 하이브리드 검색 후보 수
 
     # MongoDB (테이블 메타 + 코드 메타 + 비즈 메타)
     mongo_host: str = "localhost"
@@ -71,10 +71,27 @@ class Settings(BaseSettings):
     mongo_user: str = "mongoadmin"
     mongo_password: str = ""
     mongo_database: str = "meta_db"
-    mongo_table_meta_collection: str = "table_meta"
-    mongo_code_meta_collection: str = "code_meta"
+    mongo_table_meta_collection: str = "dpasset_table"
+    mongo_column_meta_collection: str = "dpasset_column"
+    mongo_code_meta_collection: str = "standard_code"
+    mongo_code_value_collection: str = "standard_code_value"
+    mongo_glossary_collection: str = "glossary"
     mongo_biz_meta_collection: str = "biz_meta"
-    mongo_request_timeout: int = 10  # MongoDB 요청 타임아웃 (초)
+    mongo_table_meta_size: int = 10   # 테이블 메타 최대 반환 건수
+    mongo_code_meta_size: int = 10    # 코드 메타 최대 반환 건수
+    mongo_request_timeout: int = 10   # MongoDB 요청 타임아웃 (초)
+
+    # Neo4j (온톨로지 그래프)
+    neo4j_host: str = "localhost"
+    neo4j_port: int = 7687
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = ""
+    neo4j_database: str = "neo4j"
+    neo4j_pool_size: int = 10
+    neo4j_request_timeout: int = 10    # Cypher 실행 타임아웃 (초)
+    neo4j_cache_ttl: int = 300         # 온톨로지 캐시 TTL (초)
+    neo4j_max_path_hops: int = 4       # JOIN 경로 최대 홉 수
+    neo4j_batch_size: int = 500        # 시딩 배치 크기
 
     # Redis
     redis_host: str = "localhost"
@@ -100,7 +117,7 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     reranker_use_fp16: bool = False  # FP16 (GPU 전용, CPU에서는 False 필수)
     reranker_cache_path: str = ""  # 폐쇄망: 오프라인 모델 캐시 경로
-    reranker_top_k: int = 10  # 재순위 후 최종 반환 건수
+    reranker_top_k: int = 5  # 재순위 후 최종 반환 건수
     # ── Reranker CPU 최적화 (ONNX Runtime) ──
     # 백엔드: "pytorch" (기본) 또는 "onnx" (CPU 최적화)
     reranker_backend: str = "onnx"
@@ -158,15 +175,29 @@ class Settings(BaseSettings):
     # Dummy 모드: True 면 외부 시스템 없이 내장 샘플 데이터로 동작
     use_dummy: bool = True
 
+    # 배포 모드: "external" (외부망, PostgreSQL) | "internal" (내부망, ADW+BDP)
+    deployment_mode: str = "external"
+    default_db_source: str = "adw"      # 시스템코드 파싱 실패 시 기본 DB
+
     # ── 파이프라인 제어 ──
     sql_max_retry: int = 2              # SQL 재생성 최대 재시도 횟수
     clarification_max_turns: int = 2    # 명확화 최대 왕복 횟수
     max_input_length: int = 500         # 사용자 입력 최대 길이 (문자 수)
     max_sessions: int = 1000            # 동시 세션 최대 수
 
+    # ── 에이전틱 코어 ──
+    agentic_core_enabled: bool = True   # True: 에이전틱 코어, False: 기존 선형
+    # LLM Heavy 노드 설정 (대형 모델: True, 소형 모델: False)
+    plan_use_llm: bool = True           # planner에서 LLM 사용
+    validate_layer2b_enabled: bool = True  # Layer 2b LLM 의미 검증 활성화
+    replan_use_llm: bool = True         # recovery_planner에서 LLM 사용
+    # 에이전틱 코어 타임아웃 (초)
+    agentic_tool_timeout: float = 10.0  # 개별 도구 호출 타임아웃 (C-12)
+    agentic_total_timeout: float = 120.0  # 서브그래프 전체 타임아웃
+
     # ── LLM 호출 ──
     llm_parse_max_retry: int = 2        # 포맷 불일치 시 최대 재시도 횟수
-    llm_default_max_tokens: int = 200   # LLM 기본 max_tokens
+    llm_default_max_tokens: int = 1000  # LLM 기본 max_tokens
     llm_default_timeout: float = 15.0   # LLM 기본 타임아웃 (초)
     llm_long_timeout: float = 30.0      # SQL생성/분석/포맷팅 등 긴 작업 타임아웃 (초)
     llm_context_timeout: float = 60.0   # 컨텍스트 수집 전체 타임아웃 (초)
@@ -186,6 +217,7 @@ class Settings(BaseSettings):
     min_description_length: int = 20    # 테이블 설명 보강 판단 최소 길이
     min_rows_for_visualization: int = 3  # 시각화 판단 최소 행 수
     format_max_rows: int = 50           # 포맷팅 프롬프트에 포함할 최대 행 수
+    analysis_max_rows: int = 100        # 분석/시각화 프롬프트에 포함할 최대 행 수
 
     # LangSmith (외부망 개발 환경 전용, 폐쇄망에서는 False)
     langsmith_enabled: bool = False
@@ -195,7 +227,7 @@ class Settings(BaseSettings):
 
     # Evaluation Tracker (자체 트래킹, 폐쇄망 호환)
     eval_tracker_enabled: bool = True
-    eval_tracker_output_dir: str = "evaluation/traces"
+    eval_tracker_output_dir: str = "devtools/evaluation/traces"
 
     # Application
     log_level: str = "INFO"

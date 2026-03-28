@@ -1,0 +1,65 @@
+{
+  "run_id": "e2e_1774514744_1",
+  "user_input": "고객 이름과 전화번호 목록",
+  "session_id": "df10c73d-8ef0-40de-adef-91f34e321e6f",
+  "start_time": "2026-03-26T08:45:44.236928+00:00",
+  "end_time": "2026-03-26T08:45:45.134385+00:00",
+  "total_duration_ms": 897.27,
+  "final_intent": "unknown",
+  "final_status": "error",
+  "final_response_summary": "죄송합니다. 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.\n다시 시도하시거나, 요청을 좀 더 구체적으로 입력해주세요.",
+  "error_message": "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+  "nodes": [
+    {
+      "node": "preprocess",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.35,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:44.264441+00:00"
+    },
+    {
+      "node": "resolve_history",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.02,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:44.266440+00:00"
+    },
+    {
+      "node": "classify_intent",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 864.78,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:45.132399+00:00"
+    }
+  ],
+  "llm_calls": [],
+  "decisions": [],
+  "context_retrievals": [],
+  "sql": {
+    "generated_sql": "",
+    "validated": false,
+    "validation_errors": [],
+    "retry_count": 0,
+    "validation_feedback": "",
+    "execution_success": false,
+    "row_count": 0,
+    "execution_time_ms": 0.0
+  },
+  "golden_id": "",
+  "eval_passed": null,
+  "eval_errors": [],
+  "total_llm_calls": 0,
+  "total_llm_latency_ms": 0.0,
+  "total_llm_tokens": 0,
+  "node_path": [
+    "preprocess",
+    "resolve_history",
+    "classify_intent"
+  ]
+}

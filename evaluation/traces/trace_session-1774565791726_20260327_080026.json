@@ -1,0 +1,2343 @@
+{
+  "run_id": "session-1774565791726",
+  "user_input": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+  "session_id": "session-1774565791726",
+  "start_time": "2026-03-27 07:58:22.262",
+  "end_time": "2026-03-27 08:00:26.064",
+  "total_duration_ms": 123807.95,
+  "final_intent": "data_analysis",
+  "final_status": "error",
+  "final_response_summary": "죄송합니다. SQL 생성 실패\n시도한 접근 방식:\n  - 미해소 용어: measure:예금신규건수\n  - 미해소 용어: measure:예금신규건수\n  - 미해소 용어: measure:예금신규건수\n확인하지 못한 정보: measure:예금신규건수\n다시 시도하시거나, 요청을 좀 더 구체적으로 입력해주세요.",
+  "error_message": "SQL 생성 실패\n시도한 접근 방식:\n  - 미해소 용어: measure:예금신규건수\n  - 미해소 용어: measure:예금신규건수\n  - 미해소 용어: measure:예금신규건수\n확인하지 못한 정보: measure:예금신규건수",
+  "nodes": [
+    {
+      "node": "preprocess",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.79,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:58:22.342"
+    },
+    {
+      "node": "resolve_history",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 3651.94,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:58:25.996"
+    },
+    {
+      "node": "classify_intent",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 2306.86,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:58:28.305"
+    },
+    {
+      "node": "normalize_query",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 7797.18,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:58:36.103"
+    },
+    {
+      "node": "reason_plan",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 26552.42,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:59:02.655"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 55168.87,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:59:57.830"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.38,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:59:57.832"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.05,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 07:59:57.834"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 9732.66,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:07.568"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.04,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:07.570"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1857.36,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:09.428"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 6938.07,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:16.367"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.54,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:16.370"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.76,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:16.372"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 9684.55,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:26.057"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.88,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:26.060"
+    },
+    {
+      "node": "reason_finalize",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.64,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-27 08:00:26.061"
+    }
+  ],
+  "llm_calls": [
+    {
+      "node": "이력해소",
+      "prompt_summary": "[S] 당신은 은행 데이터 분석 시스템의 대화 맥락 판단 전문가입니다.\n사용자의 현재 입력이 이전 대화에 이어지는 것인지 판단하고, 필요하면 재작성하세요.\n\n[판단 기준]\n\nCONTINUE — 현재 입력이 이전 대화의 연장선\n  ✓ 이전 데이터 질의에 조건을 추가/변경하는 경 | [U] [이전 대화]\n  사용자: 지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n[현재 입력]\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\nJSON만 출력하세요.",
+      "prompt_variables": {
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "history": "  사용자: 지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘"
+      },
+      "prompt_tokens": 1178,
+      "response_text": "{\n  \"decision\": \"NEW\",\n  \"query\": \"지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\"\n}",
+      "response_tokens": 36,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2504.56,
+      "timestamp": "2026-03-27 07:58:25.994"
+    },
+    {
+      "node": "classify_intent",
+      "prompt_summary": "[S] 당신은 사용자 입력의 의도를 분류하는 전문가입니다.\n사용자가 데이터 분석 시스템에 입력한 문장을 받아, 아래 6개 카테고리 중 하나로 분류합니다.\n\n[분류 카테고리]\n\nDATA_ANALYSIS — 데이터에 대한 분석·비교·인사이트·판단을 요청\n  판별 기준: 아래 중  | [U] 다음 입력을 분류해 주세요.\n\n[입력]\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\nJSON만 출력하세요.",
+      "prompt_variables": {
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘"
+      },
+      "prompt_tokens": 1058,
+      "response_text": "{\n  \"category\": \"DATA_ANALYSIS\",\n  \"confidence\": \"HIGH\",\n  \"reason\": \"TOP 3 지점을 추출하는 과정은 지점 간의 실적을 비교하는 분석적 판단을 포함하며, 명시된 기준(예금신규가 많은 순)에 따른 데이터 해석을 요청함\"\n}",
+      "response_tokens": 74,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2305.46,
+      "timestamp": "2026-03-27 07:58:28.304"
+    },
+    {
+      "node": "normalize_query",
+      "prompt_summary": "[S] 당신은 은행 업무 자연어 질의를 구조화된 의미 슬롯으로 분해하는 전문가입니다.\n사용자가 데이터 추출 또는 분석을 요청하는 자연어 문장을 입력하면,\n이를 아래 8개 슬롯으로 분해하여 JSON으로 출력합니다.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ | [U] 다음 자연어 질의를 8-Slot 구조로 분해하여 JSON으로 출력해 주세요.\n\n[입력 질의]\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n[오늘 날짜]\n2026-03-27\n\n[동의어 사전]\n\n[measures]\n  \"여신잔액\" ← 대출잔액, 대출금액, 론",
+      "prompt_variables": {
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "today": "2026-03-27",
+        "synonym_dict": "\n[measures]\n  \"여신잔액\" ← 대출잔액, 대출금액, 론잔액, 여신금액, 대여금잔액\n  \"신규여신액\" ← 신규대출액, 신규대출금액, 신규실행액, 여신실행액\n  \"연체금액\" ← 연체액, 연체잔액, 부실채권액\n  \"연체율\" ← 연체비율, 연체률\n  \"부실채권비율\" ← NPL비율, NPL율, 고정이하여신비율\n  \"예금잔액\" ← 수신잔액, 예금금액, 수신...",
+        "output_template_text": "\n  \"거래명세\":\n    트리거: 거래 명세, 거래명세서, 거래 내역서, 입출금명세\n    format: SPEC_SHEET\n    기대컬럼: [거래일자, 거래번호, 계좌번호, 거래유형, 입금액, 출금액, 잔액, 거래상대, 적요]\n    필요엔티티: ['거래', '계좌']\n\n  \"여신명세\":\n    트리거: 여신 명세, 대출 명세, 대출명세서, 여신내역\n..."
+      },
+      "prompt_tokens": 7771,
+      "response_text": "{\n  \"original_query\": \"지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\",\n  \"rewritten_query\": \"2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수가 많은 순서대로 상위 3개 지점을 조회한다\",\n  \"intent\": {\n    \"primary\": \"RANK\",\n    \"secondary\": [\n      \"AGGREGATE\"\n    ]\n  },\n  \"entities\": [\n    {\n      \"term\": \"예금\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"예금\",\n      \"note\": null\n    },\n    {\n      \"term\": \"지점\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"지점\",\n      \"note\": null\n    }\n  ],\n  \"measures\": [\n    {\n      \"term\": \"예금신규\",\n      \"measure_type\": \"RAW\",\n      \"agg_function\": \"COUNT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"건수\",\n      \"note\": \"예금 신규 개설 건수\"\n    }\n  ],\n  \"dimensions\": [\n    {\n      \"term\": \"지점\",\n      \"role\": \"GROUP\",\n      \"granularity\": \"INDIVIDUAL\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"지점\",\n      \"is_time_dimension\": false,\n      \"note\": null\n    }\n  ],\n  \"filters\": [],\n  \"time\": {\n    \"type\": \"ABSOLUTE\",\n    \"base_period\": {\n      \"label\": \"지난 1년간\",\n      \"resolve\": \"ABSOLUTE_RANGE\",\n      \"n\": null,\n      \"absolute_start\": \"2025-03-27\",\n      \"absolute_end\": \"2026-03-27\"\n    },\n    \"compare_period\": null\n  },\n  \"modifiers\": [\n    {\n      \"type\": \"RANK\",\n      \"direction\": \"DESC\",\n      \"limit\": 3,\n      \"by\": \"예금신규건수\",\n      \"note\": \"상위 3개 지점 조회\"\n    }\n  ],\n  \"output_hint\": {\n    \"format\": \"SUMMARY\",\n    \"doc_type\": null,\n    \"expected_columns\": [],\n    \"confidence\": \"LOW\",\n    \"note\": \"명시적 문서 형식 없음\"\n  },\n  \"ambiguities\": [],\n  \"search_keywords\": {\n    \"meta_search\": [\n      \"지점\",\n      \"예금\",\n      \"신규\",\n      \"건수\"\n    ],\n    \"vector_search\": \"지난 1년간 지점별 예금 신규 개설 건수 기준 상위 3개 지점 조회\"\n  }\n}",
+      "response_tokens": 709,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 3804.08,
+      "timestamp": "2026-03-27 07:58:32.112"
+    },
+    {
+      "node": "normalize_query",
+      "prompt_summary": "[S] 당신은 구조화된 질의 분석 결과를 교차 검증하는 전문 검수자입니다.\nPhase 1에서 생성된 정규화 JSON을 받아, 아래 검증 규칙에 따라 수정된 JSON을 출력합니다.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[교차 | [U] 아래는 원본 질의와 Phase 1에서 생성된 정규화 JSON입니다.\n교차 검증 규칙 R1~R12를 모두 적용하여 수정된 JSON을 출력해 주세요.\n\n[원본 질의]\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n[Phase 1 결과 JSON]\n{\n  \"ori",
+      "prompt_variables": {
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "phase1_json": "{\n  \"original_query\": \"지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\",\n  \"rewritten_query\": \"2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수가 많은 순서대로 상위 3개 지점을 조회한다\",\n  \"intent\": {\n    \"primary\": \"RANK\",\n    \"secondary\": [\n      \"AGGREGATE\"\n    ]\n  },\n  \"entities\": [\n    {\n      \"term\": \"예금\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"예금\",\n      \"note\": null\n    },\n    {\n      \"term\": \"지점\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"지점\",\n    ..."
+      },
+      "prompt_tokens": 1684,
+      "response_text": "{\n  \"original_query\": \"지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\",\n  \"rewritten_query\": \"2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다\",\n  \"intent\": {\n    \"primary\": \"RANK\",\n    \"secondary\": [\n      \"AGGREGATE\"\n    ]\n  },\n  \"entities\": [\n    {\n      \"term\": \"예금\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"예금\",\n      \"note\": null\n    },\n    {\n      \"term\": \"지점\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"지점\",\n      \"note\": null\n    }\n  ],\n  \"measures\": [\n    {\n      \"term\": \"예금신규건수\",\n      \"measure_type\": \"RAW\",\n      \"agg_function\": \"COUNT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"예금신규건수\",\n      \"note\": \"예금 신규 개설 건수\"\n    }\n  ],\n  \"dimensions\": [\n    {\n      \"term\": \"지점\",\n      \"role\": \"GROUP\",\n      \"granularity\": \"INDIVIDUAL\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"지점\",\n      \"is_time_dimension\": false,\n      \"note\": null\n    }\n  ],\n  \"filters\": [],\n  \"time\": {\n    \"type\": \"ABSOLUTE\",\n    \"base_period\": {\n      \"label\": \"지난 1년간\",\n      \"resolve\": \"ABSOLUTE_RANGE\",\n      \"n\": null,\n      \"absolute_start\": \"2025-03-27\",\n      \"absolute_end\": \"2026-03-27\"\n    },\n    \"compare_period\": null\n  },\n  \"modifiers\": [\n    {\n      \"type\": \"RANK\",\n      \"direction\": \"DESC\",\n      \"limit\": 3,\n      \"by\": \"예금신규건수\",\n      \"note\": \"상위 3개 지점 조회\"\n    }\n  ],\n  \"output_hint\": {\n    \"format\": \"SUMMARY\",\n    \"doc_type\": null,\n    \"expected_columns\": [\n      \"지점\",\n      \"예금신규건수\"\n    ],\n    \"confidence\": \"HIGH\",\n    \"note\": \"지점별 예금신규건수 기준 TOP 3 리스트 출력\"\n  },\n  \"ambiguities\": [],\n  \"search_keywords\": {\n    \"meta_search\": [\n      \"지점\",\n      \"예금\",\n      \"신규\",\n      \"건수\",\n      \"예금신규건수\"\n    ],\n    \"vector_search\": \"지난 1년간 지점별 예금 신규 개설 건수 기준 상위 3개 지점 조회\"\n  }\n}",
+      "response_tokens": 763,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 3989.98,
+      "timestamp": "2026-03-27 07:58:36.102"
+    },
+    {
+      "node": "reason_plan",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스를 탐색하는 신중한 데이터 분석가입니다.\n확인되지 않은 것을 추측하지 말고, 탐색을 통해 점진적으로 확신을 쌓아가야 합니다.\n\n## 용어 정의\n\n- 지식 항목(knowledge item): 탐색에서 확인한 용어-DB 표현 매핑. UNRES | [U] 지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "conversation_history": "(없음)",
+        "query_decomposition": "{\"measures\": [{\"term\": \"예금신규건수\", \"agg_function\": \"COUNT\"}], \"filters\": [], \"group_by\": [\"지점\"], \"order_limit\": [{\"type\": \"RANK\", \"value\": \"\"}], \"required_concepts\": [\"예금\", \"지점\", \"예금신규건수\"]}",
+        "initial_context_summary": "유사 활용사례 5건 발견\n  - (유사도 0.04) 지점별 정상계좌수 및 예금잔액 상위 10개 지점 (전월 기준)\n  - (유사도 0.04) 지점별 정상계좌수 및 예금잔액 상위 10개 지점 (전월 기준)\n  - (유사도 0.04) 지점별 정상계좌수 및 예금잔액 상위 10개 지점 (전월 기준)\n활용사례 테이블: TB_ADW_DEP201P, TB_ADW_COM001M\n검증된 조인 패턴: TB_ADW_DEP201P.BLNG_BRCD = TB_ADW_COM001M.BLNG_BRCD\n과거 사용된 코드값: ACT_STCD IN ('01')\n유사 질의 집계 방식: COUNT(TB_ADW_DEP201P.ACN), SUM(TB_ADW_DEP201P.BAL_AMT)\n유사 질의 출력 컬럼: TB_ADW_COM001M.BR_NM, COUNT(TB_ADW_DEP201P.ACN) AS acct_cnt, SUM(TB_ADW_DEP201P.BAL_AMT) AS total_bal\n유사 질의 GROUP BY: TB_ADW_COM001M.BR_NM\n관련 테이블 10건: TB_ADW_DEP219M, TB_ADW_DEP220M, TB_ADW_DEP212L, TB_ADW_DEP218M, TB_ADW_DEP213L\n",
+        "searched_queries": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "sampled_tables": "(없음)",
+        "vague_output_keywords": "\"명세\", \"현황\", \"정보\", \"내역\", \"데이터\", \"목록\", \"리스트\"",
+        "extraction_keywords": "\"뽑아\", \"추출\", \"조회\""
+      },
+      "prompt_tokens": 3638,
+      "response_text": "{\n  \"unresolved_terms\": [\n    {\"key\": \"measure:예금신규건수\", \"description\": \"신규 예금 계좌를 식별하는 테이블과 컬럼, 그리고 '신규'의 정의(기준일자/상태코드)가 불분명함\", \"is_critical\": true},\n    {\"key\": \"dimension:지점\", \"description\": \"지점 정보를 식별할 수 있는 컬럼명(BR_NM, BLNG_BRCD 등) 및 매핑 관계\", \"is_critical\": true},\n    {\"key\": \"filter:지난1년\", \"description\": \"지난 1년을 정의하는 기준 일자 컬럼(신규일자, 개설일자 등)\", \"is_critical\": true}\n  ],\n  \"hypotheses\": [\n    {\n      \"hypothesis_id\": \"H1\",\n      \"description\": \"예금 계좌 원장 테이블(TB_ADW_DEP201P 등)의 신규 일자 컬럼을 활용하여 기간 내 건수 집계\",\n      \"based_on_use_case\": \"유사 활용사례(지점별 정상계좌수 집계)의 조인 구조 및 테이블 활용\",\n      \"missing_terms\": [\"신규일자 컬럼\", \"지점 코드/명 컬럼\"],\n      \"priority\": \"high\",\n      \"strategy\": \"유사 사례에서 사용된 DEP201P 테이블을 중심으로 신규 일자 필터링 컬럼 탐색\"\n    },\n    {\n      \"hypothesis_id\": \"H_FALLBACK\",\n      \"description\": \"관련 테이블 메타 검색을 통한 신규 예금 거래 및 일자 컬럼 식별\",\n      \"based_on_use_case\": null,\n      \"missing_terms\": [\"테이블 구조\", \"신규 관련 컬럼\"],\n      \"priority\": \"low\",\n      \"strategy\": \"관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인\"\n    }\n  ],\n  \"execution_plan\": [\n    {\n      \"step\": 1,\n      \"tool\": \"search_use_cases\",\n      \"input\": \"예금 신규 계좌 집계 지점\",\n      \"purpose\": \"과거 예금 신규 관련 집계 시 사용된 테이블과 로직 확인\"\n    },\n    {\n      \"step\": 2,\n      \"tool\": \"search_table_meta\",\n      \"input\": \"TB_ADW_DEP201P\",\n      \"purpose\": \"예금 계좌 테이블 내 신규일자 및 지점 코드 컬럼 식별\"\n    },\n    {\n      \"step\": 3,\n      \"tool\": \"search_table_meta\",\n      \"input\": \"TB_ADW_DEP219M\",\n      \"purpose\": \"신규 예금 실적 또는 이력 관련 테이블 구조 확인 (DEP201P에 신규일자가 없을 경우 대비)\"\n    }\n  ]\n}",
+      "response_tokens": 694,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 4252.33,
+      "timestamp": "2026-03-27 07:59:02.654"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_use_cases",
+        "tool_input": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다",
+        "tool_purpose": "유사 활용사례에서 테이블/조인 구조 참고",
+        "tool_result": "[{\"sql\": \"SELECT b.BR_NM, COUNT(ab.ACN) AS acct_cnt, SUM(ab.BAL_AMT) AS total_bal FROM biz_schema.TB_ADW_DEP201P ab JOIN biz_schema.TB_ADW_COM001M b ON ab.BLNG_BRCD = b.BLNG_BRCD WHERE ab.STD_DT = CURRENT_DATE AND ab.ACT_STCD = '01' GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10\", \"description\": \"지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준)\", \"tables_used\": [\"TB_ADW_DEP201P\", \"TB_ADW_COM001M\"], \"domain\": \"DEP\", \"complexity\": \"multi_join\", \"exec_user\": \"user46\", \"exec_dt\": \"2026-02-11\", \"_score\": 0.7625554800033569, \"similarity\": 0.7625554800033569}, {\"sql\": \"SELECT b.BR_NM, COUNT(ab.ACN) AS acct_cnt, SUM(ab.BAL_AMT) AS total_bal FROM biz_schema.TB_ADW_DEP201P ab JOIN biz_schema.TB_ADW_COM001M b ON ab.BLNG_BRCD = b.BLNG_BRCD WHERE ab.STD_DT = CURRENT_DATE AND ab.ACT_STCD = '01' GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10\", \"description\": \"지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준)\", \"tables_used\": [\"TB_ADW_DEP201P\", \"TB_ADW_COM001M\"], \"domain\": \"DEP\", \"complexity\": \"multi_join\", \"exec_user\": \"user16\", \"exec_dt\": \"2025-07-27\", \"_score\": 0.7625554800033569, \"similarity\": 0.7625554800033569}, {\"sql\": \"SELECT b.BR_NM, COUNT(ab.ACN) AS acct_cnt, SUM(ab.BAL_AMT) AS total_bal FROM biz_schema.TB_ADW_DEP201P ab JOIN biz_schema.TB_ADW_COM001M b ON ab.BLNG_BRCD = b.BLNG_BRCD WHERE ab.STD_DT = CURRENT_DATE AND ab.ACT_STCD = '01' GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10\", \"description\": \"지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준)\", \"tables_used\": [\"TB_ADW_DEP201P\", \"TB_ADW_COM001M\"], \"domain\": \"DEP\", \"complexity\": \"multi_join\", \"exec_user\": \"user15\", \"exec_dt\": \"2026-02-18\", \"_score\": 0.7625554800033569, \"similarity\": 0.7625554800033569}, {\"sql\": \"SELECT b.BR_NM, COUNT(ab.ACN) AS acct_cnt, SUM(ab.BAL_AMT) AS total_bal FROM biz_schema.TB_ADW_DEP201P ab JOIN biz_schema.TB_ADW_COM001M b ON ab.BLNG_BRCD = b.BLNG_BRCD WHERE ab.STD_DT = CURRENT_DATE AND ab.ACT_STCD = '01' GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10\", \"description\": \"지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준)\", \"tables_used\": [\"TB_ADW_DEP201P\", \"TB_ADW_COM001M\"], \"domain\": \"DEP\", \"complexity\": \"multi_join\", \"exec_user\": \"user06\", \"exec_dt\": \"2025-07-22\", \"_score\": 0.7625554800033569, \"similarity\": 0.7625554800033569}, {\"sql\": \"SELECT b.BR_NM, COUNT(ab.ACN) AS acct_cnt, SUM(ab.BAL_AMT) AS total_bal FROM biz_schema.TB_ADW_DEP201P ab JOIN biz_schema.TB_ADW_COM001M b ON ab.BLNG_BRCD = b.BLNG_BRCD WHERE ab.STD_DT = CURRENT_DATE AND ab.ACT_STCD = '01' GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10\", \"description\": \"지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준)\", \"tables_used\": [\"TB_ADW_DEP201P\", \"TB_ADW_COM001M\"], \"domain\": \"DEP\", \"complexity\": \"multi_join\", \"exec_user\": \"user20\", \"exec_dt\": \"2025-05-29\", \"_score\": 0.7625554800033569, \"similarity\": 0.7625554800033569}]"
+      },
+      "prompt_tokens": 3761,
+      "response_text": "{\n  \"insight\": \"지점별 예금 계좌 및 잔액 현황을 조회하기 위해 TB_ADW_DEP201P(예금 계좌 원장)와 TB_ADW_COM001M(지점 정보) 테이블을 BLNG_BRCD로 조인하는 구조를 확인했습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP201P\",\n      \"value\": \"예금계좌 정보 (ACN: 계좌번호, BLNG_BRCD: 관할지점코드, BAL_AMT: 잔액, ACT_STCD: 계좌상태코드)\",\n      \"confidence\": 0.8,\n      \"new_status\": \"CONFIRMED\",\n      \"source\": \"활용사례\",\n      \"evidence\": \"상위 지점 조회 쿼리에서 계좌 원장 테이블로 사용됨\",\n      \"is_critical\": true\n    },\n    {\n      \"key\": \"table:TB_ADW_COM001M\",\n      \"value\": \"지점 정보 (BR_NM: 지점명, BLNG_BRCD: 관할지점코드)\",\n      \"confidence\": 0.8,\n      \"new_status\": \"CONFIRMED\",\n      \"source\": \"활용사례\",\n      \"evidence\": \"지점코드와 지점명을 매핑하는 마스터 테이블로 사용됨\",\n      \"is_critical\": true\n    },\n    {\n      \"key\": \"code:ACT_STCD='01'\",\n      \"value\": \"정상계좌 상태코드\",\n      \"confidence\": 0.7,\n      \"new_status\": \"PROBABLE\",\n      \"source\": \"활용사례\",\n      \"evidence\": \"모든 활용사례 쿼리에서 '01'을 정상계좌 조건으로 필터링함\",\n      \"is_critical\": false\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP201P\",\n      \"role\": \"예금 원장 정보\",\n      \"relevant_columns\": [\"ACN\", \"BLNG_BRCD\", \"BAL_AMT\", \"ACT_STCD\", \"STD_DT\"],\n      \"join_keys\": [\"BLNG_BRCD\"],\n      \"entity_scope\": \"예금 계좌별 잔액 및 상태 정보\",\n      \"functional_usage\": \"지점별 예금 실적 집계용 메인 테이블\",\n      \"data_refresh_hint\": \"일 단위 적재(STD_DT 컬럼 존재)\"\n    },\n    {\n      \"table_name\": \"TB_ADW_COM001M\",\n      \"role\": \"지점 마스터\",\n      \"relevant_columns\": [\"BLNG_BRCD\", \"BR_NM\"],\n      \"join_keys\": [\"BLNG_BRCD\"],\n      \"entity_scope\": \"조직(지점) 정보\",\n      \"functional_usage\": \"지점코드에 대응하는 지점명 조회용\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 724,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 4088.64,
+      "timestamp": "2026-03-27 07:59:12.951"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP201P",
+        "tool_purpose": "TB_ADW_DEP201P 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP201P\", \"alt_name\": \"DEP수신계좌잔액(T+0)\", \"description\": \"DEP수신계좌잔액(T+0) 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 실시간이며, 기준일자 조건을 포함하여 조회해야 한다.\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"EDPS_CSN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"ACT_DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"BAL_AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"OPEN_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"BLNG_BRCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"PD_CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"PD_NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"APLY_RT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"ACT_STCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2845,
+      "response_text": "{\n  \"insight\": \"TB_ADW_DEP201P 테이블에서 계좌 개설일자(OPEN_DT)와 관리지점코드(BLNG_BRCD)를 활용하여 지점별 예금신규 현황을 집계할 수 있음을 확인하였습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP201P\",\n      \"value\": \"DEP수신계좌잔액(T+0) 테이블 (OPEN_DT, BLNG_BRCD, ACN 등 포함)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"수신 계좌의 개설일자와 관리지점 정보를 포함하고 있어 기간별 신규 집계에 적합함\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP201P\",\n      \"role\": \"수신 계좌의 잔액 및 관리 정보 조회\",\n      \"relevant_columns\": [\"OPEN_DT\", \"BLNG_BRCD\", \"ACN\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"DEP 업무 영역 수신 계좌 데이터\",\n      \"functional_usage\": \"수신계좌 잔액 및 관리 정보\",\n      \"data_refresh_hint\": \"실시간\"\n    }\n  ]\n}",
+      "response_tokens": 345,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2578.15,
+      "timestamp": "2026-03-27 07:59:15.560"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_COM001M",
+        "tool_purpose": "TB_ADW_COM001M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_COM001M\", \"alt_name\": \"COM부점정보기본\", \"description\": \"TEMP\", \"columns\": [{\"name\": \"BLNG_BRCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"BR_NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGN_CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGN_NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"BR_DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2611,
+      "response_text": "{\n  \"insight\": \"지점의 명칭과 관할 정보를 관리하는 'COM부점정보기본' 테이블을 확인하였으며, 지점 코드(BLNG_BRCD)와 명칭(BR_NM) 컬럼을 식별했습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_COM001M\",\n      \"value\": \"COM부점정보기본 (BLNG_BRCD, BR_NM, RGN_CD, RGN_NM, BR_DCD 등)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"TB_ADW_COM001M 테이블의 구조를 통해 지점명과 지점코드 컬럼을 확보함\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_COM001M\",\n      \"role\": \"부점 정보 관리 마스터 테이블\",\n      \"relevant_columns\": [\n        \"BLNG_BRCD\",\n        \"BR_NM\"\n      ],\n      \"join_keys\": [\n        \"BLNG_BRCD\"\n      ],\n      \"entity_scope\": \"은행 내 부점 기본 정보\",\n      \"functional_usage\": \"지점명 및 소속 정보 관리\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 349,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2280.94,
+      "timestamp": "2026-03-27 07:59:17.849"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP219M",
+        "tool_purpose": "TB_ADW_DEP219M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP219M\", \"alt_name\": \"DEP휴면예금\", \"description\": \"DEP휴면예금\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2721,
+      "response_text": "{\n  \"insight\": \"조회한 TB_ADW_DEP219M 테이블은 '휴면예금' 관련 정보를 담고 있어, 질의하신 '예금 신규' 데이터를 추출하기에는 부적절한 테이블로 판단됩니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP219M\",\n      \"value\": \"휴면예금 관리 테이블\",\n      \"confidence\": 0.5,\n      \"new_status\": \"PROBABLE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"테이블 설명이 'DEP휴면예금'으로 명시되어 있어 예금 신규 가입 이력과는 직접적인 관련이 없음\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP219M\",\n      \"role\": \"휴면예금 정보 관리\",\n      \"relevant_columns\": [\"ACN\", \"STD_DT\", \"NM\", \"DCD\", \"CD\", \"AMT\", \"RGST_DT\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"휴면예금 상태 및 잔액 정보\",\n      \"functional_usage\": \"휴면예금 조회 및 관리\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 321,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2707.65,
+      "timestamp": "2026-03-27 07:59:20.562"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP220M",
+        "tool_purpose": "TB_ADW_DEP220M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP220M\", \"alt_name\": \"DEP미수령예금\", \"description\": \"DEP미수령예금 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 월배치이며, 기준일자 조건을 포함하여 조회해야 한다.\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2767,
+      "response_text": "{\n  \"insight\": \"DEP미수령예금 테이블(TB_ADW_DEP220M)의 메타데이터를 확인했으나, 질의에 필요한 '지점' 정보와 '예금신규' 여부를 식별할 수 있는 컬럼이 명확하지 않습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP220M\",\n      \"value\": \"DEP미수령예금 테이블 (ACN, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT, RGST_USR_ID, INS_DTM, UPD_DTM)\",\n      \"confidence\": 0.3,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"질의에서 요구하는 '지점' 및 '신규 거래'를 식별할 수 있는 컬럼(예: BRANCH_CD, TRAN_TYPE 등)이 테이블 메타에 명시되어 있지 않음\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP220M\",\n      \"role\": \"미수령 예금 관리 데이터\",\n      \"relevant_columns\": [\"ACN\", \"STD_DT\", \"AMT\", \"RGST_DT\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"DEP미수령예금 데이터 포함\",\n      \"functional_usage\": \"DEP 업무 영역 내 데이터 관리\",\n      \"data_refresh_hint\": \"월배치\"\n    }\n  ]\n}",
+      "response_tokens": 384,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2611.16,
+      "timestamp": "2026-03-27 07:59:23.178"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP212L",
+        "tool_purpose": "TB_ADW_DEP212L 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP212L\", \"alt_name\": \"DEP예금이자계산내역\", \"description\": \"DEP예금이자계산내역\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CALC_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"TR_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"EXEC_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CHN_CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2700,
+      "response_text": "{\n  \"insight\": \"TB_ADW_DEP212L 테이블에서 예금 관련 데이터를 확인했으나, '지점' 정보가 명시된 컬럼이 없어 추가적인 지점 관련 테이블 탐색이 필요합니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP212L\",\n      \"value\": \"DEP예금이자계산내역 테이블 (ACN, CALC_DT, TR_DT, EXEC_DT, AMT, DCD, CHN_CD 등 포함)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"메타검색을 통해 예금이자계산내역 테이블의 구조를 확인하였으나 지점 코드(Branch Code) 컬럼이 식별되지 않음\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP212L\",\n      \"role\": \"DEP예금이자계산내역\",\n      \"relevant_columns\": [\"ACN\", \"CALC_DT\", \"TR_DT\", \"EXEC_DT\", \"AMT\", \"DCD\", \"CHN_CD\"],\n      \"join_keys\": [\"ACN\"],\n      \"entity_scope\": \"예금 이자 계산 이력 데이터\",\n      \"functional_usage\": \"DEP예금이자계산내역\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 363,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2835.51,
+      "timestamp": "2026-03-27 07:59:26.019"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP218M",
+        "tool_purpose": "TB_ADW_DEP218M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP218M\", \"alt_name\": \"DEP예금세금정보\", \"description\": \"DEP예금세금정보 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 일배치이며, 기준일자 조건을 포함하여 조회해야 한다.\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"TAX_YR\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2796,
+      "response_text": "{\n  \"insight\": \"DEP예금세금정보 테이블(TB_ADW_DEP218M)의 메타 정보를 확인했으나, 예금신규 지점 정보를 식별할 수 있는 지점 코드나 신규 일자 컬럼이 명확하지 않아 추가적인 테이블 조사가 필요합니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP218M\",\n      \"value\": \"DEP예금세금정보 관리 테이블 (ACN, TAX_YR, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT, RGST_USR_ID, INS_DTM, UPD_DTM)\",\n      \"confidence\": 0.4,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"메타검색에서 해당 테이블의 구조를 확인하였으나 예금 신규 지점 파악을 위한 특정 컬럼(지점코드 등) 식별이 어려움\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP218M\",\n      \"role\": \"DEP예금세금정보 관리\",\n      \"relevant_columns\": [\"ACN\", \"STD_DT\", \"DCD\", \"CD\", \"AMT\", \"RGST_DT\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"DEP 업무 영역의 예금 세금 데이터\",\n      \"functional_usage\": \"DEP예금세금정보 관리\",\n      \"data_refresh_hint\": \"일배치 갱신\"\n    }\n  ]\n}",
+      "response_tokens": 395,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 3076.07,
+      "timestamp": "2026-03-27 07:59:29.099"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP213L",
+        "tool_purpose": "TB_ADW_DEP213L 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP213L\", \"alt_name\": \"DEP예금이자지급내역\", \"description\": \"DEP예금이자지급내역. 당행 업무 데이터.\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"PAY_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"SEQ\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"TR_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"EXEC_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CHN_CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2731,
+      "response_text": "{\n  \"insight\": \"TB_ADW_DEP213L 테이블은 'DEP예금이자지급내역' 정보를 담고 있으나, 예금 신규 데이터를 식별할 수 있는 지점 코드나 신규 일자 관련 구체적인 컬럼은 확인되지 않았습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP213L\",\n      \"value\": \"DEP예금이자지급내역 테이블 (ACN, PAY_DT, SEQ, TR_DT, EXEC_DT, AMT, DCD, CHN_CD, RGST_DT, INS_DTM, UPD_DTM)\",\n      \"confidence\": 0.4,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"검색 결과 테이블 내에 지점코드(BR_CD 등)나 예금 신규를 명확히 구분할 컬럼이 식별되지 않음\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP213L\",\n      \"role\": \"예금이자지급내역\",\n      \"relevant_columns\": [\n        \"ACN\",\n        \"PAY_DT\",\n        \"TR_DT\",\n        \"DCD\",\n        \"CHN_CD\",\n        \"RGST_DT\"\n      ],\n      \"join_keys\": [],\n      \"entity_scope\": \"예금 이자 지급 내역 및 관련 트랜잭션 정보\",\n      \"functional_usage\": \"DEP예금이자지급내역 관리\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 405,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2653.68,
+      "timestamp": "2026-03-27 07:59:31.759"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP211M",
+        "tool_purpose": "TB_ADW_DEP211M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP211M\", \"alt_name\": \"DEP예금상품조건\", \"description\": \"DEP예금상품조건\", \"columns\": [{\"name\": \"PD_CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"COND_SEQ\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2751,
+      "response_text": "{\n  \"insight\": \"TB_ADW_DEP211M 테이블은 예금상품의 조건 정보를 관리하는 테이블로, 예금 신규 실적(지점별/일자별)을 집계하기 위한 직접적인 거래 원장 정보는 포함되어 있지 않습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP211M\",\n      \"value\": \"DEP예금상품조건 (PD_CD, COND_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT 등)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"테이블 메타 확인 결과, 상품의 조건 및 메타 정보를 관리하는 테이블임을 확인하였음\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP211M\",\n      \"role\": \"예금 상품 조건 관리\",\n      \"relevant_columns\": [\"PD_CD\", \"STD_DT\", \"NM\", \"DCD\", \"CD\", \"AMT\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"예금 상품의 조건 관련 마스터 데이터\",\n      \"functional_usage\": \"DEP예금상품조건 관리\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 342,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 4260.72,
+      "timestamp": "2026-03-27 07:59:36.024"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP209M",
+        "tool_purpose": "TB_ADW_DEP209M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP209M\", \"alt_name\": \"DEP예금상품정보\", \"description\": \"DEP예금상품정보 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 일배치이며, 기준일자 조건을 포함하여 조회해야 한다.\", \"columns\": [{\"name\": \"PD_CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2766,
+      "response_text": "{\n  \"insight\": \"DEP예금상품정보 테이블(TB_ADW_DEP209M)의 메타데이터를 확인했으나, '지점' 정보와 관련된 컬럼은 발견되지 않아 추가 테이블 탐색이 필요합니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP209M\",\n      \"value\": \"DEP예금상품정보 테이블 (PD_CD, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT, RGST_USR_ID, INS_DTM, UPD_DTM)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"테이블 구조 내 지점 식별이 가능한 컬럼(예: BR_CD 등)이 부재하여 예금 신규 지점 파악을 위해서는 다른 테이블 결합이 필수적임\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP209M\",\n      \"role\": \"DEP예금상품정보 관리\",\n      \"relevant_columns\": [\"PD_CD\", \"STD_DT\", \"AMT\", \"RGST_DT\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"DEP 업무 영역 내 예금 상품 데이터\",\n      \"functional_usage\": \"DEP 업무 프로세스 수행 시 데이터 적재\",\n      \"data_refresh_hint\": \"일배치 갱신\"\n    }\n  ]\n}",
+      "response_tokens": 375,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2014.63,
+      "timestamp": "2026-03-27 07:59:38.048"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEA208M",
+        "tool_purpose": "TB_ADW_DEA208M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEA208M\", \"alt_name\": \"DEP예금계좌정보\", \"description\": \"DEP예금계좌정보\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2723,
+      "response_text": "{\n  \"insight\": \"DEP예금계좌정보를 포함하는 TB_ADW_DEA208M 테이블을 확보하였으며, 지점코드(DCD)와 계좌등록일자(RGST_DT)를 통해 예금 신규 건수를 집계할 수 있습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEA208M\",\n      \"value\": \"DEP예금계좌정보 테이블 (DCD, RGST_DT, ACN 등 컬럼 포함)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"DEP예금계좌정보를 관리하는 테이블 구조를 확인하였으며, 지점코드(DCD)와 등록일자(RGST_DT)를 통해 기간별/지점별 통계 산출이 가능함.\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEA208M\",\n      \"role\": \"예금 계좌 기본 원장 및 등록 정보 관리\",\n      \"relevant_columns\": [\n        \"DCD\",\n        \"RGST_DT\",\n        \"ACN\"\n      ],\n      \"join_keys\": [],\n      \"entity_scope\": \"예금 계좌 원장 정보 (DCD: 지점코드, RGST_DT: 계좌등록일자 포함)\",\n      \"functional_usage\": \"DEP예금계좌정보 관리\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 383,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2523.01,
+      "timestamp": "2026-03-27 07:59:40.579"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP210M",
+        "tool_purpose": "TB_ADW_DEP210M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP210M\", \"alt_name\": \"DEP예금상품금리\", \"description\": \"DATA TABLE\", \"columns\": [{\"name\": \"PD_CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"EFF_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2749,
+      "response_text": "{\n  \"insight\": \"TB_ADW_DEP210M 테이블을 확인했으나, 컬럼 구성이 상품 금리 정보 위주로 되어 있어 지점별 예금 신규 건수를 집계하기 위한 적절한 테이블을 추가로 찾아야 합니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP210M\",\n      \"value\": \"DEP예금상품금리 (PD_CD, EFF_DT, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT, RGST_USR_ID, INS_DTM, UPD_DTM)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"테이블명 및 메타 설명이 예금상품금리 정보로 확인됨, 신규 계좌 관련 지점 정보 부재\",\n      \"is_critical\": false\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP210M\",\n      \"role\": \"예금상품금리 관리\",\n      \"relevant_columns\": [\"PD_CD\", \"EFF_DT\", \"STD_DT\", \"NM\", \"DCD\", \"CD\", \"AMT\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"예금 상품 및 금리 관련 데이터\",\n      \"functional_usage\": \"DATA TABLE (예금상품금리)\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 371,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2794.18,
+      "timestamp": "2026-03-27 07:59:43.380"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_table_meta",
+        "tool_input": "TB_ADW_DEP217M",
+        "tool_purpose": "TB_ADW_DEP217M 테이블의 컬럼 구조 확인",
+        "tool_result": "[{\"schema_name\": \"biz_schema\", \"name\": \"TB_ADW_DEP217M\", \"alt_name\": \"DEP예금질권설정\", \"description\": \"DEP예금질권설정\", \"columns\": [{\"name\": \"ACN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"PLEDGE_SEQ\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"STD_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"NM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"DCD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"CD\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"AMT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"USE_YN\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_DT\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"RGST_USR_ID\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"INS_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}, {\"name\": \"UPD_DTM\", \"alt_name\": \"\", \"type\": \"\", \"description\": \"\", \"is_pk\": false}]}]"
+      },
+      "prompt_tokens": 2756,
+      "response_text": "{\n  \"insight\": \"조회된 TB_ADW_DEP217M 테이블은 'DEP예금질권설정'에 관한 데이터를 담고 있으며, 예금 신규 건수를 집계하기 위한 고객 정보나 지점 코드 및 계좌 개설 정보는 포함되어 있지 않아 질의 해결을 위한 추가 테이블 검색이 필요합니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_DEP217M\",\n      \"value\": \"DEP예금질권설정 정보 (ACN, PLEDGE_SEQ, STD_DT, NM, DCD, CD, AMT 등)\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"테이블메타\",\n      \"evidence\": \"질권설정 관련 테이블로 확인됨, 예금 신규 지점 통계 산출을 위한 직접적인 정보 부족\",\n      \"is_critical\": false\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEP217M\",\n      \"role\": \"DEP예금질권설정 정보\",\n      \"relevant_columns\": [\"ACN\", \"STD_DT\", \"DCD\", \"CD\", \"AMT\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"예금 질권 설정 데이터 (ACN, PLEDGE_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN 등 포함)\",\n      \"functional_usage\": \"예금질권설정 내역 관리\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 384,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2555.55,
+      "timestamp": "2026-03-27 07:59:45.942"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### TB_ADW_DEP219M\n- 메타 설명: \"DEP휴면예금\" (메타 원본)\n- 주요 컬럼: ACN, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT (메타 원본)\n\n### biz_schema.TB_ADW_DEP219M\n- 메타 설명: \"DEP휴면예금\" (메타 원본)\n- 주요 컬럼: ACN, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT (메타 원본)\n- 엔티티 범위: \"휴면예금 상태 및 잔액 정보\" (LLM 추론)\n- 기능적 용도: \"휴면예금 조회 및 관리\" (LLM 추론)\n"
+      },
+      "prompt_tokens": 466,
+      "response_text": "{\n  \"selected\": [],\n  \"rejected\": [\"TB_ADW_DEP219M\", \"biz_schema.TB_ADW_DEP219M\"],\n  \"reason\": \"제공된 테이블들은 모두 '휴면예금' 관련 데이터로, 신규 예금 가입 현황을 집계하기 위한 일반 예금 신규 거래 정보가 포함되어 있지 않아 분석에 적합하지 않습니다.\"\n}",
+      "response_tokens": 96,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 1857.49,
+      "timestamp": "2026-03-27 07:59:47.948"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### TB_ADW_DEP220M\n- 메타 설명: \"DEP미수령예금 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 월배치이며, 기준일자 조건을 포함하여 조회해야 한다.\" (메타 원본)\n- 주요 컬럼: ACN, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT (메타 원본)\n\n### biz_schema.TB_ADW_DEP220M\n- 메타 설명: \"DEP미수령예금 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 월배치이며, 기준일자 조건을 포함하여 조회해야 한다.\" (메타 원본)\n- 주요 컬럼: ACN, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT (메타 원본)\n- 엔티티 범위: \"DEP미수령예금 데이터 포함\" (LLM 추론)\n- 기능적 용도: \"DEP 업무 영역 내 데이터 관리\" (LLM 추론)\n- 갱신 주기: \"월배치\" (LLM 추론)\n"
+      },
+      "prompt_tokens": 572,
+      "response_text": "{\n  \"selected\": [],\n  \"rejected\": [\"TB_ADW_DEP220M\", \"biz_schema.TB_ADW_DEP220M\"],\n  \"reason\": \"두 테이블 모두 '미수령예금'을 관리하는 테이블로, '예금신규' 데이터를 집계하는 목적에 부합하지 않아 분석에 적합하지 않습니다.\"\n}",
+      "response_tokens": 87,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 1388.66,
+      "timestamp": "2026-03-27 07:59:49.337"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### TB_ADW_DEP218M\n- 메타 설명: \"DEP예금세금정보 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 일배치이며, 기준일자 조건을 포함하여 조회해야 한다.\" (메타 원본)\n- 주요 컬럼: ACN, TAX_YR, STD_DT, NM, DCD, CD, AMT, USE_YN (메타 원본)\n\n### TB_ADW_DEP209M\n- 메타 설명: \"DEP예금상품정보 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 일배치이며, 기준일자 조건을 포함하여 조회해야 한다.\" (메타 원본)\n- 주요 컬럼: PD_CD, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT (메타 원본)\n"
+      },
+      "prompt_tokens": 505,
+      "response_text": "{\n  \"selected\": [],\n  \"rejected\": [\"TB_ADW_DEP218M\", \"TB_ADW_DEP209M\"],\n  \"reason\": \"두 테이블 모두 예금의 세금 정보 및 상품 정보만을 포함하고 있어, 질의에 필요한 '지점별 예금 신규 실적'을 집계할 수 있는 지점 코드나 신규 계좌 정보 컬럼이 존재하지 않습니다.\"\n}",
+      "response_tokens": 98,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 1650.03,
+      "timestamp": "2026-03-27 07:59:50.987"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### TB_ADW_DEP213L\n- 메타 설명: \"DEP예금이자지급내역. 당행 업무 데이터.\" (메타 원본)\n- 주요 컬럼: ACN, PAY_DT, SEQ, TR_DT, EXEC_DT, AMT, DCD, CHN_CD (메타 원본)\n\n### biz_schema.TB_ADW_DEP201P\n- 메타 설명: \"DEP수신계좌잔액(T+0) 테이블. 당행 DEP 업무 영역에서 관리하는 데이터로, 관련 업무 프로세스 수행 시 데이터가 적재된다. 갱신 주기는 실시간이며, 기준일자 조건을 포함하여 조회해야 한다.\" (메타 원본)\n- 주요 컬럼: ACN, STD_DT, EDPS_CSN, ACT_DCD, BAL_AMT, OPEN_DT, BLNG_BRCD, PD_CD (메타 원본)\n- 엔티티 범위: \"DEP 업무 영역 수신 계좌 데이터\" (LLM 추론)\n- 기능적 용도: \"수신계좌 잔액 및 관리 정보\" (LLM 추론)\n- 갱신 주기: \"실시간\" (LLM 추론)\n"
+      },
+      "prompt_tokens": 555,
+      "response_text": "{\n  \"selected\": [\"biz_schema.TB_ADW_DEP201P\"],\n  \"rejected\": [\"TB_ADW_DEP213L\"],\n  \"reason\": \"TB_ADW_DEP201P는 계좌 개설일(OPEN_DT)과 지점 정보(BLNG_BRCD)를 포함하고 있어 신규 가입 지점 분석에 적합하나, TB_ADW_DEP213L은 이자 지급 내역 위주로 구성되어 있어 신규 가입 건수 집계에 부적합합니다.\"\n}",
+      "response_tokens": 131,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2030.0,
+      "timestamp": "2026-03-27 07:59:53.018"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### biz_schema.TB_ADW_DEP211M\n- 메타 설명: \"DEP예금상품조건\" (메타 원본)\n- 주요 컬럼: PD_CD, COND_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN (메타 원본)\n- 엔티티 범위: \"예금 상품의 조건 관련 마스터 데이터\" (LLM 추론)\n- 기능적 용도: \"DEP예금상품조건 관리\" (LLM 추론)\n\n### biz_schema.TB_ADW_DEP210M\n- 메타 설명: \"DATA TABLE\" (메타 원본)\n- 주요 컬럼: PD_CD, EFF_DT, STD_DT, NM, DCD, CD, AMT, USE_YN (메타 원본)\n- 엔티티 범위: \"예금 상품 및 금리 관련 데이터\" (LLM 추론)\n- 기능적 용도: \"DATA TABLE (예금상품금리)\" (LLM 추론)\n"
+      },
+      "prompt_tokens": 512,
+      "response_text": "{\n  \"selected\": [],\n  \"rejected\": [\"biz_schema.TB_ADW_DEP211M\", \"biz_schema.TB_ADW_DEP210M\"],\n  \"reason\": \"두 테이블 모두 예금 상품의 조건 및 금리 정보만을 포함하는 마스터/기초 테이블로, 지점별 예금 신규 실적(거래 내역)을 집계할 수 있는 데이터가 존재하지 않아 분석에 부적합합니다.\"\n}",
+      "response_tokens": 107,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 1670.62,
+      "timestamp": "2026-03-27 07:59:54.690"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### biz_schema.TB_ADW_DEP212L\n- 메타 설명: \"DEP예금이자계산내역\" (메타 원본)\n- 주요 컬럼: ACN, CALC_DT, TR_DT, EXEC_DT, AMT, DCD, CHN_CD, RGST_DT (메타 원본)\n- 엔티티 범위: \"예금 이자 계산 이력 데이터\" (LLM 추론)\n- 기능적 용도: \"DEP예금이자계산내역\" (LLM 추론)\n\n### biz_schema.TB_ADW_DEP217M\n- 메타 설명: \"DEP예금질권설정\" (메타 원본)\n- 주요 컬럼: ACN, PLEDGE_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN (메타 원본)\n- 엔티티 범위: \"예금 질권 설정 데이터 (ACN, PLEDGE_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN 등 포함)\" (LLM 추론)\n- 기능적 용도: \"예금질권설정 내역 관리\" (LLM 추론)\n"
+      },
+      "prompt_tokens": 555,
+      "response_text": "{\n  \"selected\": [],\n  \"rejected\": [\"biz_schema.TB_ADW_DEP212L\", \"biz_schema.TB_ADW_DEP217M\"],\n  \"reason\": \"제공된 후보 테이블들은 예금 이자 계산 및 질권 설정에 관한 것으로, 질의 내용인 '예금 신규' 및 '지점 정보'를 포함하고 있지 않아 적합한 테이블이 없습니다.\"\n}",
+      "response_tokens": 99,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 1527.33,
+      "timestamp": "2026-03-27 07:59:56.218"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### biz_schema.TB_ADW_COM001M\n- 메타 설명: \"TEMP\" (메타 원본)\n- 주요 컬럼: BLNG_BRCD, BR_NM, RGN_CD, RGN_NM, BR_DCD, INS_DTM, UPD_DTM (메타 원본)\n- 엔티티 범위: \"은행 내 부점 기본 정보\" (LLM 추론)\n- 기능적 용도: \"지점명 및 소속 정보 관리\" (LLM 추론)\n\n### biz_schema.TB_ADW_DEA208M\n- 메타 설명: \"DEP예금계좌정보\" (메타 원본)\n- 주요 컬럼: ACN, STD_DT, NM, DCD, CD, AMT, USE_YN, RGST_DT (메타 원본)\n- 엔티티 범위: \"예금 계좌 원장 정보 (DCD: 지점코드, RGST_DT: 계좌등록일자 포함)\" (LLM 추론)\n- 기능적 용도: \"DEP예금계좌정보 관리\" (LLM 추론)\n"
+      },
+      "prompt_tokens": 538,
+      "response_text": "{\n  \"selected\": [\n    \"biz_schema.TB_ADW_DEA208M\",\n    \"biz_schema.TB_ADW_COM001M\"\n  ],\n  \"rejected\": [],\n  \"reason\": \"예금 신규 건수 산출을 위해 계좌 정보(TB_ADW_DEA208M)와 지점명 매핑을 위한 부점 기본 정보(TB_ADW_COM001M) 테이블의 조인이 필요합니다.\"\n}",
+      "response_tokens": 116,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 1610.46,
+      "timestamp": "2026-03-27 07:59:57.829"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "tool_name": "search_use_cases",
+        "tool_input": "관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인",
+        "tool_purpose": "새 가설 기반 활용사례 재검색",
+        "tool_result": "[{\"sql\": \"SELECT TR_ID, ACN, TR_AMT, TR_DCD, CHN_CD FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= '2025-11-19' AND TR_DT <= '2025-12-21' AND TR_AMT >= 100000000\", \"description\": \"2025-11-19~2025-12-21 기간 1억원 이상 거래 내역\", \"tables_used\": [\"TB_ADW_TRX701L\"], \"domain\": \"TRX\", \"complexity\": \"simple\", \"exec_user\": \"user05\", \"exec_dt\": \"2025-07-20\", \"_score\": 0.00921105407178402, \"similarity\": 0.00921105407178402}, {\"sql\": \"SELECT TR_ID, ACN, TR_AMT, TR_DCD, CHN_CD FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= '2025-06-19' AND TR_DT <= '2025-08-02' AND TR_AMT >= 100000000\", \"description\": \"2025-06-19~2025-08-02 기간 1억원 이상 거래 내역 (분기 기준)\", \"tables_used\": [\"TB_ADW_TRX701L\"], \"domain\": \"TRX\", \"complexity\": \"simple\", \"exec_user\": \"user36\", \"exec_dt\": \"2025-10-22\", \"_score\": 0.008689899928867817, \"similarity\": 0.008689899928867817}, {\"sql\": \"WITH monthly_trx AS (SELECT DATE_TRUNC('month', TR_DT) AS mon, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '6 months' GROUP BY DATE_TRUNC('month', TR_DT)) SELECT mon, cnt, total, LAG(total) OVER (ORDER BY mon) AS prev_total, total - LAG(total) OVER (ORDER BY mon) AS diff FROM monthly_trx ORDER BY mon LIMIT 20\", \"description\": \"최근 6개월 월별 거래금액 추이 및 전월 대비 증감 (최근 기준) (상위 20건)\", \"tables_used\": [\"TB_ADW_TRX701L\"], \"domain\": \"TRX\", \"complexity\": \"cte\", \"exec_user\": \"user37\", \"exec_dt\": \"2026-02-17\", \"_score\": 0.008074160665273666, \"similarity\": 0.008074160665273666}, {\"sql\": \"SELECT CHN_CD, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' GROUP BY CHN_CD ORDER BY cnt DESC LIMIT 20\", \"description\": \"최근 30일 채널별 거래건수 및 거래금액 (상위 20건)\", \"tables_used\": [\"TB_ADW_TRX701L\"], \"domain\": \"TRX\", \"complexity\": \"aggregation\", \"exec_user\": \"user07\", \"exec_dt\": \"2025-10-30\", \"_score\": 0.008054460398852825, \"similarity\": 0.008054460398852825}, {\"sql\": \"SELECT TR_ID, ACN, TR_AMT, TR_DCD, CHN_CD FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= '2025-07-19' AND TR_DT <= '2025-08-25' AND TR_AMT >= 1000000\", \"description\": \"2025-07-19~2025-08-25 기간 100만원 이상 거래 내역\", \"tables_used\": [\"TB_ADW_TRX701L\"], \"domain\": \"TRX\", \"complexity\": \"simple\", \"exec_user\": \"user03\", \"exec_dt\": \"2025-08-06\", \"_score\": 0.007855379022657871, \"similarity\": 0.007855379022657871}]"
+      },
+      "prompt_tokens": 3547,
+      "response_text": "{\n  \"insight\": \"제공된 활용사례들은 대부분 TB_ADW_TRX701L 테이블을 활용한 거래금액 및 채널 분석 위주이며, 지점별 예금신규 현황을 직접 산출할 수 있는 테이블이나 컬럼 정보는 확인되지 않습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_TRX701L\",\n      \"value\": \"거래 내역 테이블 (TR_DT, TR_AMT, CHN_CD 포함)\",\n      \"confidence\": 0.4,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"활용사례분석\",\n      \"evidence\": \"도구 실행 결과에서 거래 데이터는 확인되나, 지점 정보와 예금 신규 여부를 판단할 컬럼이 부재함.\",\n      \"is_critical\": false\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_TRX701L\",\n      \"role\": \"거래 내역 데이터\",\n      \"relevant_columns\": [\"TR_DT\", \"TR_AMT\", \"CHN_CD\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"일자별/채널별 거래금액 및 거래건수 데이터\",\n      \"functional_usage\": \"거래 내역 조회 및 집계 분석\",\n      \"data_refresh_hint\": \"일별 적재 패턴 확인됨\"\n    }\n  ]\n}",
+      "response_tokens": 349,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 3595.92,
+      "timestamp": "2026-03-27 08:00:04.257"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n## | [U] 테이블을 비교 판정하세요.",
+      "prompt_variables": {
+        "original_query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "time_slot": "(명시되지 않음)",
+        "table_comparison_block": "### biz_schema.TB_ADW_DEP212L\n- 메타 설명: \"DEP예금이자계산내역\" (메타 원본)\n- 주요 컬럼: ACN, CALC_DT, TR_DT, EXEC_DT, AMT, DCD, CHN_CD, RGST_DT (메타 원본)\n- 엔티티 범위: \"예금 이자 계산 이력 데이터\" (LLM 추론)\n- 기능적 용도: \"DEP예금이자계산내역\" (LLM 추론)\n\n### biz_schema.TB_ADW_DEP211M\n- 메타 설명: \"DEP예금상품조건\" (메타 원본)\n- 주요 컬럼: PD_CD, COND_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN (메타 원본)\n- 엔티티 범위: \"예금 상품의 조건 관련 마스터 데이터\" (LLM 추론)\n- 기능적 용도: \"DEP예금상품조건 관리\" (LLM 추론)\n\n### biz_schema.TB_ADW_DEP210M\n- 메타 설명: \"DATA TABLE\" (메타 원본)\n- 주요 컬럼: PD_CD, EFF_DT, STD_DT, NM, DCD, CD, AMT, USE_YN (메타 원본)\n- 엔티티 범위: \"예금 상품 및 금리 관련 데이터\" (LLM 추론)\n- 기능적 용도: \"DATA TABLE (예금상품금리)\" (LLM 추론)\n\n### biz_schema.TB_ADW_DEP217M\n- 메타 설명: \"DEP예금질권설정\" (메타 원본)\n- 주요 컬럼: ACN, PLEDGE_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN (메타 원본)\n- 엔티티 범위: \"예금 질권 설정 데이터 (ACN, PLEDGE_SEQ, STD_DT, NM, DCD, CD, AMT, USE_YN 등 포함)\" (LLM 추론)\n- 기능적 용도: \"예금질권설정 내역 관리\" (LLM 추론)\n"
+      },
+      "prompt_tokens": 785,
+      "response_text": "{\n  \"selected\": [],\n  \"rejected\": [\"biz_schema.TB_ADW_DEP212L\", \"biz_schema.TB_ADW_DEP211M\", \"biz_schema.TB_ADW_DEP210M\", \"biz_schema.TB_ADW_DEP217M\"],\n  \"reason\": \"제공된 후보 테이블들은 예금 이자, 상품 조건, 질권 설정 등 특정 업무에 국한되어 있으며, 지점별 신규 가입 건수를 집계할 수 있는 지점 코드(BR_CD)나 신규 거래 여부 컬럼이 포함되어 있지 않아 해당 질의를 처리하기에 적합하지 않습니다.\"\n}",
+      "response_tokens": 157,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2009.86,
+      "timestamp": "2026-03-27 08:00:26.056"
+    }
+  ],
+  "decisions": [
+    {
+      "node": "intent_classifier",
+      "decision_type": "intent_classification",
+      "chosen": "data_analysis",
+      "alternatives": [],
+      "confidence": 0.95,
+      "reason": "category=DATA_ANALYSIS, TOP 3 지점을 추출하는 과정은 지점 간의 실적을 비교하는 분석적 판단을 포함하며, 명시된 기준(예금신규가 많은 순)에 따른 데이터 해석을 요청함",
+      "timestamp": "2026-03-27 07:58:28.305"
+    },
+    {
+      "node": "query_normalizer",
+      "decision_type": "normalization_result",
+      "chosen": "RANK",
+      "alternatives": [],
+      "confidence": 0.0,
+      "reason": "entities=['예금', '지점'], measures=['예금신규건수'], filters=0, ambiguities=0",
+      "timestamp": "2026-03-27 07:58:36.103"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.291,
+      "reason": "knowledge=2/16, tables=12, pending_steps=0",
+      "timestamp": "2026-03-27 07:59:57.832"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.288,
+      "reason": "knowledge=2/17, tables=12, pending_steps=0",
+      "timestamp": "2026-03-27 08:00:07.570"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.288,
+      "reason": "knowledge=2/17, tables=12, pending_steps=0",
+      "timestamp": "2026-03-27 08:00:16.370"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "conclude_failure",
+      "alternatives": [],
+      "confidence": 0.288,
+      "reason": "knowledge=2/17, tables=12, pending_steps=0",
+      "timestamp": "2026-03-27 08:00:26.060"
+    }
+  ],
+  "context_retrievals": [
+    {
+      "source": "embedding_encode",
+      "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=15"
+      ],
+      "latency_ms": 13990.58,
+      "timestamp": "2026-03-27 07:58:50.106"
+    },
+    {
+      "source": "reranker",
+      "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+      "results_count": 5,
+      "results_summary": [
+        "backend=onnx",
+        "input=20",
+        "filtered=20",
+        "output=5",
+        "지점별 정상계좌수 및 예금잔액 상위 10개 지점 (전월 기준) (score=0.038)",
+        "지점별 정상계좌수 및 예금잔액 상위 10개 지점 (전월 기준) (score=0.038)",
+        "지점별 정상계좌수 및 예금잔액 상위 10개 지점 (전월 기준) (score=0.038)"
+      ],
+      "latency_ms": 3672.13,
+      "timestamp": "2026-03-27 07:58:57.839"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=36"
+      ],
+      "latency_ms": 391.01,
+      "timestamp": "2026-03-27 07:59:03.056"
+    },
+    {
+      "source": "reranker",
+      "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다",
+      "results_count": 5,
+      "results_summary": [
+        "backend=onnx",
+        "input=20",
+        "filtered=20",
+        "output=5",
+        "지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준) (score=0.763)",
+        "지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준) (score=0.763)",
+        "지점별 정상계좌수 및 예금잔액 상위 10개 지점 (분기 기준) (score=0.763)"
+      ],
+      "latency_ms": 5719.71,
+      "timestamp": "2026-03-27 07:59:08.861"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다",
+      "results_count": 5,
+      "results_summary": [
+        "지점별 예금 계좌 및 잔액 현황을 조회하기 위해 TB_ADW_DEP201P(예금 계좌 원장)와 TB_ADW_COM001M(지점 정보) 테이블을 BLNG_BRCD로 조인하는 구조를 확인했습니다."
+      ],
+      "latency_ms": 6198.5,
+      "timestamp": "2026-03-27 07:59:12.951"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP201P",
+      "results_count": 1,
+      "results_summary": [
+        "TB_ADW_DEP201P 테이블에서 계좌 개설일자(OPEN_DT)와 관리지점코드(BLNG_BRCD)를 활용하여 지점별 예금신규 현황을 집계할 수 있음을 확인하였습니다."
+      ],
+      "latency_ms": 30.3,
+      "timestamp": "2026-03-27 07:59:15.561"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_COM001M",
+      "results_count": 1,
+      "results_summary": [
+        "지점의 명칭과 관할 정보를 관리하는 'COM부점정보기본' 테이블을 확인하였으며, 지점 코드(BLNG_BRCD)와 명칭(BR_NM) 컬럼을 식별했습니다."
+      ],
+      "latency_ms": 6.3,
+      "timestamp": "2026-03-27 07:59:17.850"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP219M",
+      "results_count": 1,
+      "results_summary": [
+        "조회한 TB_ADW_DEP219M 테이블은 '휴면예금' 관련 정보를 담고 있어, 질의하신 '예금 신규' 데이터를 추출하기에는 부적절한 테이블로 판단됩니다."
+      ],
+      "latency_ms": 4.1,
+      "timestamp": "2026-03-27 07:59:20.563"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP220M",
+      "results_count": 1,
+      "results_summary": [
+        "DEP미수령예금 테이블(TB_ADW_DEP220M)의 메타데이터를 확인했으나, 질의에 필요한 '지점' 정보와 '예금신규' 여부를 식별할 수 있는 컬럼이 명확하지 않습니다."
+      ],
+      "latency_ms": 4.9,
+      "timestamp": "2026-03-27 07:59:23.179"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP212L",
+      "results_count": 1,
+      "results_summary": [
+        "TB_ADW_DEP212L 테이블에서 예금 관련 데이터를 확인했으나, '지점' 정보가 명시된 컬럼이 없어 추가적인 지점 관련 테이블 탐색이 필요합니다."
+      ],
+      "latency_ms": 4.0,
+      "timestamp": "2026-03-27 07:59:26.019"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP218M",
+      "results_count": 1,
+      "results_summary": [
+        "DEP예금세금정보 테이블(TB_ADW_DEP218M)의 메타 정보를 확인했으나, 예금신규 지점 정보를 식별할 수 있는 지점 코드나 신규 일자 컬럼이 명확하지 않아 추가적인 테이블 조사가 필요합니다."
+      ],
+      "latency_ms": 4.6,
+      "timestamp": "2026-03-27 07:59:29.101"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP213L",
+      "results_count": 1,
+      "results_summary": [
+        "TB_ADW_DEP213L 테이블은 'DEP예금이자지급내역' 정보를 담고 있으나, 예금 신규 데이터를 식별할 수 있는 지점 코드나 신규 일자 관련 구체적인 컬럼은 확인되지 않았습니다."
+      ],
+      "latency_ms": 4.0,
+      "timestamp": "2026-03-27 07:59:31.760"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP211M",
+      "results_count": 1,
+      "results_summary": [
+        "TB_ADW_DEP211M 테이블은 예금상품의 조건 정보를 관리하는 테이블로, 예금 신규 실적(지점별/일자별)을 집계하기 위한 직접적인 거래 원장 정보는 포함되어 있지 않습니다."
+      ],
+      "latency_ms": 4.1,
+      "timestamp": "2026-03-27 07:59:36.025"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP209M",
+      "results_count": 1,
+      "results_summary": [
+        "DEP예금상품정보 테이블(TB_ADW_DEP209M)의 메타데이터를 확인했으나, '지점' 정보와 관련된 컬럼은 발견되지 않아 추가 테이블 탐색이 필요합니다."
+      ],
+      "latency_ms": 6.8,
+      "timestamp": "2026-03-27 07:59:38.049"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEA208M",
+      "results_count": 1,
+      "results_summary": [
+        "DEP예금계좌정보를 포함하는 TB_ADW_DEA208M 테이블을 확보하였으며, 지점코드(DCD)와 계좌등록일자(RGST_DT)를 통해 예금 신규 건수를 집계할 수 있습니다."
+      ],
+      "latency_ms": 6.9,
+      "timestamp": "2026-03-27 07:59:40.580"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP210M",
+      "results_count": 1,
+      "results_summary": [
+        "TB_ADW_DEP210M 테이블을 확인했으나, 컬럼 구성이 상품 금리 정보 위주로 되어 있어 지점별 예금 신규 건수를 집계하기 위한 적절한 테이블을 추가로 찾아야 합니다."
+      ],
+      "latency_ms": 5.5,
+      "timestamp": "2026-03-27 07:59:43.381"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "TB_ADW_DEP217M",
+      "results_count": 1,
+      "results_summary": [
+        "조회된 TB_ADW_DEP217M 테이블은 'DEP예금질권설정'에 관한 데이터를 담고 있으며, 예금 신규 건수를 집계하기 위한 고객 정보나 지점 코드 및 계좌 개설 정보는 포함되어 있지 않아 질의 해결을 위한 추가 테이블 검색이 필요합니다."
+      ],
+      "latency_ms": 5.5,
+      "timestamp": "2026-03-27 07:59:45.943"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=23"
+      ],
+      "latency_ms": 205.08,
+      "timestamp": "2026-03-27 07:59:58.042"
+    },
+    {
+      "source": "reranker",
+      "query": "관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인",
+      "results_count": 5,
+      "results_summary": [
+        "backend=onnx",
+        "input=20",
+        "filtered=20",
+        "output=5",
+        "2025-11-19~2025-12-21 기간 1억원 이상 거래 내역 (score=0.009)",
+        "2025-06-19~2025-08-02 기간 1억원 이상 거래 내역 (분기 기준) (score=0.009)",
+        "최근 6개월 월별 거래금액 추이 및 전월 대비 증감 (최근 기준) (상위 20건) (score=0.008)"
+      ],
+      "latency_ms": 2563.42,
+      "timestamp": "2026-03-27 08:00:00.662"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인",
+      "results_count": 5,
+      "results_summary": [
+        "제공된 활용사례들은 대부분 TB_ADW_TRX701L 테이블을 활용한 거래금액 및 채널 분석 위주이며, 지점별 예금신규 현황을 직접 산출할 수 있는 테이블이나 컬럼 정보는 확인되지 않습니다."
+      ],
+      "latency_ms": 2825.5,
+      "timestamp": "2026-03-27 08:00:04.258"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=11"
+      ],
+      "latency_ms": 136.88,
+      "timestamp": "2026-03-27 08:00:09.567"
+    },
+    {
+      "source": "reranker",
+      "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+      "results_count": 5,
+      "results_summary": [
+        "backend=onnx",
+        "input=20",
+        "filtered=20",
+        "output=5",
+        "개인 고객의 기본 정보(고객번호, 성명, 유형, 등급) 목록 (분기 기준) (score=0.003)",
+        "개인 고객의 기본 정보(고객번호, 성명, 유형, 등급) 목록 (분기 기준) (score=0.003)",
+        "개인 고객의 기본 정보(고객번호, 성명, 유형, 등급) 목록 (분기 기준) (score=0.003)"
+      ],
+      "latency_ms": 1735.97,
+      "timestamp": "2026-03-27 08:00:11.341"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+      "results_count": 5,
+      "results_summary": [
+        "활용사례 5건 검색 (상위 유사도: 0.00)"
+      ],
+      "latency_ms": 1911.1,
+      "timestamp": "2026-03-27 08:00:12.972"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "매뉴얼에서 업무 규정/산출식 확인 후 재탐색",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=15"
+      ],
+      "latency_ms": 152.35,
+      "timestamp": "2026-03-27 08:00:16.526"
+    },
+    {
+      "source": "reranker",
+      "query": "매뉴얼에서 업무 규정/산출식 확인 후 재탐색",
+      "results_count": 5,
+      "results_summary": [
+        "backend=onnx",
+        "input=20",
+        "filtered=20",
+        "output=5",
+        "고객유형별(개인/기업/개인사업자) 대출건수 및 실행금액 (분기 기준) (상위 10건) (score=0.000)",
+        "고객유형별(개인/기업/개인사업자) 대출건수 및 실행금액 (반기 기준) (상위 100건) (score=0.000)",
+        "고객유형별(개인/기업/개인사업자) 대출건수 및 실행금액 (분기 기준) (상위 100건) (score=0.000)"
+      ],
+      "latency_ms": 4059.25,
+      "timestamp": "2026-03-27 08:00:20.626"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "매뉴얼에서 업무 규정/산출식 확인 후 재탐색",
+      "results_count": 5,
+      "results_summary": [
+        "활용사례 5건 검색 (상위 유사도: 0.00)"
+      ],
+      "latency_ms": 4253.8,
+      "timestamp": "2026-03-27 08:00:22.339"
+    }
+  ],
+  "sql": {
+    "generated_sql": "",
+    "validated": false,
+    "validation_errors": [],
+    "retry_count": 0,
+    "validation_feedback": "",
+    "execution_success": false,
+    "row_count": 0,
+    "execution_time_ms": 0.0
+  },
+  "timeline": [
+    {
+      "seq": 1,
+      "event_type": "node_start",
+      "node": "preprocess",
+      "parent_seq": 0,
+      "summary": "preprocess 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:22.341"
+    },
+    {
+      "seq": 2,
+      "event_type": "node_end",
+      "node": "preprocess",
+      "parent_seq": 1,
+      "summary": "preprocess 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 0.79,
+      "status": "success",
+      "timestamp": "2026-03-27 07:58:22.342"
+    },
+    {
+      "seq": 3,
+      "event_type": "node_start",
+      "node": "resolve_history",
+      "parent_seq": 0,
+      "summary": "resolve_history 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:22.344"
+    },
+    {
+      "seq": 4,
+      "event_type": "llm_call",
+      "node": "이력해소",
+      "parent_seq": null,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 1214tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 1178,
+        "response_tokens": 36,
+        "response_preview": "{\n  \"decision\": \"NEW\",\n  \"query\": \"지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\"\n}"
+      },
+      "duration_ms": 2504.56,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:25.994"
+    },
+    {
+      "seq": 5,
+      "event_type": "node_end",
+      "node": "resolve_history",
+      "parent_seq": 3,
+      "summary": "resolve_history 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 3651.94,
+      "status": "success",
+      "timestamp": "2026-03-27 07:58:25.996"
+    },
+    {
+      "seq": 6,
+      "event_type": "node_start",
+      "node": "classify_intent",
+      "parent_seq": 0,
+      "summary": "classify_intent 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:25.998"
+    },
+    {
+      "seq": 7,
+      "event_type": "llm_call",
+      "node": "classify_intent",
+      "parent_seq": 6,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 1132tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 1058,
+        "response_tokens": 74,
+        "response_preview": "{\n  \"category\": \"DATA_ANALYSIS\",\n  \"confidence\": \"HIGH\",\n  \"reason\": \"TOP 3 지점을 추출하는 과정은 지점 간의 실적을 비교하는 분석적 판단을 포함하며, 명시"
+      },
+      "duration_ms": 2305.46,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:28.304"
+    },
+    {
+      "seq": 8,
+      "event_type": "decision",
+      "node": "intent_classifier",
+      "parent_seq": null,
+      "summary": "intent_classification: data_analysis (95%)",
+      "detail": {
+        "type": "intent_classification",
+        "chosen": "data_analysis",
+        "alternatives": [],
+        "confidence": 0.95,
+        "reason": "category=DATA_ANALYSIS, TOP 3 지점을 추출하는 과정은 지점 간의 실적을 비교하는 분석적 판단을 포함하며, 명시된 기준(예금신규가 많은 순)에 따른 데이터 해석을 요청함"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:28.305"
+    },
+    {
+      "seq": 9,
+      "event_type": "node_end",
+      "node": "classify_intent",
+      "parent_seq": 6,
+      "summary": "classify_intent 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 2306.86,
+      "status": "success",
+      "timestamp": "2026-03-27 07:58:28.305"
+    },
+    {
+      "seq": 10,
+      "event_type": "node_start",
+      "node": "normalize_query",
+      "parent_seq": 0,
+      "summary": "normalize_query 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:28.306"
+    },
+    {
+      "seq": 11,
+      "event_type": "llm_call",
+      "node": "normalize_query",
+      "parent_seq": 10,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 8480tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 7771,
+        "response_tokens": 709,
+        "response_preview": "{\n  \"original_query\": \"지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\",\n  \"rewritten_query\": \"2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개"
+      },
+      "duration_ms": 3804.08,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:32.112"
+    },
+    {
+      "seq": 12,
+      "event_type": "llm_call",
+      "node": "normalize_query",
+      "parent_seq": 10,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 2447tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 1684,
+        "response_tokens": 763,
+        "response_preview": "{\n  \"original_query\": \"지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\",\n  \"rewritten_query\": \"2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개"
+      },
+      "duration_ms": 3989.98,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:36.102"
+    },
+    {
+      "seq": 13,
+      "event_type": "decision",
+      "node": "query_normalizer",
+      "parent_seq": null,
+      "summary": "normalization_result: RANK (0%)",
+      "detail": {
+        "type": "normalization_result",
+        "chosen": "RANK",
+        "alternatives": [],
+        "confidence": 0.0,
+        "reason": "entities=['예금', '지점'], measures=['예금신규건수'], filters=0, ambiguities=0"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:36.103"
+    },
+    {
+      "seq": 14,
+      "event_type": "node_end",
+      "node": "normalize_query",
+      "parent_seq": 10,
+      "summary": "normalize_query 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 7797.18,
+      "status": "success",
+      "timestamp": "2026-03-27 07:58:36.103"
+    },
+    {
+      "seq": 15,
+      "event_type": "node_start",
+      "node": "reason_plan",
+      "parent_seq": 0,
+      "summary": "reason_plan 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:58:36.104"
+    },
+    {
+      "seq": 16,
+      "event_type": "tool_call",
+      "node": "reason_plan",
+      "parent_seq": 15,
+      "summary": "embedding_encode('지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘')→1건",
+      "detail": {
+        "tool": "embedding_encode",
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "results_count": 1
+      },
+      "duration_ms": 13990.58,
+      "status": "success",
+      "timestamp": "2026-03-27 07:58:50.106"
+    },
+    {
+      "seq": 17,
+      "event_type": "tool_call",
+      "node": "reason_plan",
+      "parent_seq": 15,
+      "summary": "reranker('지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘')→5건",
+      "detail": {
+        "tool": "reranker",
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘",
+        "results_count": 5
+      },
+      "duration_ms": 3672.13,
+      "status": "success",
+      "timestamp": "2026-03-27 07:58:57.839"
+    },
+    {
+      "seq": 18,
+      "event_type": "llm_call",
+      "node": "reason_plan",
+      "parent_seq": 15,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 4332tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 3638,
+        "response_tokens": 694,
+        "response_preview": "{\n  \"unresolved_terms\": [\n    {\"key\": \"measure:예금신규건수\", \"description\": \"신규 예금 계좌를 식별하는 테이블과 컬럼, 그리고 '신규'의 정의(기준일자/상태코드)가"
+      },
+      "duration_ms": 4252.33,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:02.654"
+    },
+    {
+      "seq": 19,
+      "event_type": "node_end",
+      "node": "reason_plan",
+      "parent_seq": 15,
+      "summary": "reason_plan 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 26552.42,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:02.655"
+    },
+    {
+      "seq": 20,
+      "event_type": "node_start",
+      "node": "reason_explore",
+      "parent_seq": 0,
+      "summary": "reason_explore 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:02.662"
+    },
+    {
+      "seq": 21,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "embedding_encode('지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-')→1건",
+      "detail": {
+        "tool": "embedding_encode",
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다",
+        "results_count": 1
+      },
+      "duration_ms": 391.01,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:03.056"
+    },
+    {
+      "seq": 22,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "reranker('지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-')→5건",
+      "detail": {
+        "tool": "reranker",
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다",
+        "results_count": 5
+      },
+      "duration_ms": 5719.71,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:08.861"
+    },
+    {
+      "seq": 23,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 4485tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 3761,
+        "response_tokens": 724,
+        "response_preview": "{\n  \"insight\": \"지점별 예금 계좌 및 잔액 현황을 조회하기 위해 TB_ADW_DEP201P(예금 계좌 원장)와 TB_ADW_COM001M(지점 정보) 테이블을 BLNG_BRCD로 조인하는 구조를 확인했습"
+      },
+      "duration_ms": 4088.64,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:12.951"
+    },
+    {
+      "seq": 24,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_use_cases('지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-')→5건",
+      "detail": {
+        "tool": "search_use_cases",
+        "query": "지난 1년간 예금신규가 가장 많은 지점 TOP 3 알려줘\n2025-03-27부터 2026-03-27까지 1년간 지점별 예금 신규 개설 건수(예금신규건수)가 많은 순서대로 상위 3개 지점을 조회한다",
+        "results_count": 5
+      },
+      "duration_ms": 6198.5,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:12.952"
+    },
+    {
+      "seq": 25,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3190tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2845,
+        "response_tokens": 345,
+        "response_preview": "{\n  \"insight\": \"TB_ADW_DEP201P 테이블에서 계좌 개설일자(OPEN_DT)와 관리지점코드(BLNG_BRCD)를 활용하여 지점별 예금신규 현황을 집계할 수 있음을 확인하였습니다.\",\n  \"know"
+      },
+      "duration_ms": 2578.15,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:15.560"
+    },
+    {
+      "seq": 26,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP201P')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP201P",
+        "results_count": 1
+      },
+      "duration_ms": 30.3,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:15.561"
+    },
+    {
+      "seq": 27,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 2960tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2611,
+        "response_tokens": 349,
+        "response_preview": "{\n  \"insight\": \"지점의 명칭과 관할 정보를 관리하는 'COM부점정보기본' 테이블을 확인하였으며, 지점 코드(BLNG_BRCD)와 명칭(BR_NM) 컬럼을 식별했습니다.\",\n  \"knowledge_upda"
+      },
+      "duration_ms": 2280.94,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:17.849"
+    },
+    {
+      "seq": 28,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_COM001M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_COM001M",
+        "results_count": 1
+      },
+      "duration_ms": 6.3,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:17.850"
+    },
+    {
+      "seq": 29,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3042tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2721,
+        "response_tokens": 321,
+        "response_preview": "{\n  \"insight\": \"조회한 TB_ADW_DEP219M 테이블은 '휴면예금' 관련 정보를 담고 있어, 질의하신 '예금 신규' 데이터를 추출하기에는 부적절한 테이블로 판단됩니다.\",\n  \"knowledge_up"
+      },
+      "duration_ms": 2707.65,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:20.562"
+    },
+    {
+      "seq": 30,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP219M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP219M",
+        "results_count": 1
+      },
+      "duration_ms": 4.1,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:20.563"
+    },
+    {
+      "seq": 31,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3151tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2767,
+        "response_tokens": 384,
+        "response_preview": "{\n  \"insight\": \"DEP미수령예금 테이블(TB_ADW_DEP220M)의 메타데이터를 확인했으나, 질의에 필요한 '지점' 정보와 '예금신규' 여부를 식별할 수 있는 컬럼이 명확하지 않습니다.\",\n  \"kno"
+      },
+      "duration_ms": 2611.16,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:23.178"
+    },
+    {
+      "seq": 32,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP220M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP220M",
+        "results_count": 1
+      },
+      "duration_ms": 4.9,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:23.179"
+    },
+    {
+      "seq": 33,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3063tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2700,
+        "response_tokens": 363,
+        "response_preview": "{\n  \"insight\": \"TB_ADW_DEP212L 테이블에서 예금 관련 데이터를 확인했으나, '지점' 정보가 명시된 컬럼이 없어 추가적인 지점 관련 테이블 탐색이 필요합니다.\",\n  \"knowledge_upda"
+      },
+      "duration_ms": 2835.51,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:26.019"
+    },
+    {
+      "seq": 34,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP212L')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP212L",
+        "results_count": 1
+      },
+      "duration_ms": 4.0,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:26.019"
+    },
+    {
+      "seq": 35,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3191tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2796,
+        "response_tokens": 395,
+        "response_preview": "{\n  \"insight\": \"DEP예금세금정보 테이블(TB_ADW_DEP218M)의 메타 정보를 확인했으나, 예금신규 지점 정보를 식별할 수 있는 지점 코드나 신규 일자 컬럼이 명확하지 않아 추가적인 테이블 조사가 "
+      },
+      "duration_ms": 3076.07,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:29.101"
+    },
+    {
+      "seq": 36,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP218M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP218M",
+        "results_count": 1
+      },
+      "duration_ms": 4.6,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:29.101"
+    },
+    {
+      "seq": 37,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3136tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2731,
+        "response_tokens": 405,
+        "response_preview": "{\n  \"insight\": \"TB_ADW_DEP213L 테이블은 'DEP예금이자지급내역' 정보를 담고 있으나, 예금 신규 데이터를 식별할 수 있는 지점 코드나 신규 일자 관련 구체적인 컬럼은 확인되지 않았습니다.\","
+      },
+      "duration_ms": 2653.68,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:31.759"
+    },
+    {
+      "seq": 38,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP213L')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP213L",
+        "results_count": 1
+      },
+      "duration_ms": 4.0,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:31.760"
+    },
+    {
+      "seq": 39,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3093tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2751,
+        "response_tokens": 342,
+        "response_preview": "{\n  \"insight\": \"TB_ADW_DEP211M 테이블은 예금상품의 조건 정보를 관리하는 테이블로, 예금 신규 실적(지점별/일자별)을 집계하기 위한 직접적인 거래 원장 정보는 포함되어 있지 않습니다.\",\n  "
+      },
+      "duration_ms": 4260.72,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:36.025"
+    },
+    {
+      "seq": 40,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP211M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP211M",
+        "results_count": 1
+      },
+      "duration_ms": 4.1,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:36.026"
+    },
+    {
+      "seq": 41,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3141tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2766,
+        "response_tokens": 375,
+        "response_preview": "{\n  \"insight\": \"DEP예금상품정보 테이블(TB_ADW_DEP209M)의 메타데이터를 확인했으나, '지점' 정보와 관련된 컬럼은 발견되지 않아 추가 테이블 탐색이 필요합니다.\",\n  \"knowledge_u"
+      },
+      "duration_ms": 2014.63,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:38.048"
+    },
+    {
+      "seq": 42,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP209M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP209M",
+        "results_count": 1
+      },
+      "duration_ms": 6.8,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:38.049"
+    },
+    {
+      "seq": 43,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3106tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2723,
+        "response_tokens": 383,
+        "response_preview": "{\n  \"insight\": \"DEP예금계좌정보를 포함하는 TB_ADW_DEA208M 테이블을 확보하였으며, 지점코드(DCD)와 계좌등록일자(RGST_DT)를 통해 예금 신규 건수를 집계할 수 있습니다.\",\n  \"kn"
+      },
+      "duration_ms": 2523.01,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:40.579"
+    },
+    {
+      "seq": 44,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEA208M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEA208M",
+        "results_count": 1
+      },
+      "duration_ms": 6.9,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:40.580"
+    },
+    {
+      "seq": 45,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3120tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2749,
+        "response_tokens": 371,
+        "response_preview": "{\n  \"insight\": \"TB_ADW_DEP210M 테이블을 확인했으나, 컬럼 구성이 상품 금리 정보 위주로 되어 있어 지점별 예금 신규 건수를 집계하기 위한 적절한 테이블을 추가로 찾아야 합니다.\",\n  \"kn"
+      },
+      "duration_ms": 2794.18,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:43.380"
+    },
+    {
+      "seq": 46,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP210M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP210M",
+        "results_count": 1
+      },
+      "duration_ms": 5.5,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:43.381"
+    },
+    {
+      "seq": 47,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3140tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 2756,
+        "response_tokens": 384,
+        "response_preview": "{\n  \"insight\": \"조회된 TB_ADW_DEP217M 테이블은 'DEP예금질권설정'에 관한 데이터를 담고 있으며, 예금 신규 건수를 집계하기 위한 고객 정보나 지점 코드 및 계좌 개설 정보는 포함되어 있지 "
+      },
+      "duration_ms": 2555.55,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:45.942"
+    },
+    {
+      "seq": 48,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "search_table_meta('TB_ADW_DEP217M')→1건",
+      "detail": {
+        "tool": "search_table_meta",
+        "query": "TB_ADW_DEP217M",
+        "results_count": 1
+      },
+      "duration_ms": 5.5,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:45.943"
+    },
+    {
+      "seq": 49,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 562tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 466,
+        "response_tokens": 96,
+        "response_preview": "{\n  \"selected\": [],\n  \"rejected\": [\"TB_ADW_DEP219M\", \"biz_schema.TB_ADW_DEP219M\"],\n  \"reason\": \"제공된 테이블들은 모두 '휴면예금' 관련 데"
+      },
+      "duration_ms": 1857.49,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:47.948"
+    },
+    {
+      "seq": 50,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 659tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 572,
+        "response_tokens": 87,
+        "response_preview": "{\n  \"selected\": [],\n  \"rejected\": [\"TB_ADW_DEP220M\", \"biz_schema.TB_ADW_DEP220M\"],\n  \"reason\": \"두 테이블 모두 '미수령예금'을 관리하는 테"
+      },
+      "duration_ms": 1388.66,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:49.337"
+    },
+    {
+      "seq": 51,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 603tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 505,
+        "response_tokens": 98,
+        "response_preview": "{\n  \"selected\": [],\n  \"rejected\": [\"TB_ADW_DEP218M\", \"TB_ADW_DEP209M\"],\n  \"reason\": \"두 테이블 모두 예금의 세금 정보 및 상품 정보만을 포함하고 있"
+      },
+      "duration_ms": 1650.03,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:50.987"
+    },
+    {
+      "seq": 52,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 686tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 555,
+        "response_tokens": 131,
+        "response_preview": "{\n  \"selected\": [\"biz_schema.TB_ADW_DEP201P\"],\n  \"rejected\": [\"TB_ADW_DEP213L\"],\n  \"reason\": \"TB_ADW_DEP201P는 계좌 개설일(OPE"
+      },
+      "duration_ms": 2030.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:53.018"
+    },
+    {
+      "seq": 53,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 619tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 512,
+        "response_tokens": 107,
+        "response_preview": "{\n  \"selected\": [],\n  \"rejected\": [\"biz_schema.TB_ADW_DEP211M\", \"biz_schema.TB_ADW_DEP210M\"],\n  \"reason\": \"두 테이블 모두 예금 상"
+      },
+      "duration_ms": 1670.62,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:54.690"
+    },
+    {
+      "seq": 54,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 654tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 555,
+        "response_tokens": 99,
+        "response_preview": "{\n  \"selected\": [],\n  \"rejected\": [\"biz_schema.TB_ADW_DEP212L\", \"biz_schema.TB_ADW_DEP217M\"],\n  \"reason\": \"제공된 후보 테이블들은 "
+      },
+      "duration_ms": 1527.33,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:56.218"
+    },
+    {
+      "seq": 55,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 654tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 538,
+        "response_tokens": 116,
+        "response_preview": "{\n  \"selected\": [\n    \"biz_schema.TB_ADW_DEA208M\",\n    \"biz_schema.TB_ADW_COM001M\"\n  ],\n  \"rejected\": [],\n  \"reason\": \"예"
+      },
+      "duration_ms": 1610.46,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:57.829"
+    },
+    {
+      "seq": 56,
+      "event_type": "node_end",
+      "node": "reason_explore",
+      "parent_seq": 20,
+      "summary": "reason_explore 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 55168.87,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:57.830"
+    },
+    {
+      "seq": 57,
+      "event_type": "node_start",
+      "node": "reason_evaluate",
+      "parent_seq": 0,
+      "summary": "reason_evaluate 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:57.831"
+    },
+    {
+      "seq": 58,
+      "event_type": "decision",
+      "node": "reason_evaluate",
+      "parent_seq": 57,
+      "summary": "readiness_verdict: replan (29%)",
+      "detail": {
+        "type": "readiness_verdict",
+        "chosen": "replan",
+        "alternatives": [],
+        "confidence": 0.291,
+        "reason": "knowledge=2/16, tables=12, pending_steps=0"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:57.832"
+    },
+    {
+      "seq": 59,
+      "event_type": "node_end",
+      "node": "reason_evaluate",
+      "parent_seq": 57,
+      "summary": "reason_evaluate 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 1.38,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:57.832"
+    },
+    {
+      "seq": 60,
+      "event_type": "node_start",
+      "node": "reason_recover",
+      "parent_seq": 0,
+      "summary": "reason_recover 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:57.833"
+    },
+    {
+      "seq": 61,
+      "event_type": "node_end",
+      "node": "reason_recover",
+      "parent_seq": 60,
+      "summary": "reason_recover 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 1.05,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:57.834"
+    },
+    {
+      "seq": 62,
+      "event_type": "node_start",
+      "node": "reason_explore",
+      "parent_seq": 0,
+      "summary": "reason_explore 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 07:59:57.835"
+    },
+    {
+      "seq": 63,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 62,
+      "summary": "embedding_encode('관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색')→1건",
+      "detail": {
+        "tool": "embedding_encode",
+        "query": "관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인",
+        "results_count": 1
+      },
+      "duration_ms": 205.08,
+      "status": "success",
+      "timestamp": "2026-03-27 07:59:58.042"
+    },
+    {
+      "seq": 64,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 62,
+      "summary": "reranker('관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색')→5건",
+      "detail": {
+        "tool": "reranker",
+        "query": "관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인",
+        "results_count": 5
+      },
+      "duration_ms": 2563.42,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:00.662"
+    },
+    {
+      "seq": 65,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 62,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 3896tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 3547,
+        "response_tokens": 349,
+        "response_preview": "{\n  \"insight\": \"제공된 활용사례들은 대부분 TB_ADW_TRX701L 테이블을 활용한 거래금액 및 채널 분석 위주이며, 지점별 예금신규 현황을 직접 산출할 수 있는 테이블이나 컬럼 정보는 확인되지 않습니"
+      },
+      "duration_ms": 3595.92,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:04.257"
+    },
+    {
+      "seq": 66,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 62,
+      "summary": "search_use_cases('관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색')→5건",
+      "detail": {
+        "tool": "search_use_cases",
+        "query": "관련 테이블(DEP219M, DEP220M 등)의 메타데이터를 직접 검색하여 신규 거래와 관련된 컬럼 확인",
+        "results_count": 5
+      },
+      "duration_ms": 2825.5,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:04.258"
+    },
+    {
+      "seq": 67,
+      "event_type": "node_end",
+      "node": "reason_explore",
+      "parent_seq": 62,
+      "summary": "reason_explore 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 9732.66,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:07.568"
+    },
+    {
+      "seq": 68,
+      "event_type": "node_start",
+      "node": "reason_evaluate",
+      "parent_seq": 0,
+      "summary": "reason_evaluate 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:07.569"
+    },
+    {
+      "seq": 69,
+      "event_type": "decision",
+      "node": "reason_evaluate",
+      "parent_seq": 68,
+      "summary": "readiness_verdict: replan (29%)",
+      "detail": {
+        "type": "readiness_verdict",
+        "chosen": "replan",
+        "alternatives": [],
+        "confidence": 0.288,
+        "reason": "knowledge=2/17, tables=12, pending_steps=0"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:07.570"
+    },
+    {
+      "seq": 70,
+      "event_type": "node_end",
+      "node": "reason_evaluate",
+      "parent_seq": 68,
+      "summary": "reason_evaluate 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 1.04,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:07.570"
+    },
+    {
+      "seq": 71,
+      "event_type": "node_start",
+      "node": "reason_recover",
+      "parent_seq": 0,
+      "summary": "reason_recover 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:07.571"
+    },
+    {
+      "seq": 72,
+      "event_type": "node_end",
+      "node": "reason_recover",
+      "parent_seq": 71,
+      "summary": "reason_recover 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 1857.36,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:09.429"
+    },
+    {
+      "seq": 73,
+      "event_type": "node_start",
+      "node": "reason_explore",
+      "parent_seq": 0,
+      "summary": "reason_explore 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:09.430"
+    },
+    {
+      "seq": 74,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 73,
+      "summary": "embedding_encode('보고서 SQL 검색으로 테이블/조인 구조 참고')→1건",
+      "detail": {
+        "tool": "embedding_encode",
+        "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+        "results_count": 1
+      },
+      "duration_ms": 136.88,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:09.567"
+    },
+    {
+      "seq": 75,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 73,
+      "summary": "reranker('보고서 SQL 검색으로 테이블/조인 구조 참고')→5건",
+      "detail": {
+        "tool": "reranker",
+        "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+        "results_count": 5
+      },
+      "duration_ms": 1735.97,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:11.341"
+    },
+    {
+      "seq": 76,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 73,
+      "summary": "search_use_cases('보고서 SQL 검색으로 테이블/조인 구조 참고')→5건",
+      "detail": {
+        "tool": "search_use_cases",
+        "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+        "results_count": 5
+      },
+      "duration_ms": 1911.1,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:12.972"
+    },
+    {
+      "seq": 77,
+      "event_type": "node_end",
+      "node": "reason_explore",
+      "parent_seq": 73,
+      "summary": "reason_explore 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 6938.07,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:16.367"
+    },
+    {
+      "seq": 78,
+      "event_type": "node_start",
+      "node": "reason_evaluate",
+      "parent_seq": 0,
+      "summary": "reason_evaluate 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:16.367"
+    },
+    {
+      "seq": 79,
+      "event_type": "decision",
+      "node": "reason_evaluate",
+      "parent_seq": 78,
+      "summary": "readiness_verdict: replan (29%)",
+      "detail": {
+        "type": "readiness_verdict",
+        "chosen": "replan",
+        "alternatives": [],
+        "confidence": 0.288,
+        "reason": "knowledge=2/17, tables=12, pending_steps=0"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:16.370"
+    },
+    {
+      "seq": 80,
+      "event_type": "node_end",
+      "node": "reason_evaluate",
+      "parent_seq": 78,
+      "summary": "reason_evaluate 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 1.54,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:16.370"
+    },
+    {
+      "seq": 81,
+      "event_type": "node_start",
+      "node": "reason_recover",
+      "parent_seq": 0,
+      "summary": "reason_recover 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:16.371"
+    },
+    {
+      "seq": 82,
+      "event_type": "node_end",
+      "node": "reason_recover",
+      "parent_seq": 81,
+      "summary": "reason_recover 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 0.76,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:16.372"
+    },
+    {
+      "seq": 83,
+      "event_type": "node_start",
+      "node": "reason_explore",
+      "parent_seq": 0,
+      "summary": "reason_explore 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:16.373"
+    },
+    {
+      "seq": 84,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 83,
+      "summary": "embedding_encode('매뉴얼에서 업무 규정/산출식 확인 후 재탐색')→1건",
+      "detail": {
+        "tool": "embedding_encode",
+        "query": "매뉴얼에서 업무 규정/산출식 확인 후 재탐색",
+        "results_count": 1
+      },
+      "duration_ms": 152.35,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:16.526"
+    },
+    {
+      "seq": 85,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 83,
+      "summary": "reranker('매뉴얼에서 업무 규정/산출식 확인 후 재탐색')→5건",
+      "detail": {
+        "tool": "reranker",
+        "query": "매뉴얼에서 업무 규정/산출식 확인 후 재탐색",
+        "results_count": 5
+      },
+      "duration_ms": 4059.25,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:20.626"
+    },
+    {
+      "seq": 86,
+      "event_type": "tool_call",
+      "node": "reason_explore",
+      "parent_seq": 83,
+      "summary": "search_use_cases('매뉴얼에서 업무 규정/산출식 확인 후 재탐색')→5건",
+      "detail": {
+        "tool": "search_use_cases",
+        "query": "매뉴얼에서 업무 규정/산출식 확인 후 재탐색",
+        "results_count": 5
+      },
+      "duration_ms": 4253.8,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:22.339"
+    },
+    {
+      "seq": 87,
+      "event_type": "llm_call",
+      "node": "reason_explore",
+      "parent_seq": 83,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 942tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 785,
+        "response_tokens": 157,
+        "response_preview": "{\n  \"selected\": [],\n  \"rejected\": [\"biz_schema.TB_ADW_DEP212L\", \"biz_schema.TB_ADW_DEP211M\", \"biz_schema.TB_ADW_DEP210M\""
+      },
+      "duration_ms": 2009.86,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:26.056"
+    },
+    {
+      "seq": 88,
+      "event_type": "node_end",
+      "node": "reason_explore",
+      "parent_seq": 83,
+      "summary": "reason_explore 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 9684.55,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:26.057"
+    },
+    {
+      "seq": 89,
+      "event_type": "node_start",
+      "node": "reason_evaluate",
+      "parent_seq": 0,
+      "summary": "reason_evaluate 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:26.058"
+    },
+    {
+      "seq": 90,
+      "event_type": "decision",
+      "node": "reason_evaluate",
+      "parent_seq": 89,
+      "summary": "readiness_verdict: conclude_failure (29%)",
+      "detail": {
+        "type": "readiness_verdict",
+        "chosen": "conclude_failure",
+        "alternatives": [],
+        "confidence": 0.288,
+        "reason": "knowledge=2/17, tables=12, pending_steps=0"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:26.060"
+    },
+    {
+      "seq": 91,
+      "event_type": "node_end",
+      "node": "reason_evaluate",
+      "parent_seq": 89,
+      "summary": "reason_evaluate 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 1.88,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:26.060"
+    },
+    {
+      "seq": 92,
+      "event_type": "node_start",
+      "node": "reason_finalize",
+      "parent_seq": 0,
+      "summary": "reason_finalize 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-27 08:00:26.061"
+    },
+    {
+      "seq": 93,
+      "event_type": "node_end",
+      "node": "reason_finalize",
+      "parent_seq": 92,
+      "summary": "reason_finalize 완료",
+      "detail": {
+        "input": {},
+        "output": {}
+      },
+      "duration_ms": 0.64,
+      "status": "success",
+      "timestamp": "2026-03-27 08:00:26.062"
+    }
+  ],
+  "golden_id": "",
+  "eval_passed": null,
+  "eval_errors": [],
+  "total_llm_calls": 27,
+  "total_llm_latency_ms": 71176.67660003644,
+  "total_llm_tokens": 68698,
+  "node_path": [
+    "preprocess",
+    "resolve_history",
+    "classify_intent",
+    "normalize_query",
+    "reason_plan",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_finalize"
+  ]
+}

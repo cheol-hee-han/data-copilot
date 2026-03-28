@@ -703,7 +703,7 @@ class TraceEntry(BaseModel):
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/preprocessor.py` |
+| 파일 | `src/agents/nodes/interpret/preprocessor.py` |
 | 입력 | `user_input`, `clarification_response` (재진입 시) |
 | 출력 | `preprocessed_input`, `status` |
 | 기능 | 유니코드 NFKC 정규화, 연속 공백 단일화, 입력 길이 제한(500자) |
@@ -717,7 +717,7 @@ class TraceEntry(BaseModel):
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/intent_classifier.py` |
+| 파일 | `src/agents/nodes/interpret/intent_classifier.py` |
 | 입력 | `preprocessed_input` |
 | 출력 | `intent`, `intent_confidence` |
 | LLM | 설정 모델 (timeout 15초, max_tokens 50) |
@@ -731,7 +731,7 @@ class TraceEntry(BaseModel):
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/clarifier.py` |
+| 파일 | `src/agents/nodes/interpret/clarifier.py` |
 | 입력 | `preprocessed_input` |
 | 출력 | `clarification_question`, `formatted_response`, `awaiting_clarification` |
 | 규칙 | 질문 2~3개, 선택지 형태, 기술 용어 금지 |
@@ -782,7 +782,7 @@ class TraceEntry(BaseModel):
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/sql_executor.py` |
+| 파일 | `src/agents/nodes/present/sql_executor.py` |
 | 입력 | `validated_sql` |
 | 출력 | `sql_result` (SQLResult: columns, rows, row_count, execution_time_ms) |
 | 안전장치 | SELECT/WITH 문 재확인, 결과 행 수 상한(10,000건) |
@@ -793,7 +793,7 @@ class TraceEntry(BaseModel):
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/analyzer.py` + `src/agents/nodes/analyzer.py` + `src/utils/chart_generator.py` |
+| 파일 | `src/agents/nodes/present/analyzer.py` + `src/agents/nodes/present/analyzer.py` + `src/utils/chart_generator.py` |
 | 입력 | `sql_result`, `user_input` |
 | 출력 | `analysis_result` (summary, insights, statistics, visualization_code, visualization_type) |
 | LLM | 설정 모델 (JSON 구조 응답 + 시각화 판단 + SVG 생성) |
@@ -806,7 +806,7 @@ class TraceEntry(BaseModel):
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/formatter.py` |
+| 파일 | `src/agents/nodes/present/formatter.py` |
 | 입력 | `sql_result`, `user_input`, `trace_log` |
 | 출력 | `formatted_response` |
 | 규칙 | 기술용어 금지, 금액 단위 변환, 코드값→이름 변환, 표 형태 |
@@ -945,16 +945,16 @@ client = get_llm_client()
 **ES nori 한글 분석기 적용:**
 
 ```text
-standalone/docker/elasticsearch/Dockerfile   ← 신규 생성
+devtools/docker/elasticsearch/Dockerfile   ← 신규 생성
   FROM elasticsearch:8.15.0
   RUN bin/elasticsearch-plugin install --batch analysis-nori
 
-standalone/docker/docker-compose.dev.yml
+devtools/docker/docker-compose.dev.yml
   elasticsearch:
-    build: ./standalone/docker/elasticsearch   ← image → build 변경
+    build: ./devtools/docker/elasticsearch   ← image → build 변경
     image: dc-elasticsearch:8.15.0-nori
 
-standalone/scripts/seed_elasticsearch.py
+devtools/scripts/seed_elasticsearch.py
   SHARD_SETTINGS에 korean analyzer 정의 (nori_tokenizer + nori_readingform)
   모든 text 필드: "analyzer": "standard" → "analyzer": "korean"
 ```

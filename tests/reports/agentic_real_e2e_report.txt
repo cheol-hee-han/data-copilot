@@ -1,0 +1,94 @@
+
+========================================================================
+  에이전틱 코어 실제 E2E 테스트 보고서
+  (Docker 데이터소스 + LLM API)
+========================================================================
+
+## CONNECTOR
+--------------------------------------------------
+  [!!] mongo_table_meta
+    Query: 고객
+    Time: 48.6ms
+    result_count: 0
+    first_table: none
+
+  [OK] mongo_code_meta
+    Query: 상태
+    Time: 56.4ms
+    result_count: 20
+
+  [OK] mongo_glossary
+    Query: 여신
+    Time: 43.8ms
+    result_count: 2
+    first_term: 여신
+
+  [OK] es_table_meta
+    Query: 고객 마스터
+    Time: 678.0ms
+    result_count: 10
+
+  [OK] es_report_sql
+    Query: 여신 잔액
+    Time: 45.7ms
+    result_count: 5
+
+  [OK] qdrant_sql_history
+    Query: 지점별 고객 수 집계
+    Time: 309.9ms
+    result_count: 50
+    top_score: 0.5
+
+  [OK] qdrant_manual
+    Query: 연체 관리
+    Time: 166.4ms
+    result_count: 3
+
+## PLANNER_REAL
+--------------------------------------------------
+  [OK] customer_loan_query
+    Query: 고객별 여신 잔액 합계
+    Time: 297.3ms
+    phase: GENERATING
+    hypotheses: 0
+    knowledge_items: 0
+    candidates: 2
+    candidate_names: ['TB_ADW_LNB341P', 'TB_ADW_LNB301M']
+    fast_path: True
+    use_cases: 50
+    searched_queries: ['고객별 여신 잔액 합계']
+    hints_empty: False
+    FINDINGS: 가설 2개 미만 — Cold Start fallback만 존재
+
+## EXPLORER_REAL
+--------------------------------------------------
+  [OK] table_glossary_search
+    Query: 고객 + 여신
+    Time: 39.4ms
+    done_steps: 2
+    failed_steps: 0
+    tool_calls: 2
+    knowledge_items: 2
+    candidate_tables: 0
+    step_insights: ['search_table_meta 결과 없음', '용어사전 2건 확인']
+
+## FLOW_REAL
+--------------------------------------------------
+  [OK] planner_to_explorer
+    Query: 지점별 수신 잔액
+    Time: 0.0ms
+    planner_hypotheses: 0
+    planner_candidates: 1
+    explorer_knowledge: 0
+    explorer_candidates: 1
+    explorer_tool_calls: 0
+    phase_after_explore: EXPLORING
+
+========================================================================
+  TOTAL: 10 | PASS: 9 | WARN: 1 | FAIL: 0
+  AVG LATENCY: 168.6ms
+========================================================================
+
+## 개선 분석
+--------------------------------------------------
+  1. 가설 2개 미만 — Cold Start fallback만 존재

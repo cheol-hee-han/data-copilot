@@ -1,0 +1,110 @@
+도구 실행 결과를 해석하여 관찰 메모를 작성하세요.
+
+## 용어 정의
+
+- 지식 항목(knowledge item): 탐색에서 확인한 용어-DB 표현 매핑. UNRESOLVED/CANDIDATE/PROBABLE/CONFIRMED/CONFLICTED 상태를 가짐.
+
+## 현재 질의
+
+{original_query}
+
+## 실행한 도구
+
+- 도구: {tool_name}
+- 입력: {tool_input}
+- 목적: {tool_purpose}
+
+## 도구 실행 결과
+
+{tool_result}
+
+## 관찰 메모 작성 기준
+
+결과를 그대로 저장하지 말고, 현재 질의와의 관련성을 판단해서
+"무엇을 알게 됐는가"를 한 문장으로 기록하세요.
+
+형식:
+  발견: "order_status 컬럼에 CANCEL 값 존재 확인"
+  확인: "grade_nm = 'VIP' 실존 확인, VVIP도 존재"
+  부재: "orders 테이블에 category 정보 없음 → 조인 필요"
+  충돌: "취소 데이터가 orders와 claims 두 곳에 존재"
+
+## 지식 항목 상태 판정 기준
+
+결과의 출처에 따라 confidence와 status를 결정하세요:
+- 테이블 메타에서 컬럼 존재 확인 → **CANDIDATE** (0.3 ~ 0.5)
+- 코드값 목록에서 값 확인 → **PROBABLE** (0.5 ~ 0.7)
+- 샘플 데이터에서 실제 값 확인 → **CONFIRMED** (0.8 ~ 0.95)
+- 여러 소스에서 상충하는 정보 발견 → **CONFLICTED** (0.3)
+
+## 필수 여부(is_critical) 판단 기준
+
+각 지식 항목이 SQL 생성에 필수인지 판단하세요:
+- **is_critical = true**: 이 항목 없이는 SQL 자체를 만들 수 없음
+  예: 집계 대상 컬럼, WHERE 조건의 코드값, 데이터를 뽑을 핵심 테이블
+- **is_critical = false**: 없어도 SQL은 만들 수 있지만 있으면 결과가 더 좋음
+  예: 코드→이름 변환용 보조 테이블, 컬럼 한국어 설명, 참고 정보
+
+예시:
+  "TB_CUST_INFO에서 고객 데이터를 뽑아야 함" → is_critical: true
+  "TB_ORG는 지점코드→지점명 변환용, 없어도 집계는 가능" → is_critical: false
+
+## 충돌(CONFLICTED) 발견 시
+
+- status를 CONFLICTED로 설정하세요.
+- evidence에 어떤 소스에서 어떤 값이 나왔는지 기록하세요.
+- 어느 소스가 더 신뢰할 수 있는지, 해소를 위해 어떤 추가 탐색이 필요한지도 기록하세요.
+
+## 출력 형식
+
+```json
+{
+  "insight": "관찰 메모 한 문장",
+  "knowledge_updates": [
+    {
+      "key": "용어 식별자",
+      "value": "확인된 값",
+      "confidence": 0.7,
+      "new_status": "PROBABLE",
+      "source": "코드메타",
+      "evidence": "근거 한 문장",
+      "is_critical": true
+    }
+  ],
+  "new_tables": [
+    {
+      "table_name": "테이블명",
+      "role": "이 테이블이 커버하는 내용",
+      "relevant_columns": ["현재 질의에 필요한 컬럼"],
+      "join_keys": ["조인 키 컬럼 (확인된 경우)"]
+    }
+  ]
+}
+```
+
+## 예시
+
+입력:
+- 질의: "지점별 이번 달 신규 고객 수"
+- 도구: search_code_meta
+- 입력: STATUS_CD
+- 결과: [{"code": "01", "name": "정상"}, {"code": "02", "name": "휴면"}, {"code": "09", "name": "해지"}]
+
+출력:
+```json
+{
+  "insight": "확인: STATUS_CD에서 '01'=정상, '02'=휴면, '09'=해지 확인. 정상 고객 필터에 '01' 사용 가능",
+  "knowledge_updates": [
+    {
+      "key": "filter:상태=정상",
+      "value": "STATUS_CD = '01'",
+      "confidence": 0.7,
+      "new_status": "PROBABLE",
+      "source": "코드메타",
+      "evidence": "코드메타에서 STATUS_CD '01'=정상 확인",
+      "is_critical": true
+    }
+  ],
+  "new_tables": []
+}
+```

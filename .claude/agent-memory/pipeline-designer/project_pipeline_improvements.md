@@ -43,8 +43,8 @@ type: project
 
 - `src/agents/state/state.py`: QueryStatus.AWAITING_CLARIFICATION, SQL_RETRY 추가; PipelineState 에 sql_retry_count, validation_feedback, awaiting_clarification, clarification_turns 필드 추가
 - `src/agents/graph/pipeline.py`: _route_after_validation 재시도 루프 엣지 추가; _route_after_intent 명확화 횟수 초과 처리; validate_sql → generate_sql 루프 엣지
-- `src/agents/nodes/preprocessor.py`: _handle_clarification_response 분기 추가
-- `src/agents/nodes/clarifier.py`: awaiting_clarification=True 설정; _build_messages 히스토리 포함
+- `src/agents/nodes/interpret/preprocessor.py`: _handle_clarification_response 분기 추가
+- `src/agents/nodes/interpret/clarifier.py`: awaiting_clarification=True 설정; _build_messages 히스토리 포함
 - `src/agents/nodes/sql_generator.py`: sql_retry_count 증가; validation_feedback 섹션 주입
 - `src/agents/nodes/sql_validator.py`: validation_feedback 생성; 검증 실패 시 status=SQL_GENERATED 유지
 - `src/services/search_context_assembler.py`: asyncio.gather 병렬화; 소스별 독립 폴백

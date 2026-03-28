@@ -26,6 +26,7 @@ from enum import Enum
 
 from src.config import settings
 from src.utils.llm import ParseError, llm_call_with_parse_retry
+from src.utils.tracker import record_prompt_variables
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -128,7 +129,7 @@ def parse_decision(text: str) -> tuple[HistoryDecision, str]:
 
     코드 펜스(```json ... ```)가 포함되어 있으면 자동 제거한다.
     파싱 실패 시 ValueError를 발생시켜 llm_call_with_parse_retry가
-    format_hint로 재시도할 수 있게 한다.
+    자동 재시도할 수 있게 한다.
     """
     cleaned = re.sub(r"```(?:json)?\s*", "", text)
     cleaned = cleaned.replace("```", "").strip()
@@ -200,14 +201,13 @@ async def resolve_history(
     *,
     system_prompt: str,
     user_template: str,
-    format_hint: str = "",
     awaiting_clarification: bool = False,
 ) -> HistoryResolveResult:
     """대화 이력 해소 전체 파이프라인.
 
     1. 규칙 기반으로 LLM 호출 필요 여부 판단
     2. LLM에게 JSON으로 판정(CONTINUE/NEW/UNSURE) + query 요청
-    3. 파싱 실패 시 format_hint로 1회 재시도
+    3. 파싱 실패 시 자동 재시도
     4. 결과 반환
     """
     needs, reason = needs_history_resolve(
@@ -237,12 +237,15 @@ async def resolve_history(
                     {"role": "user", "content": user_prompt},
                 ],
                 parse_fn=parse_decision,
-                format_hint=format_hint,
                 max_tokens=settings.llm_default_max_tokens,
                 timeout=settings.llm_default_timeout,
                 node_name="이력해소",
             )
         )
+        record_prompt_variables({
+            "query": query,
+            "history": history_text[:300] + "..." if len(history_text) > 300 else history_text,
+        })
     except ParseError as e:
         logger.warning(
             "이력 해소 JSON 파싱 최종 실패, NEW로 폴백",

@@ -104,12 +104,12 @@ LLM_MODEL=qwen3:8b
 
 ```bash
 # 1. 컨테이너 기동 (ES는 nori 플러그인 포함 이미지로 빌드됨)
-docker compose -f standalone/docker/docker-compose.dev.yml up -d --build
+docker compose -f devtools/docker/docker-compose.dev.yml up -d --build
 
 # 2. 데이터 시딩
-python standalone/scripts/seed_postgres.py
-python standalone/scripts/seed_elasticsearch.py    # nori analyzer 적용된 인덱스 생성
-python standalone/scripts/seed_qdrant.py           # fastembed 모델 필요 (pip install fastembed)
+python devtools/scripts/seed_postgres.py
+python devtools/scripts/seed_elasticsearch.py    # nori analyzer 적용된 인덱스 생성
+python devtools/scripts/seed_qdrant.py           # fastembed 모델 필요 (pip install fastembed)
 
 # 3. .env 에서 Dummy 모드 비활성화
 USE_DUMMY=false
@@ -118,17 +118,17 @@ USE_DUMMY=false
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-> **참고:** ES 이미지는 `standalone/docker/elasticsearch/Dockerfile`에서 `analysis-nori` 플러그인이
+> **참고:** ES 이미지는 `devtools/docker/elasticsearch/Dockerfile`에서 `analysis-nori` 플러그인이
 > 포함된 커스텀 이미지(`dc-elasticsearch:8.15.0-nori`)로 빌드됩니다.
 > 최초 빌드 시 플러그인 다운로드로 1~2분 소요될 수 있습니다.
 
 ### 개별 시딩 (필요 시)
 
 ```bash
-docker compose -f standalone/docker/docker-compose.dev.yml up -d --build
-python standalone/scripts/seed_postgres.py
-python standalone/scripts/seed_elasticsearch.py
-python standalone/scripts/seed_qdrant.py
+docker compose -f devtools/docker/docker-compose.dev.yml up -d --build
+python devtools/scripts/seed_postgres.py
+python devtools/scripts/seed_elasticsearch.py
+python devtools/scripts/seed_qdrant.py
 ```
 
 ### 검색 쿼리 전략 테스트
@@ -150,5 +150,5 @@ pytest tests/test_qdrant_vector_search.py -v -s
 ### 인프라 정리
 
 ```bash
-docker compose -f standalone/docker/docker-compose.dev.yml down -v
+docker compose -f devtools/docker/docker-compose.dev.yml down -v
 ```

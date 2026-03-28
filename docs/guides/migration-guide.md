@@ -783,7 +783,7 @@ python -m uv run python -m src.agents.graph.runner "데이터 좀 뽑아줘"
 ```bash
 # 실 데이터소스 연결 후 골든셋 기반 SQL 생성 정확도를 측정한다.
 # 골든셋이 실 DB 기준으로 재작성된 상태에서만 의미 있다.
-python -m uv run python -m evaluation.evaluator
+python -m uv run python -m devtools.evaluation.evaluator
 ```
 
 ---

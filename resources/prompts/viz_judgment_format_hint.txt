@@ -1,5 +1,0 @@
-CHART_TYPE: bar
-CHART_TITLE: 월별 매출 추이
-
-허용되는 CHART_TYPE 값: bar, line, pie, table, none
-위 두 줄만 출력하세요. 다른 텍스트는 절대 추가하지 마세요.

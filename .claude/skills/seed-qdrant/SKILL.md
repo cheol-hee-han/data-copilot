@@ -165,7 +165,7 @@ LLM을 호출하지 않고, 현재 **업무 테이블 설계(섹션 5) + 업무 
 - 호스트에서 직접 실행 가능 (fastembed이 로컬에 설치된 경우)
 - 실행 명령:
   ```bash
-  PYTHONIOENCODING=utf-8 python standalone/scripts/seed_qdrant.py
+  PYTHONIOENCODING=utf-8 python devtools/scripts/seed_qdrant.py
   ```
 - Python 3.14에서 fastembed 빌드 실패 시 Docker 사용 (아래 참조)
 
@@ -173,11 +173,11 @@ LLM을 호출하지 않고, 현재 **업무 테이블 설계(섹션 5) + 업무 
 
 - `seed_qdrant.py`는 메인 드라이버 (컬렉션 생성 + 임베딩 + upsert)
 - `qdrant_data_generators.py`는 데이터 생성기 (biz_manual + sql_history)
-- 두 파일이 같은 디렉토리(`standalone/scripts/`)에 위치해야 함 (`sys.path.insert`로 임포트)
+- 두 파일이 같은 디렉토리(`devtools/scripts/`)에 위치해야 함 (`sys.path.insert`로 임포트)
 
 ## .env 경로
 
-- `.env` 파일 경로: `Path(__file__).resolve().parent.parent.parent / ".env"` (standalone/scripts/ → 프로젝트 루트)
+- `.env` 파일 경로: `Path(__file__).resolve().parent.parent.parent / ".env"` (devtools/scripts/ → 프로젝트 루트)
 - 기존 `.parent.parent`는 오류 — `.parent.parent.parent`가 올바른 경로
 
 ## 임베딩 모델 경고
@@ -205,8 +205,8 @@ LLM을 호출하지 않고, 현재 **업무 테이블 설계(섹션 5) + 업무 
 
 # 산출물 위치
 
-- 시딩 스크립트: `standalone/scripts/seed_qdrant.py`
-- 데이터 생성기: `standalone/scripts/qdrant_data_generators.py`
+- 시딩 스크립트: `devtools/scripts/seed_qdrant.py`
+- 데이터 생성기: `devtools/scripts/qdrant_data_generators.py`
 
 # 인자 사용법
 
@@ -220,8 +220,8 @@ Python 3.14에서 fastembed 빌드가 실패하는 경우, Docker 컨테이너 �
 
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm --network host \
-  -v "$(pwd)/standalone/scripts:/app/standalone/scripts:ro" \
+  -v "$(pwd)/devtools/scripts:/app/devtools/scripts:ro" \
   -v "$(pwd)/.env:/app/.env:ro" \
   -w /app python:3.12-slim \
-  sh -c "pip install -q fastembed qdrant-client python-dotenv && python standalone/scripts/seed_qdrant.py"
+  sh -c "pip install -q fastembed qdrant-client python-dotenv && python devtools/scripts/seed_qdrant.py"
 ```

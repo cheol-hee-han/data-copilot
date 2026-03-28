@@ -30,7 +30,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from src.utils.timezone import now_stamp
 from pathlib import Path
 from typing import Any
 
@@ -171,7 +171,7 @@ class SQLHistorySeeder:
             "logs/seed_checkpoint.json"
         )
         self._semaphore = asyncio.Semaphore(3)
-        self._now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self._now = now_stamp()
 
         # 통계
         self._stats: dict[str, int] = {

@@ -39,6 +39,7 @@ from src.utils.llm import (
     llm_call_with_parse_retry,
 )
 from src.utils.logger import get_logger
+from src.utils.tracker import record_prompt_variables
 
 logger = get_logger(__name__)
 
@@ -101,18 +102,18 @@ async def judge_visualization(
     data_summary: str,
     *,
     system_prompt: str,
-    format_hint: str,
+    user_template: str,
 ) -> tuple[VisualizationType, str]:
     """LLM에게 시각화 필요 여부와 차트 유형을 판단시킨다."""
+    user_message = user_template.format(data=data_summary)
     try:
         _, (chart_type, chart_title) = (
             await llm_call_with_parse_retry(
                 system=system_prompt,
                 messages=[
-                    {"role": "user", "content": data_summary},
+                    {"role": "user", "content": user_message},
                 ],
                 parse_fn=parse_viz_judgment,
-                format_hint=format_hint,
                 max_tokens=100,
                 timeout=settings.llm_default_timeout,
                 node_name="시각화판단",
@@ -137,12 +138,12 @@ async def generate_svg_via_llm(
     chart_title: str,
     data_summary: str,
     *,
-    user_template: str,
     system_prompt: str,
+    user_template: str,
 ) -> str:
     """LLM에게 SVG 코드를 직접 생성시킨다."""
     client = get_llm_client()
-    prompt = user_template.format(
+    user_message = user_template.format(
         chart_type=chart_type,
         chart_title=chart_title,
         data=data_summary,
@@ -154,7 +155,7 @@ async def generate_svg_via_llm(
             timeout=settings.llm_long_timeout,
             system=system_prompt,
             messages=[
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_message},
             ],
         )
     except Exception as e:
@@ -195,22 +196,25 @@ async def build_visualization(
     result: SQLResult,
     *,
     viz_judgment_prompt: str,
-    viz_judgment_hint: str,
-    viz_svg_template: str,
+    viz_judgment_user: str,
     viz_svg_system: str,
+    viz_svg_user: str,
 ) -> VisualizationData:
     """SQL 결과로부터 시각화 데이터를 생성한다."""
-    data_summary = (
-        f"컬럼: {result.columns}\n"
-        f"행 수: {result.row_count}\n"
-        f"샘플 데이터 (최대 10행):\n"
-        + "\n".join(str(row) for row in result.rows[:10])
+    from src.services.response_formatter import (
+        rows_to_markdown_table,
+    )
+
+    data_summary = rows_to_markdown_table(
+        result.columns,
+        result.rows,
+        max_rows=settings.analysis_max_rows,
     )
 
     chart_type, chart_title = await judge_visualization(
         data_summary,
         system_prompt=viz_judgment_prompt,
-        format_hint=viz_judgment_hint,
+        user_template=viz_judgment_user,
     )
     if chart_type == VisualizationType.NONE:
         return VisualizationData()
@@ -225,8 +229,8 @@ async def build_visualization(
         chart_type.value,
         chart_title,
         data_summary,
-        user_template=viz_svg_template,
         system_prompt=viz_svg_system,
+        user_template=viz_svg_user,
     )
 
     if not svg_code:
@@ -258,11 +262,10 @@ async def analyze_data(
     *,
     system_prompt: str,
     user_template: str,
-    format_hint: str,
     viz_judgment_prompt: str,
-    viz_judgment_hint: str,
-    viz_svg_template: str,
+    viz_judgment_user: str,
     viz_svg_system: str,
+    viz_svg_user: str,
     min_rows_for_viz: int,
 ) -> tuple[AnalysisResult, VisualizationData]:
     """추출 데이터를 분석하고 시각화를 생성한다.
@@ -272,8 +275,8 @@ async def analyze_data(
         sql_result: SQL 실행 결과.
         system_prompt: 분석 시스템 프롬프트.
         user_template: 분석 유저 프롬프트 템플릿.
-        format_hint: 분석 JSON 포맷 힌트.
-        viz_*: 시각화 관련 프롬프트들.
+        viz_svg_system: SVG 생성 시스템 프롬프트 (규칙+few-shot).
+        viz_svg_user: SVG 생성 유저 프롬프트 템플릿 ({chart_type},{data} 등).
         min_rows_for_viz: 시각화 최소 행 수.
 
     Returns:
@@ -293,12 +296,14 @@ async def analyze_data(
             VisualizationData(),
         )
 
-    result_str = "\n".join(
-        str(row) for row in sql_result.rows[:100]
+    from src.services.response_formatter import (
+        rows_to_markdown_table,
     )
-    query_result_str = (
-        f"컬럼: {', '.join(sql_result.columns)}\n"
-        f"{result_str}\n총 {sql_result.row_count}건"
+
+    query_result_str = rows_to_markdown_table(
+        sql_result.columns,
+        sql_result.rows,
+        max_rows=settings.analysis_max_rows,
     )
     user_message = user_template.format(
         user_input=user_input,
@@ -312,11 +317,14 @@ async def analyze_data(
                 {"role": "user", "content": user_message},
             ],
             parse_fn=parse_analysis_json,
-            format_hint=format_hint,
             max_tokens=settings.llm_format_max_tokens,
             timeout=settings.llm_long_timeout,
             node_name="데이터분석",
         )
+        record_prompt_variables({
+            "user_input": user_input,
+            "query_result": query_result_str[:300] + "..." if len(query_result_str) > 300 else query_result_str,
+        })
     except ParseError as e:
         logger.warning(
             "분석 JSON 파싱 최종 실패, 텍스트 폴백 사용",
@@ -338,9 +346,9 @@ async def analyze_data(
         viz = await build_visualization(
             sql_result,
             viz_judgment_prompt=viz_judgment_prompt,
-            viz_judgment_hint=viz_judgment_hint,
-            viz_svg_template=viz_svg_template,
+            viz_judgment_user=viz_judgment_user,
             viz_svg_system=viz_svg_system,
+            viz_svg_user=viz_svg_user,
         )
 
     return analysis, viz

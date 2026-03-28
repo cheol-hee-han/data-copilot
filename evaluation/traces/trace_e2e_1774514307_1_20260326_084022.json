@@ -1,0 +1,436 @@
+{
+  "run_id": "e2e_1774514307_1",
+  "user_input": "전체 고객 수 알려줘",
+  "session_id": "35c4bfea-b94d-4af4-bf94-9ef6026d5266",
+  "start_time": "2026-03-26T08:38:27.968580+00:00",
+  "end_time": "2026-03-26T08:40:22.083084+00:00",
+  "total_duration_ms": 114115.09,
+  "final_intent": "data_extraction",
+  "final_status": "error",
+  "final_response_summary": "죄송합니다. SQL 생성 실패\n시도한 접근 방식:\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n다시 시도하시거나, 요청을 좀 더 구체적으로 입력해주세요.",
+  "error_message": "SQL 생성 실패\n시도한 접근 방식:\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보",
+  "nodes": [
+    {
+      "node": "preprocess",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.58,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:38:28.002805+00:00"
+    },
+    {
+      "node": "resolve_history",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.02,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:38:28.004953+00:00"
+    },
+    {
+      "node": "classify_intent",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1556.4,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:38:29.561393+00:00"
+    },
+    {
+      "node": "normalize_query",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 2999.36,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:38:32.562565+00:00"
+    },
+    {
+      "node": "reason_plan",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 33343.99,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:05.907238+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 804.14,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:06.712427+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.45,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:06.713425+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.31,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:06.714425+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 10867.44,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:17.583246+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.78,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:17.584246+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 9887.86,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:27.473064+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 16098.63,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:43.572149+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.86,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:43.574155+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 11923.23,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:39:55.498725+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 26579.44,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:40:22.079084+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.06,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:40:22.080084+00:00"
+    },
+    {
+      "node": "reason_finalize",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.04,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:40:22.082083+00:00"
+    }
+  ],
+  "llm_calls": [
+    {
+      "node": "classify_intent",
+      "prompt_summary": "[S] 당신은 사용자 입력의 의도를 분류하는 전문가입니다.\n사용자가 데이터 분석 시스템에 입력한 문장을 받아, 아래 6개 카테고리 중 하나로 분류합니다.\n\n[분류 카테고리]\n\nDATA_ANALYSIS — 데이터에 대한 분석·비교·인사이트·판단을 요청\n  판별 기준: 아래 중  | [U] 다음 입력을 분류해 주세요.\n\n[입력]\n전체 고객 수 알려줘\n\nJSON만 출력하세요.",
+      "prompt_tokens": 1127,
+      "response_text": "{\n  \"category\": \"DATA_EXTRACTION\",\n  \"confidence\": \"HIGH\",\n  \"reason\": \"구체적인 비즈니스 엔티티인 '고객'와 수치/지표가 언급되며, 조회/추출을 요청하는 동사가 있음\"\n}",
+      "response_tokens": 61,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 1555.87,
+      "timestamp": "2026-03-26T08:38:29.561393+00:00"
+    },
+    {
+      "node": "normalize_query",
+      "prompt_summary": "[S] 당신은 은행 업무 자연어 질의를 구조화된 의미 슬롯으로 분해하는 전문가입니다.\n사용자가 데이터 추출 또는 분석을 요청하는 자연어 문장을 입력하면,\n이를 아래 8개 슬롯으로 분해하여 JSON으로 출력합니다.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ | [U] 다음 자연어 질의를 8-Slot 구조로 분해하여 JSON으로 출력해 주세요.\n\n[입력 질의]\n전체 고객 수 알려줘\n\n[오늘 날짜]\n2026-03-26\n\n[동의어 사전]\n\n[measures]\n  \"여신잔액\" ← 대출잔액, 대출금액, 론잔액, 여신금액, 대여금잔액\n  \"신",
+      "prompt_tokens": 7447,
+      "response_text": "```\n{\n  \"original_query\": \"전체 고객 수 알려줘\",\n  \"rewritten_query\": \"전체 고객의 수를 조회한다\",\n  \"intent\": {\n    \"primary\": \"EXTRACT\",\n    \"secondary\": []\n  },\n  \"entities\": [\n    {\n      \"term\": \"고객\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"고객\",\n      \"note\": null\n    }\n  ],\n  \"measures\": [\n    {\n      \"term\": \"수\",\n      \"measure_type\": \"RAW\",\n      \"agg_function\": \"COUNT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"고객수\",\n      \"note\": null\n    }\n  ],\n  \"dimensions\": [],\n  \"filters\": [],\n  \"time\": {\n    \"type\": \"NONE\",\n    \"base_period\": null,\n    \"compare_period\": null\n  },\n  \"modifiers\": [],\n  \"output_hint\": {\n    \"format\": \"DETAIL_LIST\",\n    \"doc_type\": null,\n    \"expected_columns\": [],\n    \"confidence\": \"MEDIUM\",\n    \"note\": null\n  },\n  \"ambiguities\": [\"조회 기준 시점이 명시되지 않음\"],\n  \"search_keywords\": {\n    \"meta_search\": [\"고객\", \"고객수\"],\n    \"vector_search\": \"전체 고객 수 조회\"\n  }\n}\n```",
+      "response_tokens": 301,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 1999.46,
+      "timestamp": "2026-03-26T08:38:31.563916+00:00"
+    },
+    {
+      "node": "normalize_query",
+      "prompt_summary": "[S] 당신은 구조화된 질의 분석 결과를 교차 검증하는 전문 검수자입니다.\nPhase 1에서 생성된 정규화 JSON을 받아, 아래 검증 규칙에 따라 수정된 JSON을 출력합니다.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[교차 | [U] 아래는 원본 질의와 Phase 1에서 생성된 정규화 JSON입니다.\n교차 검증 규칙 R1~R12를 모두 적용하여 수정된 JSON을 출력해 주세요.\n\n[원본 질의]\n전체 고객 수 알려줘\n\n[Phase 1 결과 JSON]\n{\n  \"original_query\": \"전체 고객",
+      "prompt_tokens": 1270,
+      "response_text": "```json\n{\n  \"original_query\": \"전체 고객 수 알려줘\",\n  \"rewritten_query\": \"전체 고객의 수를 조회한다\",\n  \"intent\": {\n    \"primary\": \"EXTRACT\",\n    \"secondary\": []\n  },\n  \"entities\": [\n    {\n      \"term\": \"고객\",\n      \"type\": \"DIRECT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"고객\",\n      \"note\": null\n    }\n  ],\n  \"measures\": [\n    {\n      \"term\": \"수\",\n      \"measure_type\": \"RAW\",\n      \"agg_function\": \"COUNT\",\n      \"confidence\": \"HIGH\",\n      \"normalized_term\": \"고객수\",\n      \"note\": null\n    }\n  ],\n  \"dimensions\": [],\n  \"filters\": [\n    {\n      \"type\": \"EXISTS\",\n      \"term\": \"고객\",\n      \"confidence\": \"MEDIUM\",\n      \"note\": \"EXISTS 필터를 추가하여 고객 존재 여부를 확인\"\n    }\n  ],\n  \"time\": {\n    \"type\": \"NONE\",\n    \"base_period\": null,\n    \"compare_period\": null\n  },\n  \"modifiers\": [],\n  \"output_hint\": {\n    \"format\": \"DETAIL_LIST\",\n    \"doc_type\": null,\n    \"expected_columns\": [\n      \"고객수\"\n    ],\n    \"confidence\": \"MEDIUM\",\n    \"note\": null\n  },\n  \"ambiguities\": [\n    \"조회 기준 시점이 명시되지 않음\"\n  ],\n  \"search_key",
+      "response_tokens": 369,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 997.72,
+      "timestamp": "2026-03-26T08:38:32.561564+00:00"
+    },
+    {
+      "node": "reason_plan",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스를 탐색하는 신중한 데이터 분석가입니다.\n확인되지 않은 것을 추측하지 말고, 탐색을 통해 점진적으로 확신을 쌓아가야 합니다.\n\n## 용어 정의\n\n- 지식 항목(knowledge item): 탐색에서 확인한 용어-DB 표현 매핑. UNRES | [U] 전체 고객 수 알려줘",
+      "prompt_tokens": 3188,
+      "response_text": "{\n  \"unresolved_terms\": [\n    {\"key\": \"customer_count\", \"description\": \"고객을 어떤 기준으로 세는지\", \"is_critical\": true}\n  ],\n  \"hypotheses\": [\n    {\n      \"hypothesis_id\": \"H1\",\n      \"description\": \"고객 마스터 테이블에서 전체 고객 수 집계\",\n      \"based_on_use_case\": null,\n      \"required_tables\": [\"고객 마스터\"],\n      \"missing_terms\": [\"고객 정의\"],\n      \"priority\": \"high\",\n      \"strategy\": \"유사한 고객 수 집계 활용사례 확인\"\n    },\n    {\n      \"hypothesis_id\": \"H_FALLBACK\",\n      \"description\": \"테이블 메타 정보 직접 확인\",\n      \"based_on_use_case\": null,\n      \"required_tables\": [],\n      \"missing_terms\": [],\n      \"priority\": \"low\",\n      \"strategy\": \"키워드 '고객수'로 테이블 메타 직접 검색\"\n    }\n  ],\n  \"execution_plan\": [\n    {\n      \"step\": 1,\n      \"tool\": \"search_use_cases\",\n      \"input\": \"전체 고객 수 집계\",\n      \"purpose\": \"유사한 고객 수 집계를 한 이전 사례에서 활용 패턴 확인\"\n    }\n  ]\n}",
+      "response_tokens": 280,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 1552.54,
+      "timestamp": "2026-03-26T08:39:05.906228+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_tokens": 2529,
+      "response_text": "{\n  \"insight\": \"고객 마스터 테이블 관련 정보 없음\",\n  \"knowledge_updates\": [],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_DEA203M\",\n      \"role\": \"계좌 마스터\",\n      \"relevant_columns\": [\"ACN\", \"STD_DT\", \"NM\", \"DCD\", \"CD\", \"AMT\", \"USE_YN\", \"RGST_DT\", \"RGST_USR_ID\", \"INS_DTM\", \"UPD_DTM\"],\n      \"join_keys\": [],\n      \"entity_scope\": \"\",\n      \"functional_usage\": \"\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 142,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 789.63,
+      "timestamp": "2026-03-26T08:39:06.712427+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_tokens": 2797,
+      "response_text": "{\n  \"insight\": \"현재 고객 수와 관련된 활용사례 5건 발견 — 고객유형별 고객 수 집계 및 개별 고객 정보 조회\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"table:TB_ADW_CSC101M\",\n      \"value\": \"고객 마스터 정보\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"search_use_cases\",\n      \"evidence\": \"5건의 활용사례에서 TB_ADW_CSC101M 테이블 사용\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_CSC101M\",\n      \"role\": \"고객 정보 마스터 — 유형별/등급별 고객 정보\",\n      \"relevant_columns\": [\"CUS_DCD\", \"EDPS_CSN\", \"CSM\", \"CUS_GRD_CD\"],\n      \"join_keys\": [\"CUS_DCD\"],\n      \"entity_scope\": \"고객 정보 — 활용사례에서 고객 마스터 데이터 역할 확인\",\n      \"functional_usage\": \"고객 수 집계 및 고객 정보 조회\",\n      \"data_refresh_hint\": \"일자별로 최신 상태로 유지됨\"\n    }\n  ]\n}",
+      "response_tokens": 275,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 10680.04,
+      "timestamp": "2026-03-26T08:39:17.582246+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터 탐색에서 실패 원인을 분석하고 대안을 수립하는 전략가입니다.\n이전 접근 방식이 실패했습니다.\n실패에서 교훈을 도출하고, 완전히 다른 각도로 접근하세요.\n\n## 입력\n\n- 사용자 질의: 전체 고객 수 알려줘\n- 실패 이력: [{\"hypothes | [U] 재계획하세요.",
+      "prompt_tokens": 1782,
+      "response_text": "{\n  \"lessons_learned\": \"이전의 'term_unresolvable' 실패는 전체 고객 수를 찾기 위한 접근이 부족했다는 것을 시사합니다. 동의어/유사어 사용이나, 업무 매뉴얼의 정의를 더 깊이 분석할 필요성이 있습니다.\",\n  \"give_up\": false,\n  \"reason\": \"\",\n  \"new_hypothesis\": {\n    \"hypothesis_id\": \"H_NEW\",\n    \"description\": \"고객 정보의 전체 수를 계산하기 위한 데이터를 찾기 위하여, 고객 정보와 관련된 다양한 테이블에서 관련된 정보를 확인할 필요가 있습니다.\",\n    \"required_tables\": [],\n    \"missing_terms\": [\"고객 정보\", \"고객 수\"],\n    \"priority\": \"high\",\n    \"strategy\": \"키워드 '고객', '사용자', '등록자' 등으로 테이블 메타와 컬럼 이름을 다시 검색하여 고객 정보를 다루는 테이블을 찾고, 업무 매뉴얼에서 고객 수에 대한 정의를 찾아ボ는 것을 포함할 것\"\n  },\n  \"execution_plan\": [\n    {\"step\": 1, \"tool\": \"search_table_meta\", \"input\": \"고객 정보 사용자 등록자\", \"purpose\": \"고객 정보와 관련된 테이블 찾기\"},\n    {\"step\": 2, \"tool\": \"search_column_name\", \"input\": \"고객 수\", \"purpose\": \"고객 수와 관련된 컬럼 찾기\"},\n    {\"step\": 3, \"tool\": \"check_manual\", \"input\": \"고객 정보 정의\", \"purpose\": \"업무 매뉴얼에서 고객 정보와 관련된 정의 찾기\"}\n  ]\n}",
+      "response_tokens": 379,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 9887.13,
+      "timestamp": "2026-03-26T08:39:27.473064+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_tokens": 2879,
+      "response_text": "{\n  \"insight\": \"전체 고객 수를 조회하는 SQL은 대출 관련 테이블에서 고객 번호로 집계할 수 있음을 알게 되었습니다.\",\n  \"knowledge_updates\": [\n    {\n      \"key\": \"고객 번호\",\n      \"value\": \"고객 번호 컬럼을 통한 고객 수 집계\",\n      \"confidence\": 0.5,\n      \"new_status\": \"CANDIDATE\",\n      \"source\": \"search_use_cases\",\n      \"evidence\": \"대출 관련 테이블에서 고객 번호로 집계할 수 있는 SQL 발견\",\n      \"is_critical\": true\n    }\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_CSC101M\",\n      \"role\": \"고객정보 마스터\",\n      \"relevant_columns\": [\"EDPS_CSN\", \"CSM\", \"CUS_DCD\", \"CUS_GRD_CD\"],\n      \"join_keys\": [\"EDPS_CSN\"],\n      \"entity_scope\": \"고객정보 (고객번호, 성명, 유형, 등급)\",\n      \"functional_usage\": \"고객 마스터 — 고객 수 집계 시 사용\",\n      \"data_refresh_hint\": \"\"\n    }\n  ]\n}",
+      "response_tokens": 265,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 15610.5,
+      "timestamp": "2026-03-26T08:39:43.572149+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터 탐색에서 실패 원인을 분석하고 대안을 수립하는 전략가입니다.\n이전 접근 방식이 실패했습니다.\n실패에서 교훈을 도출하고, 완전히 다른 각도로 접근하세요.\n\n## 입력\n\n- 사용자 질의: 전체 고객 수 알려줘\n- 실패 이력: [{\"hypothes | [U] 재계획하세요.",
+      "prompt_tokens": 1913,
+      "response_text": "{\n  \"lessons_learned\": \"전체 고객 수를 조회하는 SQL은 대출 관련 테이블에서 고객 번호로 집계할 수 있음을 알게 되었습니다. 이전 접근 방식은 고객 마스터 테이블이나 고객 정보에 대한 키워드와 용어를 사용하여 찾으려 했으나, 실패 원인이 탐색 스텝 소진과 충분한 정보 미확보에 기인함을 알 수 있습니다.\",\n  \"give_up\": false,\n  \"reason\": \"\",\n  \"new_hypothesis\": {\n    \"hypothesis_id\": \"H_NEW\",\n    \"description\": \"대출 관련 테이블에서 고객 번호로 집계하여 전체 고객 수를 조회하는ใหม로운 가설\",\n    \"required_tables\": [\"대출 관련 테이블\"],\n    \"missing_terms\": [\"고객 번호\"],\n    \"priority\": \"high\",\n    \"strategy\": \"대출 관련 테이블에서 고객 번호로 집계\"\n  },\n  \"execution_plan\": [\n    {\"step\": 1, \"tool\": \"search_table_meta\", \"input\": \"대출\", \"purpose\": \"대출 관련 테이블 tìm kiếm\"},\n    {\"step\": 2, \"tool\": \"get_sample_data\", \"input\": \"대출 관련 테이블\", \"purpose\": \"대출 관련 테이블의 샘플 데이터 확인\"},\n    {\"step\": 3, \"tool\": \"sql_execution\", \"input\": \"대출 관련 테이블에서 고객 번호로 집계하는 SQL 명령어\", \"purpose\": \"대출 관련 테이블에서 고객 번호로 집계하여 전체 고객 수를 조회\"}\n  ]\n}",
+      "response_tokens": 363,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 11921.33,
+      "timestamp": "2026-03-26T08:39:55.498725+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스 탐색 도구의 실행 결과를 해석하는 분석가입니다.\n도구가 반환한 원시 데이터에서 현재 질의에 관련된 핵심 정보만 추출하고,\n지식 항목의 상태를 정확하게 판정하세요.\n\n도구 실행 결과를 해석하여 관찰 메모를 작성하세요.\n\n## 현재 질의\n\n | [U] 결과를 해석하세요.",
+      "prompt_tokens": 3254,
+      "response_text": "{\n  \"insight\": \"무관련 테이블 2건 발견: WM리서치리포트, WM자산승계. 둘다 대출업무와 관련 없으며, 전체 고객 수와 관련된 내용 없음\",\n  \"knowledge_updates\": [\n  ],\n  \"new_tables\": [\n    {\n      \"table_name\": \"TB_ADW_WMR1411M\",\n      \"role\": \"WM리서치리포트 — 관련 업무 프로세스 수행\",\n      \"relevant_columns\": [],\n      \"join_keys\": [],\n      \"entity_scope\": \"\",\n      \"functional_usage\": \"WM리서치리포트 — 관련 업무 프로세스 수행\",\n      \"data_refresh_hint\": \"월배치\"\n    },\n    {\n      \"table_name\": \"TB_ADW_WMB1415M\",\n      \"role\": \"WM자산승계 — 자산 승계에 관한 테이블\",\n      \"relevant_columns\": [],\n      \"join_keys\": [],\n      \"entity_scope\": \"\",\n      \"functional_usage\": \"WM자산승계 — 관련 업무 프로세스 수행\",\n      \"data_refresh_hint\": \"실시간\"\n    }\n  ]\n}",
+      "response_tokens": 248,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 16432.74,
+      "timestamp": "2026-03-26T08:40:11.939388+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "prompt_summary": "[S] 당신은 은행 정보계 데이터베이스의 유사 테이블을 비교하는 분석가입니다.\n사용자 질의에 가장 적합한 테이블을 판정하세요.\n\n## 사용자 질의\n\n전체 고객 수 알려줘\n\n## 질의의 시간 조건\n\n(명시되지 않음)\n\n## 후보 테이블\n\n### biz_schema.TB_ADW_ | [U] 테이블을 비교 판정하세요.",
+      "prompt_tokens": 1633,
+      "response_text": "{\n  \"selected\": [],\n  \"rejected\": [\"biz_schema.TB_ADW_WMR1411M\", \"biz_schema.TB_ADW_WMB1415M\", \"biz_schema.TB_ADW_WMB1412M\", \"biz_schema.TB_ADW_TXP728M\", \"biz_schema.TB_ADW_TXP721M\", \"biz_schema.TB_ADW_TXP708M\", \"biz_schema.TB_ADW_TRX733S\", \"biz_schema.TB_ADW_TRX730S\", \"biz_schema.TB_ADW_TRX707G\", \"biz_schema.TB_ADW_TRX705G\"],\n  \"reason\": \"전체 고객 수를 알려주는 적합한 테이블이 존재하지 않음\"\n}",
+      "response_tokens": 159,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 10138.02,
+      "timestamp": "2026-03-26T08:40:22.078086+00:00"
+    }
+  ],
+  "decisions": [
+    {
+      "node": "intent_classifier",
+      "decision_type": "intent_classification",
+      "chosen": "data_extraction",
+      "alternatives": [],
+      "confidence": 0.95,
+      "reason": "category=DATA_EXTRACTION, 구체적인 비즈니스 엔티티인 '고객'와 수치/지표가 언급되며, 조회/추출을 요청하는 동사가 있음",
+      "timestamp": "2026-03-26T08:38:29.561393+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.45,
+      "reason": "knowledge=0/0, tables=1, pending_steps=0",
+      "timestamp": "2026-03-26T08:39:06.713425+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.2,
+      "reason": "knowledge=0/1, tables=1, pending_steps=0",
+      "timestamp": "2026-03-26T08:39:17.584246+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.2,
+      "reason": "knowledge=0/2, tables=1, pending_steps=0",
+      "timestamp": "2026-03-26T08:39:43.574155+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "conclude_failure",
+      "alternatives": [],
+      "confidence": 0.2,
+      "reason": "knowledge=0/2, tables=11, pending_steps=0",
+      "timestamp": "2026-03-26T08:40:22.080084+00:00"
+    }
+  ],
+  "context_retrievals": [
+    {
+      "source": "embedding_encode",
+      "query": "전체 고객 수 알려줘",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=5"
+      ],
+      "latency_ms": 31501.91,
+      "timestamp": "2026-03-26T08:39:04.084440+00:00"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "고객 마스터",
+      "results_count": 1,
+      "results_summary": [
+        "고객 마스터 테이블 관련 정보 없음"
+      ],
+      "latency_ms": 13.5,
+      "timestamp": "2026-03-26T08:39:06.712427+00:00"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "키워드 '고객수'로 테이블 메타 직접 검색",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=10"
+      ],
+      "latency_ms": 162.56,
+      "timestamp": "2026-03-26T08:39:06.878907+00:00"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "키워드 '고객수'로 테이블 메타 직접 검색",
+      "results_count": 50,
+      "results_summary": [
+        "현재 고객 수와 관련된 활용사례 5건 발견 — 고객유형별 고객 수 집계 및 개별 고객 정보 조회"
+      ],
+      "latency_ms": 186.3,
+      "timestamp": "2026-03-26T08:39:17.582246+00:00"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "키워드 '고객', '사용자', '등록자' 등으로 테이블 메타와 컬럼 이름을 다시 검색하여 고객 정보를 다루는 테이블을 찾고, 업무 매뉴얼에서 고객 수에 대한 정의를 찾아ボ는 것을 포함할 것",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=36"
+      ],
+      "latency_ms": 457.37,
+      "timestamp": "2026-03-26T08:39:27.932526+00:00"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "키워드 '고객', '사용자', '등록자' 등으로 테이블 메타와 컬럼 이름을 다시 검색하여 고객 정보를 다루는 테이블을 찾고, 업무 매뉴얼에서 고객 수에 대한 정의를 찾아ボ는 것을 포함할 것",
+      "results_count": 50,
+      "results_summary": [
+        "전체 고객 수를 조회하는 SQL은 대출 관련 테이블에서 고객 번호로 집계할 수 있음을 알게 되었습니다."
+      ],
+      "latency_ms": 486.5,
+      "timestamp": "2026-03-26T08:39:43.572149+00:00"
+    },
+    {
+      "source": "search_table_meta",
+      "query": "대출 관련 테이블",
+      "results_count": 10,
+      "results_summary": [
+        "무관련 테이블 2건 발견: WM리서치리포트, WM자산승계. 둘다 대출업무와 관련 없으며, 전체 고객 수와 관련된 내용 없음"
+      ],
+      "latency_ms": 6.5,
+      "timestamp": "2026-03-26T08:40:11.939388+00:00"
+    }
+  ],
+  "sql": {
+    "generated_sql": "",
+    "validated": false,
+    "validation_errors": [],
+    "retry_count": 0,
+    "validation_feedback": "",
+    "execution_success": false,
+    "row_count": 0,
+    "execution_time_ms": 0.0
+  },
+  "golden_id": "",
+  "eval_passed": null,
+  "eval_errors": [],
+  "total_llm_calls": 11,
+  "total_llm_latency_ms": 81564.98539999666,
+  "total_llm_tokens": 32661,
+  "node_path": [
+    "preprocess",
+    "resolve_history",
+    "classify_intent",
+    "normalize_query",
+    "reason_plan",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_finalize"
+  ]
+}

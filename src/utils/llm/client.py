@@ -22,6 +22,7 @@ settings.llm_provider와 관련 설정만 변경하면 노드 코드 수정 없�
 
 from __future__ import annotations
 
+import re as _re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +31,49 @@ from src.utils.tracker import (
     get_current_node,
     get_current_tracker,
 )
+
+
+# ── Thinking 모드 제어 유틸리티 ──
+
+_THINK_TAG_RE = _re.compile(r"<think>[\s\S]*?</think>\s*", _re.DOTALL)
+
+
+def _strip_thinking_tags(text: str) -> str:
+    """Qwen thinking 태그를 제거한다."""
+    return _THINK_TAG_RE.sub("", text).strip()
+
+
+def _resolve_thinking_params(model: str, mode: str) -> dict[str, Any]:
+    """모델과 thinking 모드에 맞는 API 파라미터를 반환한다.
+
+    모델별 처리:
+        Gemini  → reasoning_effort 파라미터
+        Qwen    → extra_body.chat_template_kwargs.enable_thinking
+        기타    → 파라미터 없음 (thinking 미지원)
+    """
+    if mode == "auto":
+        return {}
+
+    model_lower = model.lower()
+
+    if "gemini" in model_lower:
+        effort_map = {
+            "off": "none", "on": "medium",
+            "low": "low", "medium": "medium", "high": "high",
+        }
+        return {"reasoning_effort": effort_map.get(mode, "medium")}
+
+    if "qwen" in model_lower:
+        enabled = mode not in ("off", "none")
+        return {
+            "extra_body": {
+                "chat_template_kwargs": {
+                    "enable_thinking": enabled,
+                },
+            },
+        }
+
+    return {}
 
 
 def _build_prompt_summary(
@@ -155,6 +199,10 @@ class OpenAICompatibleMessages:
         """OpenAI chat.completions.create 를 Anthropic 인터페이스로 호출한다."""
         import time as _time
 
+        from src.agents.nodes.thinking_modes import (
+            get_thinking_mode,
+        )
+
         # Anthropic 의 system 파라미터 → OpenAI 의 system role message 로 변환
         openai_messages: list[dict[str, str]] = []
         if system:
@@ -169,12 +217,26 @@ class OpenAICompatibleMessages:
         if timeout is not None:
             call_kwargs["timeout"] = timeout
 
+        # ── Thinking 모드 제어 (모델별 자동 감지) ──
+        node_name = get_current_node()
+        thinking_mode = get_thinking_mode(node_name)
+        thinking_params = _resolve_thinking_params(
+            model, thinking_mode,
+        )
+        call_kwargs.update(thinking_params)
+
         _start = _time.perf_counter()
-        response = await self._client.chat.completions.create(**call_kwargs)
+        response = await self._client.chat.completions.create(
+            **call_kwargs,
+        )
         _elapsed = (_time.perf_counter() - _start) * 1000
 
         # OpenAI 응답 → Anthropic 호환 LLMResponse 로 변환
         text = response.choices[0].message.content or ""
+
+        # Qwen <think> 태그 제거
+        if "qwen" in model.lower():
+            text = _strip_thinking_tags(text)
 
         _tracker = get_current_tracker()
         if _tracker and _tracker.enabled:
@@ -184,7 +246,7 @@ class OpenAICompatibleMessages:
                 prompt_summary=_build_prompt_summary(
                     system, messages,
                 ),
-                response_text=text[:1000],
+                response_text=text,
                 model=model,
                 prompt_tokens=getattr(
                     _usage, "prompt_tokens", 0,

@@ -1,0 +1,358 @@
+{
+  "run_id": "e2e_1774514737_1",
+  "user_input": "1억 이상 대출 보유 고객 수",
+  "session_id": "1b2953d5-e833-4c50-8168-3e262cd27ac7",
+  "start_time": "2026-03-26T08:45:37.492448+00:00",
+  "end_time": "2026-03-26T08:45:41.221542+00:00",
+  "total_duration_ms": 3729.85,
+  "final_intent": "data_extraction",
+  "final_status": "error",
+  "final_response_summary": "죄송합니다. SQL 생성 실패\n시도한 접근 방식:\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n다시 시도하시거나, 요청을 좀 더 구체적으로 입력해주세요.",
+  "error_message": "SQL 생성 실패\n시도한 접근 방식:\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보\n  - 탐색 스텝 소진 — 충분한 정보 미확보",
+  "nodes": [
+    {
+      "node": "preprocess",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.3,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:37.518288+00:00"
+    },
+    {
+      "node": "resolve_history",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.02,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:37.520284+00:00"
+    },
+    {
+      "node": "classify_intent",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1344.54,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:38.865701+00:00"
+    },
+    {
+      "node": "normalize_query",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 207.39,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:39.074514+00:00"
+    },
+    {
+      "node": "reason_plan",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 363.21,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:39.438141+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 330.31,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:39.769472+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.74,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:39.771049+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.52,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:39.772092+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 348.58,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:40.121187+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.01,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:40.123184+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.74,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:40.124184+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 388.33,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:40.512754+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.47,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:40.515280+00:00"
+    },
+    {
+      "node": "reason_recover",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 190.56,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:40.707140+00:00"
+    },
+    {
+      "node": "reason_explore",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 508.7,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:41.217540+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.36,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:41.218543+00:00"
+    },
+    {
+      "node": "reason_finalize",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 1.08,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:41.220543+00:00"
+    }
+  ],
+  "llm_calls": [
+    {
+      "node": "의도분류",
+      "prompt_summary": "[S] 당신은 은행 데이터 요청을 분류하는 AI입니다.\n아래 규칙과 예제를 따라 사용자 요청을 정확히 분류하세요.\n\n[분류 기준]\n- data_extraction : 특정 데이터를 조회·추출하는 요청\n  신호어: ~건수, ~금액, ~목록, ~현황, 뽑아줘, 알려줘, 보여줘,  | [U] 1억 이상 대출 보유 고객 수",
+      "prompt_tokens": 539,
+      "response_text": "INTENT: data_extraction\nCONFIDENCE: 0.96",
+      "response_tokens": 15,
+      "model": "llama-3.3-70b-versatile",
+      "latency_ms": 654.92,
+      "timestamp": "2026-03-26T08:45:38.865169+00:00"
+    }
+  ],
+  "decisions": [
+    {
+      "node": "intent_classifier",
+      "decision_type": "intent_classification",
+      "chosen": "data_extraction",
+      "alternatives": [],
+      "confidence": 0.96,
+      "reason": "category=, ",
+      "timestamp": "2026-03-26T08:45:38.865701+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.45,
+      "reason": "knowledge=0/0, tables=0, pending_steps=0",
+      "timestamp": "2026-03-26T08:45:39.771049+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.45,
+      "reason": "knowledge=0/0, tables=0, pending_steps=0",
+      "timestamp": "2026-03-26T08:45:40.123184+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "replan",
+      "alternatives": [],
+      "confidence": 0.45,
+      "reason": "knowledge=0/0, tables=0, pending_steps=0",
+      "timestamp": "2026-03-26T08:45:40.515280+00:00"
+    },
+    {
+      "node": "reason_evaluate",
+      "decision_type": "readiness_verdict",
+      "chosen": "conclude_failure",
+      "alternatives": [],
+      "confidence": 0.45,
+      "reason": "knowledge=0/0, tables=0, pending_steps=0",
+      "timestamp": "2026-03-26T08:45:41.218543+00:00"
+    }
+  ],
+  "context_retrievals": [
+    {
+      "source": "embedding_encode",
+      "query": "1억 이상 대출 보유 고객 수",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=8"
+      ],
+      "latency_ms": 127.64,
+      "timestamp": "2026-03-26T08:45:39.202880+00:00"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "유사 SQL 활용사례 기반 접근",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=7"
+      ],
+      "latency_ms": 107.79,
+      "timestamp": "2026-03-26T08:45:39.547711+00:00"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "유사 SQL 활용사례 기반 접근",
+      "results_count": 50,
+      "results_summary": [
+        "활용사례 50건 검색 (상위 유사도: 0.50)"
+      ],
+      "latency_ms": 132.7,
+      "timestamp": "2026-03-26T08:45:39.769472+00:00"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "질의 키워드로 테이블/컬럼 메타를 직접 검색",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=13"
+      ],
+      "latency_ms": 120.03,
+      "timestamp": "2026-03-26T08:45:39.893426+00:00"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "질의 키워드로 테이블/컬럼 메타를 직접 검색",
+      "results_count": 50,
+      "results_summary": [
+        "활용사례 50건 검색 (상위 유사도: 0.50)"
+      ],
+      "latency_ms": 150.8,
+      "timestamp": "2026-03-26T08:45:40.121187+00:00"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "질의 키워드 조합으로 테이블을 직접 탐색",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=10"
+      ],
+      "latency_ms": 152.99,
+      "timestamp": "2026-03-26T08:45:40.279682+00:00"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "질의 키워드 조합으로 테이블을 직접 탐색",
+      "results_count": 50,
+      "results_summary": [
+        "활용사례 50건 검색 (상위 유사도: 0.50)"
+      ],
+      "latency_ms": 184.3,
+      "timestamp": "2026-03-26T08:45:40.512754+00:00"
+    },
+    {
+      "source": "embedding_encode",
+      "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+      "results_count": 1,
+      "results_summary": [
+        "dense_dim=1024",
+        "sparse_nnz=11"
+      ],
+      "latency_ms": 269.09,
+      "timestamp": "2026-03-26T08:45:40.978298+00:00"
+    },
+    {
+      "source": "search_use_cases",
+      "query": "보고서 SQL 검색으로 테이블/조인 구조 참고",
+      "results_count": 50,
+      "results_summary": [
+        "활용사례 50건 검색 (상위 유사도: 0.50)"
+      ],
+      "latency_ms": 320.7,
+      "timestamp": "2026-03-26T08:45:41.216542+00:00"
+    }
+  ],
+  "sql": {
+    "generated_sql": "",
+    "validated": false,
+    "validation_errors": [],
+    "retry_count": 0,
+    "validation_feedback": "",
+    "execution_success": false,
+    "row_count": 0,
+    "execution_time_ms": 0.0
+  },
+  "golden_id": "",
+  "eval_passed": null,
+  "eval_errors": [],
+  "total_llm_calls": 1,
+  "total_llm_latency_ms": 654.9176999978954,
+  "total_llm_tokens": 554,
+  "node_path": [
+    "preprocess",
+    "resolve_history",
+    "classify_intent",
+    "normalize_query",
+    "reason_plan",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_recover",
+    "reason_explore",
+    "reason_evaluate",
+    "reason_finalize"
+  ]
+}

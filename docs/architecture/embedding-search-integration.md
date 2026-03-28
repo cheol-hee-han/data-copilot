@@ -227,7 +227,7 @@ reranked = reranker.rerank(
 
 ### 6.2 구현
 
-독립 배치 스크립트 (`standalone/scripts/enrich_sql_history.py`):
+독립 배치 스크립트 (`devtools/scripts/enrich_sql_history.py`):
 1. sql_history 원본 데이터 로드
 2. LLM으로 description 보강 (동의어·영어표현·관련 비즈니스 용어)
 3. 보강된 텍스트를 BGE-M3로 Dense+Sparse 임베딩
@@ -267,7 +267,7 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 |------|------|
 | `src/connectors/search_query_embedder.py` | BGE-M3 임베딩 서비스 (Dense + Sparse 동시 생성) |
 | `src/services/reranker.py` | BGE-Reranker-v2-m3 래퍼 (폴백 포함) |
-| `standalone/scripts/enrich_sql_history.py` | LLM 기반 오프라인 문서 보강 배치 |
+| `devtools/scripts/enrich_sql_history.py` | LLM 기반 오프라인 문서 보강 배치 |
 
 ### 수정
 
@@ -279,8 +279,8 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 | `src/connectors/qdrant_connector.py` | `search_sql_history()` + 하이브리드 검색 + BGE-M3 임베딩 전환 |
 | `src/services/search_query_builder.py` | `_build_sql_history_vector_query()` — NormalizedQuery 슬롯 기반 합성 |
 | `src/services/search_context_assembler.py` | `_fetch_sql_history_vectors()` 추가, 병렬 수집에 포함 |
-| `src/agents/nodes/query_normalizer.py` | `sql_history_search` 생성 로직 (후처리 단계) |
-| `standalone/scripts/seed_qdrant.py` | BGE-M3 하이브리드 임베딩, Named Vectors 스키마 |
+| `src/agents/nodes/interpret/query_normalizer.py` | `sql_history_search` 생성 로직 (후처리 단계) |
+| `devtools/scripts/seed_qdrant.py` | BGE-M3 하이브리드 임베딩, Named Vectors 스키마 |
 | `pyproject.toml` | `FlagEmbedding` 의존성 추가, `fastembed` 제거 |
 
 ---

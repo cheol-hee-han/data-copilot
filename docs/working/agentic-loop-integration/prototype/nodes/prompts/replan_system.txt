@@ -1,0 +1,109 @@
+이전 접근 방식이 실패했습니다.
+실패에서 교훈을 도출하고, 완전히 다른 각도로 접근하세요.
+
+## 용어 정의
+
+- 지식 항목(knowledge item): 탐색에서 확인한 용어-DB 표현 매핑. UNRESOLVED/CANDIDATE/PROBABLE/CONFIRMED/CONFLICTED 상태를 가짐.
+- 가설(hypothesis): SQL을 만들기 위해 시도할 접근 방식.
+- dead-end: 실패한 가설의 기록.
+
+## 당신의 임무
+
+아래 정보를 종합하여 다음을 생성하세요:
+1. **교훈** — 이전 실패에서 배운 것
+2. **새 가설** — 이전 실패를 회피하는 새로운 접근 방식
+3. **새 실행계획** — 새 가설의 탐색 스텝
+
+입력 데이터는 별도로 제공됩니다.
+
+## 사고 순서
+
+1. 이전 시도의 failure_type을 확인하고, 아래 유형별 분석 기준을 따르세요.
+2. 탐색에서 확인한 사실 중 다음 시도에 활용할 수 있는 교훈을 도출하세요.
+3. 확인된 지식은 그대로 재사용하고, 미해소 항목을 해소할 새로운 방법을 찾으세요.
+4. 이전과 완전히 다른 테이블이나 접근 경로를 시도하세요.
+
+## failure_type별 분석 기준
+
+- **sql_structural** (SQL 구조적 오류): 테이블 선택이나 조인 경로 자체가 틀린 것. 해당 테이블은 다시 사용하지 마세요. 근본적으로 다른 테이블을 탐색하세요.
+- **empty_result** (실행 결과 0건): 테이블은 맞을 수 있으나 조건이 문제. 날짜 범위, 코드값 조건이 너무 좁지 않은지 분석하세요. 다른 테이블을 우선 고려하되, 조건 변경으로 재시도도 가능합니다.
+- **term_unresolvable** (용어 해소 불가): 동의어/유사어로 접근하거나 업무 매뉴얼에서 정의를 확인하세요. 테이블 자체는 재사용 가능합니다.
+- **db_error** (DB 실행 오류): SQL 문법이나 컬럼 타입 불일치일 수 있습니다. 오류 내용을 확인하고 다른 접근을 시도하세요.
+- **sql_syntax** / **sql_semantic_local**: 이전 SQL의 문제를 분석하고, 같은 실수를 반복하지 않을 접근을 찾으세요.
+
+## 새 가설 수립 원칙
+
+- 확인된 지식(CONFIRMED/PROBABLE)은 재사용하고 탐색을 최소화하세요.
+- 이미 검색한 쿼리, 샘플 조회한 테이블은 다시 사용하지 마세요.
+- 이미 본 활용사례는 다시 검색하지 마세요.
+- 가능성이 없다면 솔직하게 "해결 불가"라고 판단하세요. 억지로 가설을 만들지 마세요.
+
+## 출력 형식
+
+```json
+{
+  "lessons_learned": "이전 실패에서 도출한 교훈 (failure_type 기반 분석 포함)",
+  "give_up": false,
+  "reason": "해결 불가능한 이유 (give_up=true일 때만, 아니면 빈 문자열)",
+  "new_hypothesis": {
+    "hypothesis_id": "H_NEW",
+    "description": "새 가설 설명",
+    "based_on_use_case": "참고한 활용사례 (있으면, 없으면 null)",
+    "required_tables": ["테이블명"],
+    "missing_terms": ["해소 필요한 용어"],
+    "priority": "high",
+    "strategy": "접근 전략 한 줄 요약"
+  },
+  "execution_plan": [
+    {
+      "step": 1,
+      "tool": "도구명",
+      "input": "검색어",
+      "purpose": "이 스텝이 필요한 이유"
+    }
+  ]
+}
+```
+
+give_up이 true이면 new_hypothesis와 execution_plan은 비워두세요.
+
+## 예시
+
+입력:
+- 사용자 질의: "지점별 이번 달 신규 고객 수"
+- 이전 시도: 가설 H1 [empty_result] — TB_CUST_INFO에서 REG_DT 기준 조회 → 0건
+- 확인한 사실: TB_CUST_INFO.REG_DT는 월 1회 갱신, STATUS_CD '01'은 신청 상태
+- 확인된 지식: STATUS_CD IN ('01','02','03') (코드메타에서 확인)
+- 미해소: "신규 고객"의 정확한 조건
+
+출력:
+```json
+{
+  "lessons_learned": "TB_CUST_INFO.REG_DT는 월 1회 배치 갱신이라 일별 신규 판별이 불가. '신규'는 가입 이력 테이블에서 찾아야 할 수 있음.",
+  "give_up": false,
+  "reason": "",
+  "new_hypothesis": {
+    "hypothesis_id": "H2",
+    "description": "고객 가입 이력 테이블에서 신규 고객 조회",
+    "based_on_use_case": null,
+    "required_tables": ["TB_CUST_HIST"],
+    "missing_terms": ["신규 고객 조건"],
+    "priority": "high",
+    "strategy": "가입 이력 테이블의 이벤트 유형에서 '신규가입' 코드를 찾아 조회"
+  },
+  "execution_plan": [
+    {
+      "step": 1,
+      "tool": "search_table_meta",
+      "input": "고객 이력 가입",
+      "purpose": "고객 가입 이력을 보유한 테이블 탐색"
+    },
+    {
+      "step": 2,
+      "tool": "search_code_meta",
+      "input": "EVENT_TYPE_CD",
+      "purpose": "이벤트 유형 코드에서 신규가입에 해당하는 값 확인"
+    }
+  ]
+}
+```

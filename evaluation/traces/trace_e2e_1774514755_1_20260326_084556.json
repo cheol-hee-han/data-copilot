@@ -1,0 +1,65 @@
+{
+  "run_id": "e2e_1774514755_1",
+  "user_input": "지점별 여신 잔액 비교 분석해줘",
+  "session_id": "0e8c21b0-d590-4a67-a8fd-cd446aaacc3d",
+  "start_time": "2026-03-26T08:45:55.972544+00:00",
+  "end_time": "2026-03-26T08:45:56.935346+00:00",
+  "total_duration_ms": 961.95,
+  "final_intent": "unknown",
+  "final_status": "error",
+  "final_response_summary": "죄송합니다. 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.\n다시 시도하시거나, 요청을 좀 더 구체적으로 입력해주세요.",
+  "error_message": "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+  "nodes": [
+    {
+      "node": "preprocess",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.33,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:55.999557+00:00"
+    },
+    {
+      "node": "resolve_history",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 0.02,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:56.001543+00:00"
+    },
+    {
+      "node": "classify_intent",
+      "input_summary": {},
+      "output_summary": {},
+      "duration_ms": 930.86,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-26T08:45:56.932343+00:00"
+    }
+  ],
+  "llm_calls": [],
+  "decisions": [],
+  "context_retrievals": [],
+  "sql": {
+    "generated_sql": "",
+    "validated": false,
+    "validation_errors": [],
+    "retry_count": 0,
+    "validation_feedback": "",
+    "execution_success": false,
+    "row_count": 0,
+    "execution_time_ms": 0.0
+  },
+  "golden_id": "",
+  "eval_passed": null,
+  "eval_errors": [],
+  "total_llm_calls": 0,
+  "total_llm_latency_ms": 0.0,
+  "total_llm_tokens": 0,
+  "node_path": [
+    "preprocess",
+    "resolve_history",
+    "classify_intent"
+  ]
+}

@@ -138,21 +138,21 @@ Dummy 모드:
 
 실행 스크립트:
     # 전체 실행
-    pytest tests/unit/test_query_normalizer.py -v
+    pytest tests/auto/unit/test_query_normalizer.py -v
 
     # 클래스별 실행
-    pytest tests/unit/test_query_normalizer.py::TestNormalizationModels -v
-    pytest tests/unit/test_query_normalizer.py::TestPreprocessor -v
-    pytest tests/unit/test_query_normalizer.py::TestJsonParser -v
-    pytest tests/unit/test_query_normalizer.py::TestValidator -v
-    pytest tests/unit/test_query_normalizer.py::TestPostProcessor -v
-    pytest tests/unit/test_query_normalizer.py::TestSynonyms -v
+    pytest tests/auto/unit/test_query_normalizer.py::TestNormalizationModels -v
+    pytest tests/auto/unit/test_query_normalizer.py::TestPreprocessor -v
+    pytest tests/auto/unit/test_query_normalizer.py::TestJsonParser -v
+    pytest tests/auto/unit/test_query_normalizer.py::TestValidator -v
+    pytest tests/auto/unit/test_query_normalizer.py::TestPostProcessor -v
+    pytest tests/auto/unit/test_query_normalizer.py::TestSynonyms -v
 
     # 개별 테스트 실행
-    pytest tests/unit/test_query_normalizer.py::TestValidator::test_invalid_intent_corrected -v
+    pytest tests/auto/unit/test_query_normalizer.py::TestValidator::test_invalid_intent_corrected -v
 
     # 실패 시 즉시 중단 + 상세 출력
-    pytest tests/unit/test_query_normalizer.py -v -x --tb=short
+    pytest tests/auto/unit/test_query_normalizer.py -v -x --tb=short
 
 참고:
     - 외부 의존성 없음 (LLM, DB, ES, Qdrant 불필요)

@@ -1,21 +1,18 @@
-"""PostgreSQL 커넥터 — 정보계 DB 쿼리 실행 및 SQL 이력 검색.
+"""PostgreSQL 커넥터 — 정보계 DB 쿼리 실행 및 SQL 이력 DB.
 
 두 가지 역할의 커넥터를 제공한다.
 InfoDBConnector는 정보계 DB에 대해 읽기 전용(SELECT/WITH만 허용) 쿼리를 실행하며,
 SQL 문 앞부분을 정규식으로 검증하여 DML/DDL을 원천 차단한다.
-HistoryDBConnector는 과거 성공한 SQL 수행이력 DB에서 키워드 ILIKE 매칭으로
-유사한 SQL을 최대 5건 검색하여 SQL 생성 시 참조 자료로 활용한다.
-SQL 템플릿은 resources/queries/search_similar_sql.sql 에서 로드한다.
+HistoryDBConnector는 SQL 이력 DB에 대한 범용 쿼리 실행을 제공한다.
 두 커넥터 모두 async SQLAlchemy(asyncpg)를 사용하며 풀 타임아웃과 쿼리 타임아웃을 설정으로 제어한다.
 
 핵심 함수/클래스:
     - InfoDBConnector: 정보계 DB 읽기 전용 쿼리 실행 (SELECT 문만 허용)
-    - HistoryDBConnector: SQL 이력 DB에서 유사 과거 SQL 키워드 검색
-    - HistoryDBConnector.search_similar_sql: 자연어 질의를 키워드 분해 후 ILIKE 검색
+    - HistoryDBConnector: SQL 이력 DB 범용 쿼리 실행
 
 Dummy 모드: use_dummy=True(기본값)일 때 DB 연결 없이 동작한다.
 InfoDBConnector는 SQL의 SELECT 절을 파싱하여 컬럼 alias에 맞는 랜덤 샘플 데이터를 생성하고,
-HistoryDBConnector는 내장된 5건의 샘플 SQL 이력을 키워드 매칭으로 반환한다.
+HistoryDBConnector는 내장된 샘플 데이터를 반환한다.
 폐쇄망 전환 시 settings의 DB 접속 정보를 변경하면 Sybase IQ/Impala 등으로 대체 가능하다.
 """
 
@@ -28,7 +25,6 @@ from src.config import settings
 from src.connectors.interfaces import DatabaseConnector
 from src.connectors.dummy_data import (
     generate_dummy_data,
-    search_dummy_sql_history,
 )
 from src.utils.logger import get_logger
 
@@ -205,55 +201,3 @@ class HistoryDBConnector(DatabaseConnector):
                 for row in result.fetchall()
             ]
 
-    async def search_similar_sql(
-        self, query_text: str,
-    ) -> list[dict[str, Any]]:
-        """유사한 과거 SQL을 검색한다."""
-        if self._use_dummy:
-            return search_dummy_sql_history(query_text)
-
-        import time as _time
-
-        from sqlalchemy import text
-        from sqlalchemy.ext.asyncio import AsyncSession
-
-        from src.utils.resource_loader import (
-            load_sql_template,
-        )
-
-        keywords = [
-            w for w in query_text.split() if len(w) >= 2
-        ]
-        if not keywords:
-            return []
-
-        conditions = " OR ".join(
-            f"query_text ILIKE :kw{i}"
-            for i in range(len(keywords))
-        )
-        params = {
-            f"kw{i}": f"%{kw}%"
-            for i, kw in enumerate(keywords)
-        }
-        template = load_sql_template(
-            "queries/search_similar_sql.sql",
-        )
-        sql = template.format(conditions=conditions)
-        _start = _time.perf_counter()
-        async with AsyncSession(self._engine) as session:
-            result = await session.execute(
-                text(sql), params,
-            )
-            columns = list(result.keys())
-            rows = [
-                dict(zip(columns, row))
-                for row in result.fetchall()
-            ]
-        _elapsed = (_time.perf_counter() - _start) * 1000
-        logger.info(
-            "이력DB 유사 SQL 검색",
-            query=query_text[:60],
-            count=len(rows),
-            latency_ms=round(_elapsed, 1),
-        )
-        return rows

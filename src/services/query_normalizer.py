@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from src.utils.timezone import today_kst
 
 from src.config import settings
 from src.services.domain.domain_synonyms import (
@@ -57,6 +57,7 @@ from src.agents.models.normalization import (
 )
 from src.utils.llm import get_llm_client
 from src.utils.logger import get_logger
+from src.utils.tracker import record_prompt_variables
 
 logger = get_logger(__name__)
 
@@ -189,12 +190,8 @@ def _validate_entities(data: dict) -> None:
             f"entities[{i}].type",
         ):
             e["type"] = "DIRECT"
-        if not _validate_enum(
-            e.get("confidence", ""),
-            VALID_CONFIDENCE,
-            f"entities[{i}].conf",
-        ):
-            e["confidence"] = "MEDIUM"
+        # confidence 필드는 더 이상 사용하지 않음 (제거 허용)
+        e.pop("confidence", None)
 
 
 def _validate_measures(data: dict) -> None:
@@ -310,7 +307,7 @@ def _validate_output_hint(data: dict) -> None:
             "format": "NONE",
             "doc_type": None,
             "expected_columns": [],
-            "confidence": "LOW",
+            # confidence 필드 제거됨
         }
 
 
@@ -355,7 +352,6 @@ def _post_aggregate_fix(
     for m in data.get("measures", []):
         if m.get("agg_function") == "NONE":
             m["agg_function"] = "SUM"
-            m["confidence"] = "MEDIUM"
             data.setdefault("ambiguities", []).append(
                 f"'{m.get('term')}'의 집계함수가 "
                 "명시되지 않아 SUM으로 추정됨"
@@ -573,7 +569,7 @@ async def run_normalization(
     cleaned = _preprocess_for_normalization(raw_query)
 
     # Phase 1 LLM
-    today = date.today().isoformat()
+    today = today_kst().isoformat()
     synonym_text = get_synonym_prompt_text()
     template_text = get_output_template_prompt_text()
 
@@ -588,6 +584,12 @@ async def run_normalization(
 
     logger.info("Phase 1 LLM 호출")
     phase1_raw = await _call_llm(p1_system, phase1_user)
+    record_prompt_variables({
+        "query": cleaned,
+        "today": today,
+        "synonym_dict": synonym_text[:200] + "..." if len(synonym_text) > 200 else synonym_text,
+        "output_template_text": template_text[:200] + "..." if len(template_text) > 200 else template_text,
+    })
 
     phase1_data = _parse_llm_json(phase1_raw)
     phase1_data, errors1 = _validate_structure(phase1_data)
@@ -634,6 +636,10 @@ async def _run_phase2(
     phase2_raw = await _call_llm(
         phase2_system, phase2_user,
     )
+    record_prompt_variables({
+        "query": cleaned,
+        "phase1_json": phase1_json_str[:500] + "..." if len(phase1_json_str) > 500 else phase1_json_str,
+    })
     final_data = _parse_llm_json(phase2_raw)
     final_data, errors2 = _validate_structure(final_data)
     final_data["original_query"] = raw_query

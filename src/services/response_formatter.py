@@ -19,30 +19,73 @@ LLM을 활용하여 조회 결과를 자연어 보고서로 변환한다.
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from src.config import settings
 from src.models.result import SQLResult
 from src.utils.llm import get_llm_client
 from src.utils.logger import get_logger
+from src.utils.tracker import record_prompt_variables
 
 logger = get_logger(__name__)
+
+
+def rows_to_markdown_table(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    max_rows: int = 100,
+) -> str:
+    """dict 행 목록을 markdown table 문자열로 변환한다.
+
+    숫자는 천 단위 쉼표를 추가하고, None은 빈 문자열로 표시한다.
+    """
+    if not columns or not rows:
+        return "(데이터 없음)"
+
+    def _fmt(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, float):
+            if value == int(value):
+                return f"{int(value):,}"
+            return f"{value:,.2f}"
+        if isinstance(value, int):
+            return f"{value:,}"
+        return str(value)
+
+    header = "| " + " | ".join(columns) + " |"
+    separator = "| " + " | ".join(
+        "---" for _ in columns
+    ) + " |"
+    body_lines: list[str] = []
+    for row in rows[:max_rows]:
+        cells = [_fmt(row.get(col, "")) for col in columns]
+        body_lines.append("| " + " | ".join(cells) + " |")
+
+    table = "\n".join([header, separator, *body_lines])
+    total = len(rows)
+    if total > max_rows:
+        table += f"\n\n(총 {total}건 중 상위 {max_rows}건 표시)"
+    else:
+        table += f"\n\n(총 {total}건)"
+    return table
 
 
 def format_result_for_prompt(
     sql_result: SQLResult,
     max_rows: int | None = None,
 ) -> str:
-    """SQL 결과를 프롬프트용 문자열로 변환한다."""
+    """SQL 결과를 markdown table 형태의 프롬프트용 문자열로 변환한다."""
     if max_rows is None:
         max_rows = settings.format_max_rows
     if not sql_result.rows:
         return "(조회 결과 없음)"
 
-    lines = [f"컬럼: {', '.join(sql_result.columns)}"]
-    for row in sql_result.rows[:max_rows]:
-        lines.append(str(row))
-    lines.append(f"\n총 {sql_result.row_count}건 조회됨")
-    return "\n".join(lines)
+    return rows_to_markdown_table(
+        sql_result.columns,
+        sql_result.rows,
+        max_rows=max_rows,
+    )
 
 
 async def format_response(
@@ -80,6 +123,12 @@ async def format_response(
             {"role": "user", "content": user_message},
         ],
     )
+
+    result_text = format_result_for_prompt(sql_result)
+    record_prompt_variables({
+        "user_input": user_input,
+        "query_result": result_text[:300] + "..." if len(result_text) > 300 else result_text,
+    })
 
     llm_elapsed = (
         (time.perf_counter() - llm_start) * 1000

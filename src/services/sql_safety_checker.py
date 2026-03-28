@@ -10,7 +10,7 @@ LLM이 생성한 SQL이 실행되기 전에 5단계 검증 파이프라인을 �
     4단계 - PII 컬럼 직접 노출 검사 (주민번호, 카드번호, 계좌번호, 비밀번호 등)
     5단계 - LIMIT 절 존재 여부 확인 (집계 쿼리는 예외 처리)
 
-PII 컬럼 목록은 resources/security/pii_columns.yaml에서 로드하며,
+PII 컬럼 목록은 resources/domain/domain_pii_columns.yaml에서 로드하며,
 YAML 파일이 없으면 내장 기본값(_DEFAULT_PII_COLUMNS, _DEFAULT_MASKING_COLUMNS)을 사용한다.
 검증 실패 시 SafetyCheckResult에 오류 목록과 LLM 재생성용 피드백 문자열을 담아 반환한다.
 """
@@ -108,8 +108,8 @@ _AGG_PATTERN = re.compile(
 
 
 def _load_pii_columns() -> tuple[set[str], set[str]]:
-    """resources/security/pii_columns.yaml 에서 PII 정의를 로드한다."""
-    data = load_yaml("security/pii_columns.yaml", None)
+    """resources/domain/domain_pii_columns.yaml 에서 PII 정의를 로드한다."""
+    data = load_yaml("domain/domain_pii_columns.yaml", None)
     if data is None:
         return _DEFAULT_PII_COLUMNS, _DEFAULT_MASKING_COLUMNS
 
