@@ -1,36 +1,59 @@
 """sql_generator 노드 — 누적 지식 기반 SQL 생성.
 
-CONFIRMED knowledge_items만 사용하여 SQL을 생성한다.
-재진입 시 sql_fix_instruction을 프롬프트에 반드시 포함하고,
+CONFIRMED knowledge_items와 candidate_tables를 기반으로 SQL을 생성한다.
+재진입 시 failure_reason(이전 검증 피드백)을 프롬프트에 반드시 포함하고,
 dead_ends를 참고하여 이전 실패 패턴을 반복하지 않는다.
 
 멀티 DB 라우팅:
-  candidate_tables의 db_source(테이블명 시스템코드에서 자동 파싱)를 확인하여
-  SQL dialect을 결정한다. 크로스 DB(ADW+BDP 혼재) 감지 시 사용자에게 안내한다.
+    candidate_tables의 db_source(테이블명 시스템코드에서 자동 파싱)를 확인하여
+    SQL dialect(postgres, sybase, impala)을 결정한다.
+    크로스 DB(ADW+BDP 혼재) 감지 시 명확화 질문으로 사용자에게 안내한다.
+
+프롬프트 구성:
+    - 기본: SQL_GENERATOR_SYSTEM (dialect 힌트 내장)
+    - 재시도: SQL_GENERATOR_FIX_SECTION (failure_reason 포함)
+    - 테이블 상세: _format_table_details()로 inferred_* 필드를 "(LLM 추론)" 태그와 함께 주입
+    - confirmed_terms: CONFIRMED 지식 항목을 자연어로 정리
+
+핵심 함수:
+    - sql_generator_node: 메인 노드 함수
+    - _call_llm_for_sql: LLM 호출 + SQL 추출 (explanation 필드는 현재 미사용)
+    - _format_table_details: CandidateTable → 프롬프트용 텍스트 변환
+    - _detect_db_source: 후보 테이블에서 dialect 자동 판정
+
+위임 구조:
+    - 프롬프트: system_prompts.py의 SQL_GENERATOR_SYSTEM, SQL_GENERATOR_FIX_SECTION
 
 v2.0 (2026-03-25): agentic 전용 프롬프트(dialect 힌트 내장)로 전환.
 """
 
 from __future__ import annotations
 
-import json
-import re
 import time
 
 from src.agents.state.state import (
     CandidateTable,
+    ColumnInfo,
+    Phase,
     PipelineState,
     ReasoningState,
+    TableSelectionStatus,
 )
-from src.utils.db_routing import parse_db_source, get_dialect_for_source
+from src.connectors.manager import ConnectorManager, get_connector_manager
 from src.agents.nodes.system_prompts import (
-    REASON_GENERATE_SQL,
-    REASON_GENERATE_SQL_FIX,
+    SQL_GENERATOR_SYSTEM,
+    SQL_GENERATOR_FIX_SECTION,
 )
 from src.config import settings
-from src.utils.llm import get_llm_client
+from src.utils.llm import llm_call_with_parse_retry
+from src.utils.llm.response import extract_json
+from src.utils.llm.prompt import (
+    render_prompt,
+    serialize_decomp_slots,
+)
 from src.utils.logger import get_logger
 from src.utils.tracker import record_prompt_variables
+from src.utils.truncate import format_sql, truncate_log
 
 logger = get_logger(__name__)
 
@@ -38,90 +61,111 @@ logger = get_logger(__name__)
 def _format_table_for_sql_prompt(ct: CandidateTable) -> str:
     """CandidateTable을 SQL 생성 프롬프트용 텍스트로 포맷한다.
 
-    3측면 정보(엔티티 범위, 기능적 용도, 갱신 주기)와
-    관찰된 날짜 분포를 포함하여 SQL Generator가
-    정확한 WHERE 조건과 테이블 선택을 할 수 있도록 한다.
+    컬럼별 한글명·타입·설명·PK 여부를 모두 전달하여
+    SQL Generator가 정확한 컬럼 선택과 조인을 할 수 있도록 한다.
     """
-    col_labels = [
-        f"{c}({ct.column_alt_names[c]})"
-        if c in ct.column_alt_names else c
-        for c in ct.relevant_columns[:8]
-    ]
-    table_id = ct.qualified_name
-    line = f"- {table_id}: {ct.role} (컬럼: {', '.join(col_labels)})"
+    lines: list[str] = [_format_table_header(ct)]
+    lines.extend(_format_columns(ct))
+    lines.extend(_format_table_details(ct))
+    return "\n".join(lines)
 
-    details: list[str] = []
+
+def _format_table_header(ct: CandidateTable) -> str:
+    """테이블 헤더 라인을 생성한다."""
+    header = f"- {ct.qualified_name}"
+    if ct.alt_name:
+        header += f" ({ct.alt_name})"
+    if ct.description:
+        header += f": {ct.description}"
+    return header
+
+
+def _format_column_line(c: ColumnInfo) -> str:
+    """단일 ColumnInfo를 프롬프트 라인으로 포맷한다."""
+    parts = [f"    {c.name}"]
+    if c.alt_name:
+        parts.append(f"({c.alt_name})")
+    if c.col_type:
+        parts.append(f" {c.col_type}")
+    if c.is_pk:
+        parts.append(" [PK]")
+    if c.description:
+        parts.append(f" — {c.description}")
+    return "".join(parts)
+
+
+def _format_columns(ct: CandidateTable) -> list[str]:
+    """컬럼 상세 라인 목록을 생성한다."""
+    if not ct.columns:
+        return []
+    return ["  컬럼:"] + [_format_column_line(c) for c in ct.columns]
+
+
+def _format_table_details(ct: CandidateTable) -> list[str]:
+    """join_keys, LLM 추론, 날짜 관찰 라인 목록을 생성한다."""
+    lines: list[str] = []
+    if ct.join_keys:
+        lines.append(f"  join_keys: {ct.join_keys}")
     if ct.inferred_entity_scope:
-        details.append(f"  엔티티: {ct.inferred_entity_scope}")
+        lines.append(f"  엔티티: {ct.inferred_entity_scope} (LLM 추론)")
     if ct.inferred_functional_usage:
-        details.append(f"  용도: {ct.inferred_functional_usage}")
+        lines.append(f"  용도: {ct.inferred_functional_usage} (LLM 추론)")
     if ct.inferred_data_refresh_hint:
-        details.append(f"  갱신: {ct.inferred_data_refresh_hint}")
+        lines.append(f"  갱신: {ct.inferred_data_refresh_hint} (LLM 추론)")
     for odc in ct.observed_date_columns:
-        details.append(
+        lines.append(
             f"  기준컬럼 {odc.column_name}: "
             f"{odc.date_range}, {odc.date_pattern}"
         )
     if not ct.observed_date_columns and ct.key_date_columns:
         for kdc in ct.key_date_columns:
-            details.append(f"  기준컬럼(PK): {kdc.column_name}")
-
-    if details:
-        return line + "\n" + "\n".join(details)
-    return line
-
-
-def determine_dialect(reason: ReasoningState) -> str:
-    """candidate_tables의 db_source로 SQL dialect을 결정한다.
-
-    모든 테이블이 같은 DB 소스면 해당 dialect 반환.
-    서로 다른 DB 소스가 혼재하면 "CROSS_DB" 반환.
-    """
-    sources = {
-        ct.db_source or parse_db_source(ct.table_name)
-        for ct in reason.candidate_tables
-        if ct.table_name
-    }
-    # 빈 문자열 제거
-    sources.discard("")
-
-    if len(sources) > 1:
-        return "CROSS_DB"
-    if not sources:
-        return get_dialect_for_source("")
-    return get_dialect_for_source(sources.pop())
+            lines.append(f"  기준컬럼(PK): {kdc.column_name}")
+    return lines
 
 
 async def sql_generator_node(state: PipelineState) -> dict:
     """누적 지식을 컨텍스트로 SQL을 생성한다."""
     reason = state.reason.model_copy(deep=True)
-    reason.phase = "GENERATING"
+    reason.phase = Phase.GENERATING
 
     reason.loop_guard = reason.loop_guard.model_copy()
     reason.loop_guard.increment_generate()
 
+    # dialect 결정 (커넥터에서 직접 가져옴)
+    db = get_connector_manager().get_query_db(reason)
+    dialect = db.dialect
+
     # 크로스 DB 감지
-    dialect = determine_dialect(reason)
-    if dialect == "CROSS_DB":
+    sources = {
+        ct.db_source or ConnectorManager.parse_db_source(ct.table_name)
+        for ct in reason.candidate_tables
+        if ct.table_name
+    }
+    sources.discard("")
+
+    if len(sources) > 1:
         adw_tables = [
             ct.qualified_name for ct in reason.candidate_tables
-            if (ct.db_source or parse_db_source(ct.table_name)) == "adw"
+            if (ct.db_source or ConnectorManager.parse_db_source(ct.table_name)) == "adw"
         ]
         bdp_tables = [
             ct.qualified_name for ct in reason.candidate_tables
-            if (ct.db_source or parse_db_source(ct.table_name)) == "bigdata"
+            if (ct.db_source or ConnectorManager.parse_db_source(ct.table_name)) == "bigdata"
         ]
-        reason.phase = "VERIFYING"
+        reason.phase = Phase.VERIFYING
+        question = (
+            "요청하신 데이터가 서로 다른 시스템에 있습니다:\n"
+            f"  - 정보계 DW(ADW): {', '.join(adw_tables)}\n"
+            f"  - 빅데이터(BDP): {', '.join(bdp_tables)}\n"
+            "한 번의 SQL로 조회할 수 없어 각각 따로 조회해야 합니다.\n"
+            "어느 쪽 데이터를 먼저 조회할까요?"
+        )
         return {
             "reason": reason,
             "awaiting_clarification": True,
-            "clarification_question": (
-                "요청하신 데이터가 서로 다른 시스템에 있습니다:\n"
-                f"  - 정보계 DW(ADW): {', '.join(adw_tables)}\n"
-                f"  - 빅데이터(BDP): {', '.join(bdp_tables)}\n"
-                "한 번의 SQL로 조회할 수 없어 각각 따로 조회해야 합니다.\n"
-                "어느 쪽 데이터를 먼저 조회할까요?"
-            ),
+            "clarification_turns": state.clarification_turns + 1,
+            "clarification_question": question,
+            "formatted_response": question,
         }
 
     # agentic 전용 프롬프트 조립
@@ -138,8 +182,8 @@ async def sql_generator_node(state: PipelineState) -> dict:
         generated = ""
 
     reason.generated_sql = generated
-    reason.sql_fix_instruction = None
-    reason.sql_validation_result = None
+    reason.failure_type = None
+    reason.failure_reason = None
 
     # ── 추적: 생성된 SQL + 치환 변수 ──
     attempt = reason.loop_guard.generate_attempts
@@ -149,10 +193,11 @@ async def sql_generator_node(state: PipelineState) -> dict:
         dialect=dialect,
         attempt=attempt,
         tables=table_names,
-        sql=generated[:300] if generated else "(빈 SQL)",
+        sql=("\n" + format_sql(generated, dialect))
+        if generated else "(빈 SQL)",
     )
 
-    record_prompt_variables(prompt_vars)
+    await record_prompt_variables(prompt_vars)
 
     return {"reason": reason}
 
@@ -162,7 +207,7 @@ def _build_agentic_prompt(
     original_query: str,
     dialect: str,
 ) -> tuple[str, dict[str, str]]:
-    """REASON_GENERATE_SQL 템플릿에 상태를 주입한다.
+    """SQL_GENERATOR_SYSTEM 템플릿에 상태를 주입한다.
 
     Returns:
         (치환된 프롬프트, 치환 변수 사전) 튜플.
@@ -170,92 +215,89 @@ def _build_agentic_prompt(
     decomp = reason.query_decomposition
 
     # 확인된 지식 항목
-    confirmed = reason.get_confirmed_knowledge()
-    confirmed_text = "\n".join(
-        f"- {ki.key}: {ki.value} ({ki.source})"
-        for ki in confirmed
-    ) if confirmed else "(확인된 항목 없음)"
+    confirmed_text = reason.format_confirmed_text()
 
-    # 테이블 정보 (3측면 정보 포함)
+    # 테이블 정보 (REJECTED 제외, 3측면 정보 포함)
+    active_tables = [
+        ct for ct in reason.candidate_tables
+        if ct.selection_status != TableSelectionStatus.REJECTED
+    ]
     tables_text = "\n".join(
         _format_table_for_sql_prompt(ct)
-        for ct in reason.candidate_tables
-    ) if reason.candidate_tables else "(후보 테이블 없음)"
+        for ct in active_tables
+    ) if active_tables else "(후보 테이블 없음)"
 
-    # 조인 경로
-    join_text = (
-        str(reason.confirmed_join_path)
-        if reason.confirmed_join_path
-        else "(미확인)"
-    )
-
-    # 구조적 힌트
-    hints_text = (
-        reason.structural_hints.to_prompt_text()
-        if not reason.structural_hints.is_empty()
-        else "(없음)"
-    )
-
-    # 활용사례 SQL
-    ref_sqls = [
-        uc.get("sql", "")
-        for uc in reason.explored_use_cases[:3]
-        if uc.get("sql")
+    # 조인 힌트 (각 테이블의 join_keys 기반)
+    join_entries = [
+        f"{ct.qualified_name}: join_keys={ct.join_keys}"
+        for ct in active_tables
+        if ct.join_keys
     ]
-    ref_text = "\n".join(
-        f"```sql\n{sql}\n```" for sql in ref_sqls
-    ) if ref_sqls else "(없음)"
+    join_text = "\n".join(join_entries) if join_entries else "(미확인)"
+
+    # 검증된 활용사례 SQL (관련 판정분만, reason 포함)
+    relevant = [
+        uc for uc in reason.explored_use_cases
+        if uc.get("_relevant", True)
+    ]
+    ref_blocks: list[str] = []
+    for i, uc in enumerate(relevant[:10], 1):
+        sql = uc.get("sql", "")
+        if not sql:
+            continue
+        reason_text = uc.get("_eval_reason", "")
+        desc = uc.get("description", "")
+        lines = [f"[{i}]"]
+        if desc:
+            lines.append(f"- 설명: {desc}")
+        if reason_text:
+            lines.append(f"- 관련성: {reason_text}")
+        lines.append(sql)
+        ref_blocks.append("\n".join(lines))
+    ref_text = "\n\n".join(ref_blocks) if ref_blocks else "(없음)"
 
     # Dead-ends
-    dead_text = "\n".join(
-        f"- [{de.failure_type}] {de.reason} "
-        f"(테이블: {', '.join(de.tried_tables)})"
-        for de in reason.dead_ends
-    ) if reason.dead_ends else "(없음)"
+    dead_text = reason.format_dead_ends_text()
 
-    # Fix section
+    # Fix section (이전 검증 피드백이 있으면 재시도 프롬프트에 포함)
     fix_text = ""
-    if reason.sql_fix_instruction:
-        fix_text = REASON_GENERATE_SQL_FIX.replace(
-            "{fix_instruction}", reason.sql_fix_instruction,
+    if reason.failure_reason:
+        fix_text = SQL_GENERATOR_FIX_SECTION.replace(
+            "{fix_instruction}", reason.failure_reason,
         )
 
-    prompt = REASON_GENERATE_SQL
+    prompt = SQL_GENERATOR_SYSTEM
     replacements = {
         "{original_query}": original_query or "",
-        "{measures}": json.dumps(
-            decomp.get("measures", []),
-            ensure_ascii=False,
-        ),
-        "{filters}": json.dumps(
-            decomp.get("filters", []),
-            ensure_ascii=False,
-        ),
-        "{group_by}": json.dumps(
-            decomp.get("group_by", []),
-            ensure_ascii=False,
-        ),
-        "{order_limit}": json.dumps(
-            decomp.get("order_limit", []),
-            ensure_ascii=False,
-        ),
+        **serialize_decomp_slots(decomp),
         "{confirmed_terms}": confirmed_text,
         "{tables}": tables_text,
         "{join_path}": join_text,
-        "{structural_hints}": hints_text,
         "{reference_sqls}": ref_text,
         "{dead_ends}": dead_text,
         "{fix_section}": fix_text,
         "{dialect}": dialect,
     }
-    for key, value in replacements.items():
-        prompt = prompt.replace(key, value)
-
-    # 치환 변수 사전 (트래킹용, {} 제거한 키)
-    variables = {
-        k.strip("{}"): v for k, v in replacements.items()
-    }
+    prompt, variables = render_prompt(prompt, replacements)
     return prompt, variables
+
+
+def _parse_sql_response(raw: str) -> str:
+    """LLM 응답에서 SQL을 추출한다.
+
+    JSON 형식 → 마크다운 코드 블록 → raw 텍스트 순으로 시도.
+    """
+    data = extract_json(raw)
+    if data:
+        sql = data.get("sql", "")
+        if sql:
+            return sql
+
+    cleaned = _clean_sql_response(raw)
+    if cleaned:
+        return cleaned
+
+    raise ValueError("SQL을 추출할 수 없음: JSON 'sql' 키 없음, 코드 블록 없음")
 
 
 async def _call_llm_for_sql(
@@ -263,45 +305,15 @@ async def _call_llm_for_sql(
     query: str,
 ) -> str:
     """LLM을 호출하여 SQL을 생성한다."""
-    client = get_llm_client()
-    llm_start = time.perf_counter()
-
-    response = await client.messages.create(
-        model=settings.llm_model,
+    _, sql = await llm_call_with_parse_retry(
+        system=prompt,
+        messages=[{"role": "user", "content": query}],
+        parse_fn=_parse_sql_response,
         max_tokens=settings.llm_format_max_tokens,
         timeout=settings.llm_long_timeout,
-        system=prompt,
-        messages=[
-            {"role": "user", "content": query},
-        ],
+        node_name="agentic_SQL생성",
     )
-
-    llm_elapsed = (time.perf_counter() - llm_start) * 1000
-    logger.info(
-        "LLM 호출 완료",
-        node="agentic_SQL생성",
-        model=settings.llm_model,
-        latency_ms=round(llm_elapsed, 1),
-    )
-
-    if not response.content:
-        raise ValueError("SQL 생성 LLM 응답이 비어있음")
-
-    raw = response.content[0].text
-
-    # JSON 형식 응답에서 SQL 추출
-    json_match = re.search(r"\{[\s\S]*\}", raw)
-    if json_match:
-        try:
-            data = json.loads(json_match.group())
-            sql = data.get("sql", "")
-            if sql:
-                return sql
-        except json.JSONDecodeError:
-            pass
-
-    # 마크다운 코드 블록에서 SQL 추출
-    return _clean_sql_response(raw)
+    return sql
 
 
 def _clean_sql_response(raw: str) -> str:

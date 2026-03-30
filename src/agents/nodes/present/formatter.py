@@ -12,8 +12,8 @@ SQL 실행 결과(sql_result)를 LLM 에 전달하여 IT 비전문 사용자가 
 
 위임 구조:
     - 비즈니스 로직: services/response_formatter.py (format_response)
-    - 프롬프트: nodes/prompts/system_prompts.py 에서 RESULT_FORMATTING,
-      FORMATTING_USER 를 로드하여 서비스에 주입
+    - 프롬프트: nodes/prompts/system_prompts.py 에서 FORMATTER_SYSTEM,
+      FORMATTER_USER 를 로드하여 서비스에 주입
 
 폴백:
     - LLM 호출 실패 시 ERR_FORMATTING 에러 메시지를 formatted_response 에 기록하여
@@ -28,8 +28,8 @@ from src.agents.models.user_messages import (
     format_error,
 )
 from src.agents.nodes.system_prompts import (
-    FORMATTING_USER,
-    RESULT_FORMATTING,
+    FORMATTER_USER,
+    FORMATTER_SYSTEM,
 )
 from src.agents.state.state import (
     PipelineState,
@@ -53,8 +53,8 @@ async def format_response_node(
         formatted = await format_response(
             user_input=state.preprocessed_input,
             sql_result=state.sql_result,
-            system_prompt=RESULT_FORMATTING,
-            user_template=FORMATTING_USER,
+            system_prompt=FORMATTER_SYSTEM,
+            user_template=FORMATTER_USER,
         )
     except Exception as e:
         logger.error(

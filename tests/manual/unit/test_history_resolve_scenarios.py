@@ -219,9 +219,9 @@ CASES: list[TestCase] = [
 
 async def run_all_cases(verbose: bool = False) -> None:
     """모든 테스트 케이스를 실행하고 결과표를 출력한다."""
-    from src.agents.nodes.prompts.system_prompts import (
-        HISTORY_RESOLVE,
-        HISTORY_RESOLVE_USER,
+    from src.agents.nodes.system_prompts import (
+        HISTORY_RESOLVER_SYSTEM,
+        HISTORY_RESOLVER_USER,
     )
     from src.services.history_resolver import resolve_history
 
@@ -232,8 +232,8 @@ async def run_all_cases(verbose: bool = False) -> None:
             r = await resolve_history(
                 tc.current_input,
                 tc.history,
-                system_prompt=HISTORY_RESOLVE,
-                user_template=HISTORY_RESOLVE_USER,
+                system_prompt=HISTORY_RESOLVER_SYSTEM,
+                user_template=HISTORY_RESOLVER_USER,
                 awaiting_clarification=tc.awaiting_clarification,
             )
             actual = r.decision.value

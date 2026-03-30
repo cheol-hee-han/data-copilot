@@ -1,0 +1,71 @@
+# ============================================================
+# 파일: resources/domain/output_templates.yaml
+# 용도: 문서유형별 기대 컬럼·포맷 매핑 (정규화 Phase 1 프롬프트 주입)
+# 적용: query_normalizer.py 에서 resource_loader 로 로드
+# ============================================================
+
+templates:
+  # ── 명세서 유형 ──
+  거래명세:
+    triggers: [거래 명세, 거래명세서, 거래 내역서, 입출금명세]
+    format: SPEC_SHEET
+    expected_columns: [거래일자, 거래번호, 계좌번호, 거래유형, 입금액, 출금액, 잔액, 거래상대, 적요]
+    required_entities: [거래, 계좌]
+    note: null
+
+  여신명세:
+    triggers: [여신 명세, 대출 명세, 대출명세서, 여신내역]
+    format: SPEC_SHEET
+    expected_columns: [대출번호, 고객명, 대출종류, 실행일자, 만기일자, 대출금액, 잔액, 금리, 상환방식, 담보유형]
+    required_entities: [대출, 고객]
+    note: null
+
+  수신명세:
+    triggers: [수신 명세, 예금 명세, 예금명세서, 수신내역]
+    format: SPEC_SHEET
+    expected_columns: [계좌번호, 고객명, 상품명, 개설일자, 만기일자, 잔액, 금리, 계좌상태]
+    required_entities: [예금, 고객, 계좌]
+    note: null
+
+  연체명세:
+    triggers: [연체 명세, 연체내역, 연체현황서, 부실채권명세]
+    format: SPEC_SHEET
+    expected_columns: [대출번호, 고객명, 대출종류, 대출잔액, 연체금액, 연체일수, 연체등급, 담당지점]
+    required_entities: [대출, 고객]
+    note: "연체등급 = 연체일수 기반 분류 (1개월 미만, 1~3개월, 3개월 이상 등)"
+
+  카드거래명세:
+    triggers: [카드 명세, 카드거래명세, 카드내역, 카드이용명세]
+    format: SPEC_SHEET
+    expected_columns: [거래일자, 카드번호, 가맹점명, 거래유형, 거래금액, 할부개월, 승인번호]
+    required_entities: [카드, 거래]
+    note: null
+
+  # ── 현황/요약 유형 ──
+  여신현황:
+    triggers: [여신 현황, 대출 현황, 여신현황표]
+    format: SUMMARY
+    expected_columns: [기간, 총대출잔액, 신규실행건수, 신규실행액, 상환건수, 상환액, 연체건수, 연체금액, 연체율]
+    required_entities: [대출]
+    note: "연체율 = 연체금액 / 총대출잔액 × 100"
+
+  수신현황:
+    triggers: [수신 현황, 예금 현황, 수신현황표]
+    format: SUMMARY
+    expected_columns: [기간, 총예금잔액, 신규개설건수, 신규개설액, 해지건수, 해지액, 정기예금잔액, 보통예금잔액]
+    required_entities: [예금]
+    note: null
+
+  고객현황:
+    triggers: [고객 현황, 회원 현황, 고객현황표]
+    format: SUMMARY
+    expected_columns: [기간, 총고객수, 신규고객수, 이탈고객수, 활성고객수, 휴면고객수]
+    required_entities: [고객]
+    note: null
+
+  지점실적현황:
+    triggers: [지점 실적, 영업점 현황, 지점현황, 지점별 실적]
+    format: SUMMARY
+    expected_columns: [지점명, 여신잔액, 수신잔액, 신규고객수, 거래건수, 수익, 목표달성률]
+    required_entities: [지점]
+    note: "목표달성률 = 실적 / 목표 × 100"

@@ -12,7 +12,7 @@ SQL 실행으로 추출된 데이터(sql_result)를 LLM 에 전달하여 비즈�
 
 위임 구조:
     - 비즈니스 로직: services/data_analyzer.py (analyze_data)
-    - 프롬프트: nodes/prompts/system_prompts.py 에서 DATA_ANALYSIS, ANALYSIS_USER,
+    - 프롬프트: nodes/prompts/system_prompts.py 에서 ANALYZER_SYSTEM, ANALYZER_USER,
       VIZ_JUDGMENT_SYSTEM, VIZ_SVG_SYSTEM 등을 로드하여 서비스에 주입
 
 폴백:
@@ -27,12 +27,12 @@ from src.agents.models.user_messages import (
     format_error,
 )
 from src.agents.nodes.system_prompts import (
-    ANALYSIS_USER,
-    DATA_ANALYSIS,
-    VIZ_JUDGMENT_SYSTEM,
-    VIZ_JUDGMENT_USER,
-    VIZ_SVG_SYSTEM,
-    VIZ_SVG_USER,
+    ANALYZER_SYSTEM,
+    ANALYZER_USER,
+    ANALYZER_VIZ_JUDGMENT_SYSTEM,
+    ANALYZER_VIZ_JUDGMENT_USER,
+    ANALYZER_VIZ_SVG_SYSTEM,
+    ANALYZER_VIZ_SVG_USER,
 )
 from src.agents.state.state import (
     AnalysisResult,
@@ -57,12 +57,12 @@ async def analyze_data_node(
         analysis, viz = await analyze_data(
             user_input=state.preprocessed_input,
             sql_result=state.sql_result,
-            system_prompt=DATA_ANALYSIS,
-            user_template=ANALYSIS_USER,
-            viz_judgment_prompt=VIZ_JUDGMENT_SYSTEM,
-            viz_judgment_user=VIZ_JUDGMENT_USER,
-            viz_svg_system=VIZ_SVG_SYSTEM,
-            viz_svg_user=VIZ_SVG_USER,
+            system_prompt=ANALYZER_SYSTEM,
+            user_template=ANALYZER_USER,
+            viz_judgment_prompt=ANALYZER_VIZ_JUDGMENT_SYSTEM,
+            viz_judgment_user=ANALYZER_VIZ_JUDGMENT_USER,
+            viz_svg_system=ANALYZER_VIZ_SVG_SYSTEM,
+            viz_svg_user=ANALYZER_VIZ_SVG_USER,
             min_rows_for_viz=(
                 settings.min_rows_for_visualization
             ),

@@ -11,7 +11,7 @@ Phase1 에서 슬롯을 추출하고, Phase2 에서 검증·보완하여 Normali
 
 위임 구조:
     - 비즈니스 로직: services/query_normalizer.py (run_normalization)
-    - 프롬프트: nodes/prompts/system_prompts.py 에서 NORMALIZATION_PHASE1/PHASE2 프롬프트를
+    - 프롬프트: nodes/prompts/system_prompts.py 에서 QUERY_NORMALIZER_PHASE1/PHASE2 프롬프트를
       로드하여 서비스에 주입
 
 폴백:
@@ -23,18 +23,20 @@ from __future__ import annotations
 
 from src.agents.models.normalization import NormalizedQuery
 from src.agents.nodes.system_prompts import (
-    NORMALIZATION_PHASE1,
-    NORMALIZATION_PHASE1_USER,
-    NORMALIZATION_PHASE2,
-    NORMALIZATION_PHASE2_USER,
+    QUERY_NORMALIZER_PHASE1_SYSTEM,
+    QUERY_NORMALIZER_PHASE1_USER,
+    QUERY_NORMALIZER_PHASE2_SYSTEM,
+    QUERY_NORMALIZER_PHASE2_USER,
 )
 from src.agents.state.state import (
     PipelineState,
     QueryStatus,
     add_trace,
 )
+from src.models.enums import IntentType
 from src.services.query_normalizer import run_normalization
 from src.utils.logger import get_logger
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -44,15 +46,15 @@ async def normalize_query_node(
 ) -> dict:
     """사용자 질의를 8-Slot NormalizedQuery로 정규화한다."""
     raw_query = state.preprocessed_input
-    logger.info("질의 정규화 시작", input=raw_query[:80])
+    logger.info("질의 정규화 시작", input=truncate_log(raw_query))
 
     try:
         normalized = await run_normalization(
             raw_query,
-            phase1_system=NORMALIZATION_PHASE1,
-            phase1_user_template=NORMALIZATION_PHASE1_USER,
-            phase2_system=NORMALIZATION_PHASE2,
-            phase2_user_template=NORMALIZATION_PHASE2_USER,
+            phase1_system=QUERY_NORMALIZER_PHASE1_SYSTEM,
+            phase1_user_template=QUERY_NORMALIZER_PHASE1_USER,
+            phase2_system=QUERY_NORMALIZER_PHASE2_SYSTEM,
+            phase2_user_template=QUERY_NORMALIZER_PHASE2_USER,
         )
     except Exception as e:
         logger.error("질의 정규화 실패", error=str(e))
@@ -64,7 +66,7 @@ async def normalize_query_node(
             "trace_log": add_trace(
                 state, "질의정규화",
                 "정규화 실패 — 기본값으로 진행",
-                str(e)[:200],
+                truncate_log(str(e)),
             ),
         }
 
@@ -82,25 +84,26 @@ async def normalize_query_node(
         entities=entity_terms,
         measures=measure_terms,
         filters=filter_count,
-        time_range=str(time_range)[:60] if time_range else "(없음)",
+        time_range=truncate_log(str(time_range)) if time_range else "(없음)",
         ambiguities=ambiguity_count,
     )
 
     # ── 추적: 정규화 슬롯 요약 ──
-    from src.utils.tracker import get_current_tracker
-    tracker = get_current_tracker()
-    if tracker and tracker.enabled:
-        tracker.track_decision(
-            node="query_normalizer",
-            decision_type="normalization_result",
-            chosen=intent_primary,
-            reason=(
-                f"entities={entity_terms}, "
-                f"measures={measure_terms}, "
-                f"filters={filter_count}, "
-                f"ambiguities={ambiguity_count}"
-            ),
-        )
+    from src.utils.tracker.dispatch import (
+        dispatch_tracking_event,
+        DECISION_NORMALIZATION,
+    )
+    await dispatch_tracking_event(DECISION_NORMALIZATION, {
+        "node": "normalize_query",
+        "decision_type": "normalization",
+        "chosen": intent_primary,
+        "reason": (
+            f"entities={entity_terms}, "
+            f"measures={measure_terms}, "
+            f"filters={filter_count}, "
+            f"ambiguities={ambiguity_count}"
+        ),
+    })
 
     trace_detail = (
         f"유형={intent_primary}, "
@@ -114,7 +117,7 @@ async def normalize_query_node(
     if ambiguity_count > 0:
         trace_detail += f", 모호성 {ambiguity_count}건"
 
-    return {
+    result = {
         "normalized_query": normalized,
         "status": QueryStatus.QUERY_NORMALIZED,
         "trace_log": add_trace(
@@ -123,3 +126,9 @@ async def normalize_query_node(
             trace_detail,
         ),
     }
+
+    # ambiguities 감지 시 intent를 return dict로 전달 (state 직접 변이 금지)
+    if ambiguity_count > 0:
+        result["intent"] = IntentType.CLARIFICATION_NEEDED
+
+    return result

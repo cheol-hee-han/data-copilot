@@ -40,6 +40,7 @@ from src.utils.llm import (
 )
 from src.utils.logger import get_logger
 from src.utils.tracker import record_prompt_variables
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -321,14 +322,14 @@ async def analyze_data(
             timeout=settings.llm_long_timeout,
             node_name="데이터분석",
         )
-        record_prompt_variables({
+        await record_prompt_variables({
             "user_input": user_input,
-            "query_result": query_result_str[:300] + "..." if len(query_result_str) > 300 else query_result_str,
+            "query_result": truncate_log(query_result_str),
         })
     except ParseError as e:
         logger.warning(
             "분석 JSON 파싱 최종 실패, 텍스트 폴백 사용",
-            last_response=e.last_response[:200],
+            last_response=truncate_log(e.last_response),
         )
         analysis = AnalysisResult(
             summary=e.last_response,

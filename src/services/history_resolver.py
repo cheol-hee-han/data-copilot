@@ -28,6 +28,7 @@ from src.config import settings
 from src.utils.llm import ParseError, llm_call_with_parse_retry
 from src.utils.tracker import record_prompt_variables
 from src.utils.logger import get_logger
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -118,8 +119,6 @@ def _format_history(
     for turn in recent:
         role = "사용자" if turn["role"] == "user" else "시스템"
         content = turn["content"]
-        if role == "시스템" and len(content) > 200:
-            content = content[:200] + "..."
         lines.append(f"  {role}: {content}")
     return "\n".join(lines)
 
@@ -180,7 +179,7 @@ def build_unsure_clarification(
 
     if last_data_query:
         return (
-            f"혹시 이전에 대화했던 '{last_data_query[:40]}'에 "
+            f"혹시 이전에 대화했던 '{last_data_query}'에 "
             f"이어서 질문하신 건가요?\n"
             f"1) 네, 이전 내용에 이어서 진행해주세요\n"
             f"2) 아니요, 새로운 데이터를 찾고 있어요\n"
@@ -242,14 +241,14 @@ async def resolve_history(
                 node_name="이력해소",
             )
         )
-        record_prompt_variables({
+        await record_prompt_variables({
             "query": query,
-            "history": history_text[:300] + "..." if len(history_text) > 300 else history_text,
+            "history": truncate_log(history_text),
         })
     except ParseError as e:
         logger.warning(
             "이력 해소 JSON 파싱 최종 실패, NEW로 폴백",
-            last_response=e.last_response[:100],
+            last_response=truncate_log(e.last_response),
         )
         return HistoryResolveResult(
             decision=HistoryDecision.NEW,
@@ -274,8 +273,8 @@ async def resolve_history(
     logger.info(
         "이력 해소 판정 완료",
         decision=decision.value,
-        original=query[:50],
-        resolved=resolved_query[:50],
+        original=truncate_log(query),
+        resolved=truncate_log(resolved_query),
     )
 
     return HistoryResolveResult(

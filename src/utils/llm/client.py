@@ -27,9 +27,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.config import settings
-from src.utils.tracker import (
-    get_current_node,
-    get_current_tracker,
+from src.utils.tracker.context import get_current_node
+from src.utils.truncate import truncate_trace
+from src.utils.tracker.dispatch import (
+    dispatch_tracking_event,
+    LLM_CALL,
 )
 
 
@@ -83,12 +85,12 @@ def _build_prompt_summary(
     """프롬프트 요약을 생성한다 (추적용)."""
     parts: list[str] = []
     if system:
-        parts.append(f"[S] {system[:150]}")
+        parts.append(f"[S] {truncate_trace(system)}")
     for msg in messages[-2:]:
         role = msg.get("role", "?")[0].upper()
         content = msg.get("content", "")
-        parts.append(f"[{role}] {content[:150]}")
-    return " | ".join(parts)[:500]
+        parts.append(f"[{role}] {truncate_trace(content)}")
+    return truncate_trace(" | ".join(parts))
 
 
 # ── Anthropic 응답 형태를 흉내내는 데이터 클래스 ──
@@ -151,27 +153,25 @@ class AnthropicMessages:
         result = await self._client.messages.create(**call_kwargs)
         _elapsed = (_time.perf_counter() - _start) * 1000
 
-        _tracker = get_current_tracker()
-        if _tracker and _tracker.enabled:
-            _usage = getattr(result, "usage", None)
-            _tracker.track_llm_call(
-                node=get_current_node(),
-                prompt_summary=_build_prompt_summary(
-                    system, messages,
-                ),
-                response_text=(
-                    result.content[0].text[:1000]
-                    if result.content else ""
-                ),
-                model=model,
-                prompt_tokens=getattr(
-                    _usage, "input_tokens", 0,
-                ),
-                response_tokens=getattr(
-                    _usage, "output_tokens", 0,
-                ),
-                latency_ms=_elapsed,
-            )
+        _usage = getattr(result, "usage", None)
+        await dispatch_tracking_event(LLM_CALL, {
+            "node": get_current_node(),
+            "prompt_summary": _build_prompt_summary(
+                system, messages,
+            ),
+            "response_text": (
+                truncate_trace(result.content[0].text)
+                if result.content else ""
+            ),
+            "model": model,
+            "prompt_tokens": getattr(
+                _usage, "input_tokens", 0,
+            ),
+            "response_tokens": getattr(
+                _usage, "output_tokens", 0,
+            ),
+            "latency_ms": _elapsed,
+        })
 
         return result
 
@@ -238,24 +238,22 @@ class OpenAICompatibleMessages:
         if "qwen" in model.lower():
             text = _strip_thinking_tags(text)
 
-        _tracker = get_current_tracker()
-        if _tracker and _tracker.enabled:
-            _usage = getattr(response, "usage", None)
-            _tracker.track_llm_call(
-                node=get_current_node(),
-                prompt_summary=_build_prompt_summary(
-                    system, messages,
-                ),
-                response_text=text,
-                model=model,
-                prompt_tokens=getattr(
-                    _usage, "prompt_tokens", 0,
-                ),
-                response_tokens=getattr(
-                    _usage, "completion_tokens", 0,
-                ),
-                latency_ms=_elapsed,
-            )
+        _usage = getattr(response, "usage", None)
+        await dispatch_tracking_event(LLM_CALL, {
+            "node": get_current_node(),
+            "prompt_summary": _build_prompt_summary(
+                system, messages,
+            ),
+            "response_text": text,
+            "model": model,
+            "prompt_tokens": getattr(
+                _usage, "prompt_tokens", 0,
+            ),
+            "response_tokens": getattr(
+                _usage, "completion_tokens", 0,
+            ),
+            "latency_ms": _elapsed,
+        })
 
         return LLMResponse(
             content=[TextBlock(text=text)],
@@ -302,7 +300,10 @@ def get_llm_client() -> UnifiedLLMClient:
     if provider == "anthropic":
         from anthropic import AsyncAnthropic
 
-        raw_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        raw_client = AsyncAnthropic(
+            api_key=settings.anthropic_api_key,
+            max_retries=settings.llm_transport_max_retry,
+        )
         _client = UnifiedLLMClient(messages=AnthropicMessages(raw_client))
 
     elif provider == "openai_compatible":
@@ -311,6 +312,7 @@ def get_llm_client() -> UnifiedLLMClient:
         raw_client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url or None,
+            max_retries=settings.llm_transport_max_retry,
             default_headers={
                 "HTTP-Referer": settings.openai_referer,
                 "X-OpenRouter-Title": settings.openai_title,

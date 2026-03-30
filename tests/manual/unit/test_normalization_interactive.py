@@ -63,10 +63,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.services.query_normalizer import (
     _preprocess_for_normalization,
 )
-from src.services.domain.domain_synonyms import (
-    ABBREVIATION_MAP,
-    build_reverse_lookup,
-)
+try:
+    from src.services.domain.domain_synonyms import (
+        ABBREVIATION_MAP,
+        build_reverse_lookup,
+    )
+except ImportError:
+    pytest.skip(
+        "domain_synonyms 모듈 삭제됨 (simplify 리팩터링)",
+        allow_module_level=True,
+    )
 
 
 def show_dry_run(query: str) -> None:
@@ -134,11 +140,11 @@ async def run_normalization_test(
     from datetime import date
 
     from src.agents.models.normalization import NormalizedQuery
-    from src.agents.nodes.prompts.system_prompts import (
-        NORMALIZATION_PHASE1,
-        NORMALIZATION_PHASE1_USER,
-        NORMALIZATION_PHASE2,
-        NORMALIZATION_PHASE2_USER,
+    from src.agents.nodes.system_prompts import (
+        QUERY_NORMALIZER_PHASE1_SYSTEM,
+        QUERY_NORMALIZER_PHASE1_USER,
+        QUERY_NORMALIZER_PHASE2_SYSTEM,
+        QUERY_NORMALIZER_PHASE2_USER,
     )
     from src.config import settings
     from src.services.domain.domain_synonyms import (
@@ -167,10 +173,10 @@ async def run_normalization_test(
     synonym_text = get_synonym_prompt_text()
     template_text = get_output_template_prompt_text()
 
-    p1_system = NORMALIZATION_PHASE1.replace(
+    p1_system = QUERY_NORMALIZER_PHASE1_SYSTEM.replace(
         "{output_template_text}", template_text,
     )
-    p1_user_tpl = NORMALIZATION_PHASE1_USER or (
+    p1_user_tpl = QUERY_NORMALIZER_PHASE1_USER or (
         "다음 자연어 질의를 8-Slot 구조로 분해하여 JSON으로 "
         "출력해 주세요.\n\n[입력 질의]\n{query}\n\n"
         "[오늘 날짜]\n{today}\n\n[동의어 사전]\n{synonym_dict}\n\n"
@@ -225,7 +231,7 @@ async def run_normalization_test(
 
     # ── Step 5: Phase 2 LLM 호출 (설정에 따라 스킵) ──
     if settings.normalization_phase2_enabled:
-        p2_user_tpl = NORMALIZATION_PHASE2_USER or (
+        p2_user_tpl = QUERY_NORMALIZER_PHASE2_USER or (
             "아래는 원본 질의와 Phase 1에서 생성된 정규화 JSON입니다.\n"
             "교차 검증 규칙 R1~R12를 모두 적용하여 "
             "수정된 JSON을 출력해 주세요.\n\n"
@@ -249,7 +255,7 @@ async def run_normalization_test(
         print("\nPhase 2 LLM 호출 중...")
         try:
             phase2_raw = await _call_llm(
-                NORMALIZATION_PHASE2, phase2_user,
+                QUERY_NORMALIZER_PHASE2_SYSTEM, phase2_user,
             )
         except Exception as e:
             print(f"[오류] Phase 2 LLM 호출 실패: {e}")

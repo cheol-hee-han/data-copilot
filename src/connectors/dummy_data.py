@@ -286,25 +286,38 @@ DUMMY_REPORT_SQLS: list[dict[str, Any]] = [
     },
 ]
 
-DUMMY_CODE_META: dict[str, dict[str, str]] = {
+DUMMY_CODE_META: dict[str, dict[str, Any]] = {
     "CUST_TYPE_CD": {
-        "01": "개인", "02": "기업", "03": "개인사업자",
+        "desc": "고객유형코드",
+        "codes": {"01": "개인", "02": "기업", "03": "개인사업자"},
     },
     "CUST_GRADE_CD": {
-        "VIP": "VIP등급", "Gold": "골드등급",
-        "Silver": "실버등급", "General": "일반등급",
+        "desc": "고객등급코드",
+        "codes": {
+            "VIP": "VIP등급", "Gold": "골드등급",
+            "Silver": "실버등급", "General": "일반등급",
+        },
     },
     "LOAN_TYPE_CD": {
-        "01": "신용대출", "02": "담보대출", "03": "보증대출",
+        "desc": "대출유형코드",
+        "codes": {"01": "신용대출", "02": "담보대출", "03": "보증대출"},
     },
     "TXN_TYPE_CD": {
-        "01": "입금", "02": "출금", "03": "이체",
+        "desc": "거래유형코드",
+        "codes": {"01": "입금", "02": "출금", "03": "이체"},
     },
     "ACCT_STATUS_CD": {
-        "01": "정상", "02": "해지", "03": "휴면",
+        "desc": "계좌상태코드",
+        "codes": {"01": "정상", "02": "해지", "03": "휴면"},
     },
-    "GENDER_CD": {"M": "남성", "F": "여성"},
-    "OVERDUE_YN": {"Y": "연체", "N": "정상"},
+    "GENDER_CD": {
+        "desc": "성별코드",
+        "codes": {"M": "남성", "F": "여성"},
+    },
+    "OVERDUE_YN": {
+        "desc": "연체여부",
+        "codes": {"Y": "연체", "N": "정상"},
+    },
 }
 
 
@@ -796,14 +809,22 @@ def search_dummy_code_meta(
 ) -> list[dict[str, Any]]:
     """키워드 매칭 기반 Dummy 코드 메타 검색."""
     matched = [
-        {"code_field": k, "codes": v}
+        {
+            "code_field": k,
+            "code_field_desc": v["desc"],
+            "codes": v["codes"],
+        }
         for k, v in DUMMY_CODE_META.items()
         if query.upper() in k
     ]
     if matched:
         return matched
     return [
-        {"code_field": k, "codes": v}
+        {
+            "code_field": k,
+            "code_field_desc": v["desc"],
+            "codes": v["codes"],
+        }
         for k, v in DUMMY_CODE_META.items()
     ]
 

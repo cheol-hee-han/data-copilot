@@ -11,8 +11,8 @@
 
 위임 구조:
     - 비즈니스 로직: services/history_resolver.py (resolve_history)
-    - 프롬프트: nodes/prompts/system_prompts.py에서 HISTORY_RESOLVE,
-      HISTORY_RESOLVE_USER를 로드하여 서비스에 주입
+    - 프롬프트: nodes/prompts/system_prompts.py에서 HISTORY_RESOLVER_SYSTEM,
+      HISTORY_RESOLVER_USER를 로드하여 서비스에 주입
 
 폴백:
     - 대화 이력이 없고 명확화 대기 아니면 스킵 (LLM 호출 없음)
@@ -22,8 +22,8 @@
 from __future__ import annotations
 
 from src.agents.nodes.system_prompts import (
-    HISTORY_RESOLVE,
-    HISTORY_RESOLVE_USER,
+    HISTORY_RESOLVER_SYSTEM,
+    HISTORY_RESOLVER_USER,
 )
 from src.agents.state.state import (
     PipelineState,
@@ -36,6 +36,7 @@ from src.services.history_resolver import (
     resolve_history,
 )
 from src.utils.logger import get_logger
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -50,8 +51,8 @@ async def resolve_history_node(
     result = await resolve_history(
         query,
         history,
-        system_prompt=HISTORY_RESOLVE,
-        user_template=HISTORY_RESOLVE_USER,
+        system_prompt=HISTORY_RESOLVER_SYSTEM,
+        user_template=HISTORY_RESOLVER_USER,
         awaiting_clarification=state.awaiting_clarification,
     )
 
@@ -68,8 +69,8 @@ async def resolve_history_node(
     if result.decision == HistoryDecision.CONTINUE:
         logger.info(
             "CONTINUE: 질의 재작성",
-            original=query[:50],
-            resolved=result.resolved_query[:50],
+            original=truncate_log(query),
+            resolved=truncate_log(result.resolved_query),
         )
         return {
             "preprocessed_input": result.resolved_query,
@@ -79,8 +80,8 @@ async def resolve_history_node(
             "trace_log": add_trace(
                 state, "이력해소",
                 f"CONTINUE — 질의 재작성 ({result.reason})",
-                f"원본: {query[:40]} → "
-                f"재작성: {result.resolved_query[:40]}",
+                f"원본: {query} → "
+                f"재작성: {result.resolved_query}",
             ),
         }
 
@@ -103,18 +104,19 @@ async def resolve_history_node(
 
     logger.info(
         "UNSURE: 명확화 질문 생성",
-        query=query[:50],
-        question=clarification_q[:50],
+        query=truncate_log(query),
+        question=truncate_log(clarification_q),
     )
 
     return {
         "clarification_question": clarification_q,
         "formatted_response": clarification_q,
         "awaiting_clarification": True,
+        "clarification_turns": state.clarification_turns + 1,
         "status": QueryStatus.AWAITING_CLARIFICATION,
         "trace_log": add_trace(
             state, "이력해소",
             f"UNSURE — 명확화 질문 생성 ({result.reason})",
-            f"질문: {clarification_q[:40]}",
+            f"질문: {clarification_q}",
         ),
     }

@@ -12,14 +12,20 @@ from typing import Any
 import pytest
 
 from src.agents.state.state import (
+    ConfidenceStatus,
+    FailureType,
+    FinalStatus,
+    HypothesisStatus,
+    Phase,
     PipelineState,
     ReasoningState,
+    StepStatus,
     CandidateTable,
+    ColumnInfo,
     ExecutionStep,
     Hypothesis,
     KnowledgeItem,
     LoopGuard,
-    SqlValidationResult,
     StructuralHints,
 )
 from src.agents.nodes.reason.planner import planner_node
@@ -130,7 +136,7 @@ class TestPlannerFlowTrace:
 
         # 검증
         assert reason.phase in (
-            "EXPLORING", "GENERATING",
+            Phase.EXPLORING, Phase.GENERATING,
         )
         assert len(reason.hypotheses) >= 1
         assert reason.current_hypothesis is not None
@@ -185,13 +191,13 @@ class TestExplorerFlowTrace:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="test",
-                        status="ACTIVE",
+                        status=HypothesisStatus.ACTIVE,
                     ),
                 ],
                 current_hypothesis=Hypothesis(
                     hypothesis_id="H1",
                     description="test",
-                    status="ACTIVE",
+                    status=HypothesisStatus.ACTIVE,
                 ),
                 execution_plan=[
                     ExecutionStep(
@@ -199,14 +205,14 @@ class TestExplorerFlowTrace:
                         tool="search_table_meta",
                         input="고객",
                         purpose="고객 테이블 탐색",
-                        status="PENDING",
+                        status=StepStatus.PENDING,
                     ),
                     ExecutionStep(
                         step=2,
                         tool="search_code_meta",
                         input="CUST_TYPE_CD",
                         purpose="고객유형 코드값 확인",
-                        status="PENDING",
+                        status=StepStatus.PENDING,
                     ),
                 ],
             ),
@@ -219,11 +225,11 @@ class TestExplorerFlowTrace:
         # 상태 추적
         done_steps = [
             s for s in reason.execution_plan
-            if s.status == "DONE"
+            if s.status == StepStatus.DONE
         ]
         failed_steps = [
             s for s in reason.execution_plan
-            if s.status == "FAILED"
+            if s.status == StepStatus.FAILED
         ]
 
         trace = {
@@ -268,7 +274,7 @@ class TestExplorerFlowTrace:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="t",
-                        status="ACTIVE",
+                        status=HypothesisStatus.ACTIVE,
                     ),
                 ],
                 execution_plan=[
@@ -277,7 +283,7 @@ class TestExplorerFlowTrace:
                         tool="search_table_meta",
                         input="고객",
                         purpose="중복 테스트",
-                        status="PENDING",
+                        status=StepStatus.PENDING,
                     ),
                 ],
             ),
@@ -289,7 +295,7 @@ class TestExplorerFlowTrace:
         reason = new_state.reason
         skipped = [
             s for s in reason.execution_plan
-            if s.status == "SKIPPED"
+            if s.status == StepStatus.SKIPPED
         ]
 
         trace = {
@@ -327,13 +333,13 @@ class TestEvaluatorFlowTrace:
                 knowledge_items=[
                     KnowledgeItem(
                         key="table:TB_CUST",
-                        status="CONFIRMED",
+                        status=ConfidenceStatus.CONFIRMED,
                         confidence=0.9,
                         is_critical=True,
                     ),
                     KnowledgeItem(
                         key="measure:고객수",
-                        status="CONFIRMED",
+                        status=ConfidenceStatus.CONFIRMED,
                         confidence=0.9,
                         is_critical=True,
                     ),
@@ -345,18 +351,18 @@ class TestEvaluatorFlowTrace:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="t",
-                        status="ACTIVE",
+                        status=HypothesisStatus.ACTIVE,
                     ),
                     Hypothesis(
                         hypothesis_id="H2",
                         description="fallback",
-                        status="PENDING",
+                        status=HypothesisStatus.PENDING,
                     ),
                 ],
                 current_hypothesis=Hypothesis(
                     hypothesis_id="H1",
                     description="t",
-                    status="ACTIVE",
+                    status=HypothesisStatus.ACTIVE,
                 ),
             ),
         )
@@ -380,7 +386,7 @@ class TestEvaluatorFlowTrace:
             else "FAIL",
         )
 
-        assert result["reason"].phase == "GENERATING"
+        assert result["reason"].phase == Phase.GENERATING
 
     @pytest.mark.asyncio
     async def test_evaluator_low_confidence(self):
@@ -390,7 +396,7 @@ class TestEvaluatorFlowTrace:
                 knowledge_items=[
                     KnowledgeItem(
                         key="measure:x",
-                        status="UNRESOLVED",
+                        status=ConfidenceStatus.UNRESOLVED,
                         is_critical=True,
                     ),
                 ],
@@ -398,18 +404,18 @@ class TestEvaluatorFlowTrace:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="t",
-                        status="ACTIVE",
+                        status=HypothesisStatus.ACTIVE,
                     ),
                     Hypothesis(
                         hypothesis_id="H2",
                         description="fallback",
-                        status="PENDING",
+                        status=HypothesisStatus.PENDING,
                     ),
                 ],
                 current_hypothesis=Hypothesis(
                     hypothesis_id="H1",
                     description="t",
-                    status="ACTIVE",
+                    status=HypothesisStatus.ACTIVE,
                 ),
             ),
         )
@@ -436,7 +442,7 @@ class TestEvaluatorFlowTrace:
         )
 
         assert result["reason"].phase in (
-            "REPLANNING", "EXPLORING",
+            Phase.REPLANNING, Phase.EXPLORING,
         )
 
 
@@ -456,31 +462,30 @@ class TestValidatorFlowTrace:
                 candidate_tables=[
                     CandidateTable(
                         table_name="users",
-                        relevant_columns=["id"],
+                        columns=[ColumnInfo(name="id")],
                     ),
                 ],
             ),
         )
 
         result = await sql_validator_node(state)
-        vr = result["reason"].sql_validation_result
+        ft = result["reason"].failure_type
 
         trace = {
-            "overall": vr.overall,
-            "layer1": vr.layer1_status,
-            "fix": result["reason"].sql_fix_instruction or "",
+            "failure_type": ft,
+            "fix": result["reason"].failure_reason or "",
         }
 
         _record(
             "validator", "dml_rejection",
             "DELETE FROM users",
-            f"overall={vr.overall}",
+            f"failure_type={ft}",
             trace,
-            "PASS" if vr.overall == "FAIL_SYNTAX"
+            "PASS" if ft == FailureType.SQL_SYNTAX
             else "FAIL",
         )
 
-        assert vr.overall == "FAIL_SYNTAX"
+        assert ft == FailureType.SQL_SYNTAX
 
     @pytest.mark.asyncio
     async def test_validator_layer2a_groupby(self):
@@ -498,35 +503,33 @@ class TestValidatorFlowTrace:
                 candidate_tables=[
                     CandidateTable(
                         table_name="tb_cust",
-                        relevant_columns=["branch_cd"],
+                        columns=[ColumnInfo(name="branch_cd")],
                     ),
                 ],
             ),
         )
 
         result = await sql_validator_node(state)
-        vr = result["reason"].sql_validation_result
+        ft = result["reason"].failure_type
 
         trace = {
-            "overall": vr.overall,
-            "layer1": vr.layer1_status,
-            "layer2": vr.layer2_status,
-            "feedback": result["reason"].sql_fix_instruction or "",
+            "failure_type": ft,
+            "feedback": result["reason"].failure_reason or "",
         }
 
         _record(
             "validator", "missing_groupby",
             "SELECT without GROUP BY (decomp has group_by)",
-            f"overall={vr.overall}",
+            f"failure_type={ft}",
             trace,
-            "PASS" if "FAIL" in vr.overall else "FAIL",
+            "PASS" if ft is not None else "FAIL",
             findings=(
                 "Layer2a sanity check가 "
                 "GROUP BY 누락을 감지하는지 확인"
             ),
         )
 
-        assert "FAIL" in vr.overall
+        assert ft is not None
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -545,23 +548,22 @@ class TestRecoveryFlowTrace:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="활용사례 기반",
-                        status="ACTIVE",
+                        status=HypothesisStatus.ACTIVE,
                     ),
                     Hypothesis(
                         hypothesis_id="H2",
                         description="직접 탐색",
-                        status="PENDING",
+                        status=HypothesisStatus.PENDING,
                         required_tables=["TB_NEW"],
                     ),
                 ],
                 current_hypothesis=Hypothesis(
                     hypothesis_id="H1",
                     description="활용사례 기반",
-                    status="ACTIVE",
+                    status=HypothesisStatus.ACTIVE,
                 ),
-                sql_validation_result=SqlValidationResult(
-                    overall="FAIL_STRUCTURAL",
-                ),
+                failure_type=FailureType.SQL_STRUCTURAL,
+                failure_reason="테이블 구조 불일치",
             ),
         )
 
@@ -595,7 +597,7 @@ class TestRecoveryFlowTrace:
 
         assert trace["current_hyp"] == "H2"
         assert trace["dead_ends"] >= 1
-        assert reason.phase == "EXPLORING"
+        assert reason.phase == Phase.EXPLORING
 
     @pytest.mark.asyncio
     async def test_recovery_fallback_hypothesis(self):
@@ -607,7 +609,7 @@ class TestRecoveryFlowTrace:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="t",
-                        status="FAILED",
+                        status=HypothesisStatus.FAILED,
                     ),
                 ],
                 current_hypothesis=None,
@@ -633,11 +635,11 @@ class TestRecoveryFlowTrace:
             "모든 가설 FAILED → fallback",
             f"phase={trace['phase']}, hyp={trace['new_hyp']}",
             trace,
-            "PASS" if trace["phase"] == "EXPLORING"
+            "PASS" if trace["phase"] == Phase.EXPLORING
             else "FAIL",
         )
 
-        assert result["reason"].phase == "EXPLORING"
+        assert result["reason"].phase == Phase.EXPLORING
         assert result["reason"].current_hypothesis is not None
 
 
@@ -672,17 +674,20 @@ class TestBoundaryConversionTrace:
             "SELECT branch_cd, COUNT(*) AS cnt "
             "FROM tb_cust GROUP BY branch_cd"
         )
-        reason.final_status = "success"
+        reason.final_status = FinalStatus.SUCCESS
         reason.candidate_tables = [
             CandidateTable(
                 table_name="tb_cust",
-                relevant_columns=["branch_cd", "cust_no"],
+                columns=[
+                    ColumnInfo(name="branch_cd"),
+                    ColumnInfo(name="cust_no"),
+                ],
             ),
         ]
         reason.knowledge_items = [
             KnowledgeItem(
                 key="table:tb_cust",
-                status="CONFIRMED",
+                status=ConfidenceStatus.CONFIRMED,
                 confidence=0.9,
             ),
         ]

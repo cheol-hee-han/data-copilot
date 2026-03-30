@@ -12,13 +12,14 @@ from __future__ import annotations
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from src.models.enums import ConfidenceStatus, Phase, StepStatus
+
 if TYPE_CHECKING:
     from src.agents.state.state import ReasoningState
 
 # ── 임계값 ──────────────────────────────────────────
-THRESHOLD_GENERATE = 0.65   # 이상이면 SQL 생성 시도
-THRESHOLD_REPLAN = 0.25     # 이하이면 가설 자체를 교체
-THRESHOLD_BOLD_GENERATE = 0.70  # 도전적 생성 (critical 미확정 허용)
+THRESHOLD_GENERATE = 0.65       # 이상이면 SQL 생성 시도
+THRESHOLD_FORCE_GENERATE = 0.55 # 교착 시 강제 생성 최소 임계값
 
 
 class ReadinessVerdict(str, Enum):
@@ -32,12 +33,12 @@ class ReadinessVerdict(str, Enum):
 
 
 # ── Phase 매핑 (assess 노드에서 사용) ──────────────
-VERDICT_TO_PHASE: dict[ReadinessVerdict, str] = {
-    ReadinessVerdict.GENERATE: "GENERATING",
-    ReadinessVerdict.REPLAN: "REPLANNING",
-    ReadinessVerdict.EXPLORE: "EXPLORING",
-    ReadinessVerdict.ASK_USER: "VERIFYING",
-    ReadinessVerdict.TERMINATE: "DONE",
+VERDICT_TO_PHASE: dict[ReadinessVerdict, Phase] = {
+    ReadinessVerdict.GENERATE: Phase.GENERATING,
+    ReadinessVerdict.REPLAN: Phase.REPLANNING,
+    ReadinessVerdict.EXPLORE: Phase.EXPLORING,
+    ReadinessVerdict.ASK_USER: Phase.VERIFYING,
+    ReadinessVerdict.TERMINATE: Phase.DONE,
 }
 
 
@@ -49,9 +50,9 @@ def evaluate_readiness(
     explore의 조기 탈출과 assess의 라우팅이 모두 이 함수를 사용한다.
     판단 우선순위:
       1. 루프 가드 초과 → TERMINATE
-      2. CONFLICTED 항목 → ASK_USER
-      3. 충분한 확신 → GENERATE
-      4. 탐색 스텝 남음 → EXPLORE
+      2. 충분한 확신 → GENERATE
+      3. 탐색 스텝 남음 → EXPLORE
+      4. CONFLICTED 항목 → ASK_USER (탐색 완료 후 판단)
       5. 확신 부족 또는 가설 실패 → REPLAN
     """
     from src.agents.state.state import should_terminate
@@ -60,26 +61,22 @@ def evaluate_readiness(
     if should_terminate(reason):
         return ReadinessVerdict.TERMINATE
 
-    # 2. CONFLICTED → 사용자 확인
-    if has_conflicted_items(reason):
-        return ReadinessVerdict.ASK_USER
-
-    # 3. 충분한 확신 → SQL 생성
+    # 2. 충분한 확신 → SQL 생성
     score = calculate_readiness(reason)
-    if score >= THRESHOLD_GENERATE:
-        if all_critical_confirmed(reason):
-            return ReadinessVerdict.GENERATE
-        # 도전적 생성: score 충분하면 critical 미확정이어도 시도
-        if score >= THRESHOLD_BOLD_GENERATE:
-            return ReadinessVerdict.GENERATE
+    if score >= THRESHOLD_GENERATE and all_critical_confirmed(reason):
+        return ReadinessVerdict.GENERATE
 
-    # 4. 탐색 스텝 남음 → 탐색 계속
+    # 3. 탐색 스텝 남음 → 탐색 계속
     remaining = [
         s for s in reason.execution_plan
-        if s.status == "PENDING"
+        if s.status == StepStatus.PENDING
     ]
     if remaining:
         return ReadinessVerdict.EXPLORE
+
+    # 4. CONFLICTED → 사용자 확인 (탐색이 충돌을 해소할 수 있으므로 탐색 후 판단)
+    if has_conflicted_items(reason):
+        return ReadinessVerdict.ASK_USER
 
     # 5. 가설 실패 또는 확신 부족 → 재계획
     return ReadinessVerdict.REPLAN
@@ -99,12 +96,16 @@ def calculate_readiness(
     """
     scores: list[tuple[str, float, float]] = []
 
-    # 1. 용어 해소율 (55%)
-    items = reason.knowledge_items
+    # 1. 용어 해소율 (55%) — is_critical 항목만 대상
+    #    status 기반 판정 (all_critical_confirmed과 동일 기준)
+    items = [ki for ki in reason.knowledge_items if ki.is_critical]
     if items:
         resolved = [
             i for i in items
-            if i.confidence >= 0.7
+            if i.status in (
+                ConfidenceStatus.CONFIRMED,
+                ConfidenceStatus.PROBABLE,
+            )
         ]
         term_score = len(resolved) / len(items)
     else:
@@ -124,18 +125,19 @@ def calculate_readiness(
         table_score = 0.0
     scores.append(("table_coverage", table_score, 0.25))
 
-    # 3. 조인 경로 확인 (20%)
-    confirmed_tables = [
-        ki for ki in items
-        if ki.key.startswith("table:")
-        and ki.confidence >= 0.7
-    ]
-    needs_join = len(confirmed_tables) > 1
+    # 3. 조인 가능성 확인 (20%)
+    # 다중 테이블 시, 공통 join_keys가 있으면 조인 가능으로 판단
+    needs_join = len(candidates) > 1
     if needs_join:
-        join_score = (
-            1.0 if reason.confirmed_join_path
-            else 0.3
+        all_keys = [
+            set(ct.join_keys) for ct in candidates
+            if ct.join_keys
+        ]
+        has_common_key = any(
+            a & b for i, a in enumerate(all_keys)
+            for b in all_keys[i + 1:]
         )
+        join_score = 1.0 if has_common_key else 0.3
     else:
         join_score = 1.0
     scores.append(("join_path", join_score, 0.20))
@@ -157,7 +159,9 @@ def all_critical_confirmed(
         ki for ki in reason.knowledge_items
         if ki.is_critical
         and ki.status in (
-            "UNRESOLVED", "CANDIDATE", "CONFLICTED",
+            ConfidenceStatus.UNRESOLVED,
+            ConfidenceStatus.CANDIDATE,
+            ConfidenceStatus.CONFLICTED,
         )
     ]
     return len(unresolved_critical) == 0
@@ -168,6 +172,6 @@ def has_conflicted_items(
 ) -> bool:
     """CONFLICTED 상태인 지식 항목이 있는지 확인."""
     return any(
-        ki.status == "CONFLICTED"
+        ki.status == ConfidenceStatus.CONFLICTED
         for ki in reason.knowledge_items
     )

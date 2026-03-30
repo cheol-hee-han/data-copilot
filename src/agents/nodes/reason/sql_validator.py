@@ -5,9 +5,12 @@ Layer 2a (Rule-based): 구조적 sanity check (C-22, dialect 무관)
 Layer 2b (LLM): 의미 검증 — query_decomposition 체크리스트 대조
 Layer 3 (Execution): db_source에 맞는 커넥터로 실행 검증
 
-실패 유형을 5단계로 분류하고 sql_fix_instruction을 생성한다.
+실패 시 failure_type(FailureType)과 failure_reason(상세 피드백)을
+state에 직접 설정하여, pipeline 라우팅·sql_generator 재시도·recovery_planner
+DeadEnd 생성까지 단일 필드로 통합 전달한다.
 
 v2.0 (2026-03-25): Layer 2b LLM 구현 — 외부 프롬프트 사용.
+v2.1 (2026-03-29): SqlValidationResult 제거 → failure_type/failure_reason 통합.
 """
 
 from __future__ import annotations
@@ -15,16 +18,18 @@ from __future__ import annotations
 from typing import Any
 
 from src.agents.state.state import (
+    FailureType,
+    Phase,
     PipelineState,
     ReasoningState,
-    SqlValidationResult,
+    TableSelectionStatus,
 )
-from src.agents.nodes.reason.sql_generator import determine_dialect
+from src.connectors.manager import get_connector_manager
 from src.agents.nodes.system_prompts import (
-    REASON_VALIDATE_LAYER2B,
+    SQL_VALIDATOR_SYSTEM,
 )
 from src.services.sql_safety_checker import validate_sql_safety
-from src.services.sql_hint_extractor import (
+from src.utils.sqlglot_analyzer import (
     parse_sql_safe,
     get_real_tables,
     get_real_columns,
@@ -32,6 +37,7 @@ from src.services.sql_hint_extractor import (
 from src.config import settings
 from src.utils.logger import get_logger
 from src.utils.tracker import record_prompt_variables
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -39,37 +45,28 @@ logger = get_logger(__name__)
 async def sql_validator_node(state: PipelineState) -> dict:
     """생성된 SQL을 3레이어로 검증한다."""
     reason = state.reason.model_copy(deep=True)
-    reason.phase = "VALIDATING"
+    reason.phase = Phase.VALIDATING
 
     sql = reason.generated_sql
     if not sql:
-        reason.sql_validation_result = SqlValidationResult(
-            overall="FAIL_SYNTAX",
-        )
-        reason.sql_fix_instruction = (
-            "SQL이 생성되지 않았습니다."
-        )
+        reason.failure_type = FailureType.SQL_SYNTAX
+        reason.failure_reason = "SQL이 생성되지 않았습니다."
         logger.warning("SQL 검증: 빈 SQL")
         return {"reason": reason}
 
-    # dialect 결정 (sql_generator와 동일 로직 공유)
-    dialect = determine_dialect(reason)
+    # dialect 결정 (커넥터에서 직접 가져옴)
+    dialect = get_connector_manager().get_query_db(reason).dialect
 
     # Layer 1: Rule-based (문법/구조, dialect 인식)
     layer1_result = _validate_layer1(sql, reason, dialect)
     if layer1_result["status"] == "FAIL":
         reason.loop_guard = reason.loop_guard.model_copy()
         reason.loop_guard.increment_local_fix()
-        reason.sql_validation_result = SqlValidationResult(
-            layer1_status="FAIL",
-            overall="FAIL_SYNTAX",
-        )
-        reason.sql_fix_instruction = (
-            layer1_result["feedback"]
-        )
+        reason.failure_type = FailureType.SQL_SYNTAX
+        reason.failure_reason = layer1_result["feedback"]
         logger.warning(
             "SQL 검증 실패: Layer1(구문)",
-            feedback=layer1_result["feedback"][:200],
+            feedback=truncate_log(layer1_result["feedback"]),
         )
         return {"reason": reason}
 
@@ -81,13 +78,16 @@ async def sql_validator_node(state: PipelineState) -> dict:
             failed=layer2a_result.get("failed", []),
         )
         return _build_layer2_failure(
-            reason, layer2a_result,
+            reason,
+            layer2a_result,
         )
 
     # Layer 2b: LLM 의미 검증 (대형 모델 환경에서만)
     if settings.validate_layer2b_enabled:
         layer2b_result = await _validate_layer2b(
-            sql, reason, state.preprocessed_input,
+            sql,
+            reason,
+            state.preprocessed_input,
         )
         if layer2b_result["status"] == "FAIL":
             logger.warning(
@@ -95,44 +95,31 @@ async def sql_validator_node(state: PipelineState) -> dict:
                 failed=layer2b_result.get("failed", []),
             )
             return _build_layer2_failure(
-                reason, layer2b_result,
+                reason,
+                layer2b_result,
             )
+        # PASS 시 체크 항목별 판정 사유를 보존 (통찰 패널에서 사용)
+        reason.validation_checks = layer2b_result.get("checks", {})
 
     # Layer 3: 실행 검증 (db_source 기반 커넥터 라우팅)
-    layer3_result = await _validate_layer3(
-        sql, reason, dialect,
-    )
+    layer3_result = await _validate_layer3(sql, reason)
     if layer3_result["status"] == "FAIL":
-        reason.sql_validation_result = SqlValidationResult(
-            layer1_status="PASS",
-            layer2_status="PASS",
-            layer3_status="FAIL",
-            layer3_row_count=layer3_result.get("row_count"),
-            layer3_is_sane=False,
-            overall=layer3_result.get(
-                "overall", "FAIL_EMPTY",
-            ),
+        layer3_failure: FailureType = layer3_result.get(
+            "failure_type", FailureType.EMPTY_RESULT
         )
-        reason.sql_fix_instruction = (
-            layer3_result["feedback"]
-        )
+        reason.failure_type = layer3_failure
+        reason.failure_reason = layer3_result["feedback"]
         logger.warning(
             "SQL 검증 실패: Layer3(실행)",
-            overall=layer3_result.get("overall"),
-            feedback=layer3_result.get("feedback", "")[:200],
+            failure_type=layer3_failure,
+            feedback=truncate_log(layer3_result.get("feedback", "")),
         )
         return {"reason": reason}
 
     # 전체 통과
     reason.validated_sql = sql
-    reason.sql_validation_result = SqlValidationResult(
-        layer1_status="PASS",
-        layer2_status="PASS",
-        layer3_status="PASS",
-        layer3_row_count=layer3_result.get("row_count", 0),
-        layer3_is_sane=True,
-        overall="SUCCESS",
-    )
+    reason.failure_type = None
+    reason.failure_reason = None
     logger.info(
         "SQL 검증 통과",
         row_count=layer3_result.get("row_count", 0),
@@ -146,34 +133,25 @@ def _build_layer2_failure(
 ) -> dict[str, Any]:
     """Layer 2 (a/b) 실패 시 공통 업데이트를 구성한다."""
     loop_guard = reason.loop_guard.model_copy()
-    failure_type = result.get(
-        "failure_type", "semantic_local",
+    layer2_type = result.get(
+        "failure_type",
+        "semantic_local",
     )
-    if (
-        failure_type == "structural"
-        or loop_guard.should_escalate_to_structural()
-    ):
-        overall = "FAIL_STRUCTURAL"
+    if layer2_type == "structural" or loop_guard.should_escalate_to_structural():
+        reason.failure_type = FailureType.SQL_STRUCTURAL
     else:
-        overall = "FAIL_SEMANTIC_LOCAL"
+        reason.failure_type = FailureType.SQL_SEMANTIC_LOCAL
         loop_guard.increment_local_fix()
 
     reason.loop_guard = loop_guard
-    reason.sql_validation_result = SqlValidationResult(
-        layer1_status="PASS",
-        layer2_status="FAIL",
-        layer2_passed=result.get("passed", []),
-        layer2_failed=result.get("failed", []),
-        layer2_failure_type=failure_type,
-        overall=overall,
-    )
-    reason.sql_fix_instruction = result.get("feedback", "")
+    reason.failure_reason = result.get("feedback", "")
     return {"reason": reason}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Layer 1: Rule-based (dialect 인식)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 
 def _validate_layer1(
     sql: str,
@@ -182,7 +160,7 @@ def _validate_layer1(
 ) -> dict[str, Any]:
     """Rule-based 문법/구조 검증 (dialect 인식)."""
     # 1. 공통 안전성 검증 (DML/DDL/시스템카탈로그)
-    safety = validate_sql_safety(sql)
+    safety = validate_sql_safety(sql, dialect)
     if not safety.is_safe:
         return {
             "status": "FAIL",
@@ -194,27 +172,20 @@ def _validate_layer1(
     if ast is None:
         return {
             "status": "FAIL",
-            "feedback": (
-                f"SQL 파싱 실패 ({dialect} 문법 오류)"
-            ),
+            "feedback": (f"SQL 파싱 실패 ({dialect} 문법 오류)"),
         }
 
     # 3. 사용된 테이블이 candidate_tables에 존재하는지
     errors: list[str] = []
     used_tables = get_real_tables(ast)
-    candidate_names = {
-        ct.table_name.upper()
-        for ct in reason.candidate_tables
-    }
-    qualified_names = [
-        ct.qualified_name
-        for ct in reason.candidate_tables
+    active_tables = [
+        ct for ct in reason.candidate_tables
+        if ct.selection_status != TableSelectionStatus.REJECTED
     ]
+    candidate_names = {ct.table_name.upper() for ct in active_tables}
+    qualified_names = [ct.qualified_name for ct in active_tables]
     if candidate_names:
-        unknown = [
-            t for t in used_tables
-            if t.upper() not in candidate_names
-        ]
+        unknown = [t for t in used_tables if t.upper() not in candidate_names]
         if unknown:
             errors.append(
                 f"미확인 테이블: {', '.join(unknown)} "
@@ -224,18 +195,13 @@ def _validate_layer1(
             )
 
     # 4. 사용된 컬럼이 candidate_tables의 컬럼 범위 안인지
-    if reason.candidate_tables and not errors:
+    if active_tables and not errors:
         allowed_columns = set()
-        for ct in reason.candidate_tables:
-            allowed_columns.update(
-                c.upper() for c in ct.relevant_columns
-            )
+        for ct in active_tables:
+            allowed_columns.update(c.name.upper() for c in ct.columns)
         if allowed_columns:
             used_columns = get_real_columns(ast)
-            unknown_cols = [
-                c for c in used_columns
-                if c.upper() not in allowed_columns
-            ]
+            unknown_cols = [c for c in used_columns if c.upper() not in allowed_columns]
             if unknown_cols:
                 errors.append(
                     f"미확인 컬럼: {', '.join(unknown_cols)} "
@@ -255,6 +221,7 @@ def _validate_layer1(
 # Layer 2a: 구조적 sanity check (dialect 무관)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+
 def _validate_layer2a(
     sql: str,
     reason: ReasoningState,
@@ -267,22 +234,22 @@ def _validate_layer2a(
 
     if decomp.get("group_by") and "GROUP BY" not in sql_upper:
         failed.append(
-            "query_decomposition에 group_by가 있는데 "
-            "SQL에 GROUP BY 절이 없음",
+            "query_decomposition에 group_by가 있는데 " "SQL에 GROUP BY 절이 없음",
         )
 
     agg_keywords = [
-        "COUNT(", "SUM(", "AVG(", "MIN(", "MAX(",
+        "COUNT(",
+        "SUM(",
+        "AVG(",
+        "MIN(",
+        "MAX(",
     ]
     has_agg = any(kw in sql_upper for kw in agg_keywords)
     measures = decomp.get("measures", [])
-    has_agg_in_decomp = any(
-        m.get("agg_function") for m in measures
-    )
+    has_agg_in_decomp = any(m.get("agg_function") for m in measures)
     if has_agg_in_decomp and not has_agg:
         failed.append(
-            "query_decomposition에 집계함수가 있는데 "
-            "SQL에 집계함수가 없음",
+            "query_decomposition에 집계함수가 있는데 " "SQL에 집계함수가 없음",
         )
 
     if failed:
@@ -299,64 +266,48 @@ def _validate_layer2a(
 # Layer 2b: LLM 의미 검증
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+
 async def _validate_layer2b(
     sql: str,
     reason: ReasoningState,
     original_query: str,
 ) -> dict[str, Any]:
-    """LLM 기반 의미 검증 — 7개 체크리스트 대조."""
-    import json
-    import re
+    """LLM 기반 의미 검증 — 7개 체크리스트 대조.
 
-    from src.utils.llm import get_llm_client
+    retry 후에도 실패하면 FAIL + SQL_STRUCTURAL로 처리하여
+    검증되지 않은 SQL이 실행되지 않도록 한다.
+    """
+    from src.utils.llm import llm_call_with_parse_retry, ParseError
+    from src.utils.llm.response import extract_json
+    from src.utils.llm.prompt import (
+        render_prompt,
+        serialize_decomp_slots,
+    )
 
     decomp = reason.query_decomposition
 
-    # 확인된 지식 항목
-    confirmed = reason.get_confirmed_knowledge()
-    confirmed_text = "\n".join(
-        f"- {ki.key}: {ki.value} ({ki.source})"
-        for ki in confirmed
-    ) if confirmed else "(없음)"
+    # 확인된 지식 항목 / Dead-ends
+    confirmed_text = reason.format_confirmed_text()
+    dead_text = reason.format_dead_ends_text()
 
-    # Dead-ends
-    dead_text = "\n".join(
-        f"- [{de.failure_type}] {de.reason}"
-        for de in reason.dead_ends
-    ) if reason.dead_ends else "(없음)"
-
-    prompt = REASON_VALIDATE_LAYER2B
+    template = SQL_VALIDATOR_SYSTEM
     replacements = {
         "{original_query}": original_query or "",
-        "{measures}": json.dumps(
-            decomp.get("measures", []),
-            ensure_ascii=False,
-        ),
-        "{filters}": json.dumps(
-            decomp.get("filters", []),
-            ensure_ascii=False,
-        ),
-        "{group_by}": json.dumps(
-            decomp.get("group_by", []),
-            ensure_ascii=False,
-        ),
-        "{order_limit}": json.dumps(
-            decomp.get("order_limit", []),
-            ensure_ascii=False,
-        ),
+        **serialize_decomp_slots(decomp),
         "{generated_sql}": sql,
         "{confirmed_terms}": confirmed_text,
         "{dead_ends}": dead_text,
     }
-    for key, value in replacements.items():
-        prompt = prompt.replace(key, value)
+    prompt, prompt_vars = render_prompt(template, replacements)
+
+    def _parse_fn(raw_text: str) -> dict[str, Any]:
+        data = extract_json(raw_text)
+        if not data:
+            raise ValueError("Layer2b JSON 파싱 실패")
+        return data
 
     try:
-        client = get_llm_client()
-        response = await client.messages.create(
-            model=settings.llm_model,
-            max_tokens=1024,
-            timeout=settings.llm_default_timeout,
+        _, data = await llm_call_with_parse_retry(
             system=prompt,
             messages=[
                 {
@@ -364,30 +315,17 @@ async def _validate_layer2b(
                     "content": "SQL을 검증하세요.",
                 },
             ],
+            parse_fn=_parse_fn,
+            max_tokens=1024,
+            timeout=settings.llm_default_timeout,
+            node_name="sql_validator_layer2b",
         )
 
-        record_prompt_variables({
-            k.strip("{}"): v for k, v in replacements.items()
-        })
-        raw = response.content[0].text
-        json_match = re.search(r"\{[\s\S]*\}", raw)
-        if not json_match:
-            logger.warning(
-                "Layer2b JSON 파싱 실패, PASS 처리",
-            )
-            return {
-                "status": "PASS",
-                "passed": [],
-                "failed": [],
-            }
-
-        data = json.loads(json_match.group())
+        await record_prompt_variables(prompt_vars)
         verdict = data.get("verdict", "PASS")
         checks = data.get("checks", {})
 
-        passed = [
-            k for k, v in checks.items() if v.get("pass")
-        ]
+        passed = [k for k, v in checks.items() if v.get("pass")]
         failed = [
             f"{k}: {v.get('detail', '')}"
             for k, v in checks.items()
@@ -422,42 +360,41 @@ async def _validate_layer2b(
             "status": "PASS",
             "passed": passed,
             "failed": [],
+            "checks": checks,
         }
 
-    except Exception as e:
+    except (ParseError, Exception) as e:
         logger.warning(
-            "Layer2b LLM 호출 실패, PASS 처리",
+            "Layer2b LLM 최종 실패, FAIL 처리",
             error=str(e),
         )
-        return {"status": "PASS", "passed": [], "failed": []}
+        return {
+            "status": "FAIL",
+            "passed": [],
+            "failed": ["LLM 의미 검증 불가"],
+            "feedback": "LLM 의미 검증에 실패하여 SQL을 확정할 수 없습니다",
+            "failure_type": "structural",
+        }
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Layer 3: 실행 검증 (db_source 기반 커넥터 라우팅)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+
 async def _validate_layer3(
     sql: str,
     reason: ReasoningState,
-    dialect: str = "tsql",
 ) -> dict[str, Any]:
     """db_source에 맞는 커넥터로 LIMIT 5 실행 검증."""
-    from src.connectors.manager import get_connector_manager
+    mgr = get_connector_manager()
+    db = mgr.get_query_db(reason)
 
     # dialect별 행 제한 문법
-    if dialect == "tsql":
-        # Sybase IQ: SELECT TOP 5 * FROM (...)
+    if db.dialect == "tsql":
         limited_sql = f"SELECT TOP 5 * FROM ({sql}) _t"
     else:
-        # Impala/Hive/PostgreSQL: LIMIT
-        limited_sql = (
-            f"SELECT * FROM ({sql}) _t LIMIT 5"
-        )
-
-    mgr = get_connector_manager()
-
-    # db_source에 따라 올바른 커넥터 선택
-    db = mgr.get_query_db(reason)
+        limited_sql = f"SELECT * FROM ({sql}) _t LIMIT 5"
 
     try:
         result = await db.execute_query(limited_sql)
@@ -468,17 +405,16 @@ async def _validate_layer3(
         if row_count == 0:
             return {
                 "status": "FAIL",
-                "overall": "FAIL_EMPTY",
+                "failure_type": FailureType.EMPTY_RESULT,
                 "row_count": 0,
                 "feedback": (
-                    "실행 결과 0건 — 조건이 너무 좁거나 "
-                    "테이블이 부적절합니다"
+                    "실행 결과 0건 — 조건이 너무 좁거나 " "테이블이 부적절합니다"
                 ),
             }
         return {"status": "PASS", "row_count": row_count}
     except Exception as e:
         return {
             "status": "FAIL",
-            "overall": "FAIL_DB_ERROR",
+            "failure_type": FailureType.DB_ERROR,
             "feedback": f"DB 실행 오류: {e}",
         }

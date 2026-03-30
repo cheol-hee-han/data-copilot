@@ -7,11 +7,11 @@
 | 파일 | 용도 | 사용처 |
 |------|------|--------|
 | `domain_dictionary.yaml` | 금융 용어 → DB 표현 매핑 | `domain_dictionary.py` → 검색 쿼리 확장 + SQL 생성 프롬프트 |
-| `domain_synonyms.yaml` | 동의어 목록 (여신↔대출 등) | `domain_synonyms.py` → 검색 쿼리 확장 |
-| `domain_categories.yaml` | 업무 카테고리 분류 | `search_query_builder.py` → 검색 범위 결정 |
+| `business_synonyms.yaml` | 동의어·약어 사전 (여신↔대출 등) | `query_normalizer.py` → 프롬프트 주입·약어 확장 |
+| `business_categories.yaml` | 업무 카테고리 분류 | `search_query_builder.py` → 검색 범위 결정 |
 | `similar_tables.yaml` | 유사 테이블 그룹 정의 | `similar_table_resolver.py` → 테이블 모호성 해소 |
 | `stopwords.yaml` | 검색 불용어 | `search_query_builder.py` → 검색 쿼리 정제 |
-| `domain_pii_columns.yaml` | PII 컬럼 정의 (금지/마스킹) | `sql_safety_checker.py` → SQL 내 PII 노출 차단 |
+| `pii_columns.yaml` | PII 컬럼 정의 (금지/마스킹) | `sql_safety_checker.py` → SQL 내 PII 노출 차단 |
 | `chart_config.yaml` | 차트 색상/폰트 설정 | `chart_generator.py` → 템플릿 SVG 스타일 |
 
 ## 강화 방법
@@ -39,7 +39,7 @@ deposit_group:
   disambiguation: "BAL=잔액스냅샷, TXN=거래이력, MASTER=계좌기본정보"
 ```
 
-### domain_synonyms.yaml
+### business_synonyms.yaml
 사용자가 쓰는 표현과 DB 컬럼명 사이의 갭을 메운다.
 
 ```yaml

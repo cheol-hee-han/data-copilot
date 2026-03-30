@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.agents.state.state import (
     ContextInfo,
+    FailureType,
     IntentType,
     PipelineState,
     QueryStatus,
@@ -98,16 +99,17 @@ def test_chain_validator_feedback_to_generator():
     from src.agents.state.state import ReasoningState
     reason = ReasoningState(
         generated_sql="UPDATE TB_CUST SET name='x'",
-        sql_fix_instruction=result.feedback,
+        failure_type=FailureType.SQL_SYNTAX,
+        failure_reason=result.feedback,
     )
-    assert reason.sql_fix_instruction != ""
-    assert "UPDATE" in reason.sql_fix_instruction
+    assert reason.failure_reason != ""
+    assert "UPDATE" in reason.failure_reason
 
     log_test_case(
         logger, "test_chain_validator_to_generator",
         "UPDATE TB_CUST",
-        "sql_fix_instruction 비어있지 않음",
-        reason.sql_fix_instruction[:80],
+        "failure_reason 비어있지 않음",
+        reason.failure_reason[:80],
         True,
     )
 

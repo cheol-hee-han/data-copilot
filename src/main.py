@@ -20,8 +20,8 @@ session_id는 영숫자/하이픈/밑줄만 허용하여 경로 순회 및 주�
 
 기동 예시::
 
-    # 개발 (hot-reload)
-    uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    # 개발 (hot-reload)uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    
 
     # 운영
     uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
@@ -50,6 +50,7 @@ from src.services.session import get_session_store
 from src.tools.langsmith import setup_langsmith
 from src.utils.logger import get_logger, setup_logging
 from src.utils.security import detect_prompt_injection, mask_pii
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -162,7 +163,7 @@ async def _handle_slash_command(
         else:
             lines = [
                 f"{i}. [{'사용자' if h['role'] == 'user' else '시스템'}] "
-                f"{h['content'][:100]}"
+                f"{truncate_log(h['content'])}"
                 for i, h in enumerate(history, 1)
             ]
             msg = "\n".join(lines)

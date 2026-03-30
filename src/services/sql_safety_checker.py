@@ -10,7 +10,7 @@ LLM이 생성한 SQL이 실행되기 전에 5단계 검증 파이프라인을 �
     4단계 - PII 컬럼 직접 노출 검사 (주민번호, 카드번호, 계좌번호, 비밀번호 등)
     5단계 - LIMIT 절 존재 여부 확인 (집계 쿼리는 예외 처리)
 
-PII 컬럼 목록은 resources/domain/domain_pii_columns.yaml에서 로드하며,
+PII 컬럼 목록은 resources/domain/pii_columns.yaml에서 로드하며,
 YAML 파일이 없으면 내장 기본값(_DEFAULT_PII_COLUMNS, _DEFAULT_MASKING_COLUMNS)을 사용한다.
 검증 실패 시 SafetyCheckResult에 오류 목록과 LLM 재생성용 피드백 문자열을 담아 반환한다.
 """
@@ -20,9 +20,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-import sqlglot
-
 from src.utils.logger import get_logger
+from src.utils.sqlglot_analyzer import parse_sql_safe
 from src.utils.resource_loader import load_yaml
 from src.utils.security import normalize_unicode
 
@@ -108,8 +107,8 @@ _AGG_PATTERN = re.compile(
 
 
 def _load_pii_columns() -> tuple[set[str], set[str]]:
-    """resources/domain/domain_pii_columns.yaml 에서 PII 정의를 로드한다."""
-    data = load_yaml("domain/domain_pii_columns.yaml", None)
+    """resources/domain/pii_columns.yaml 에서 PII 정의를 로드한다."""
+    data = load_yaml("domain/pii_columns.yaml", None)
     if data is None:
         return _DEFAULT_PII_COLUMNS, _DEFAULT_MASKING_COLUMNS
 
@@ -178,14 +177,13 @@ def check_forbidden_patterns(sql: str) -> list[str]:
     ]
 
 
-def check_sql_syntax(sql: str) -> list[str]:
+def check_sql_syntax(
+    sql: str, dialect: str = "postgres",
+) -> list[str]:
     """SQL 구문을 파싱 검증한다."""
-    try:
-        parsed = sqlglot.parse(sql, dialect="postgres")
-        if not parsed:
-            return ["SQL 구문을 파싱할 수 없습니다"]
-    except sqlglot.errors.ParseError as e:
-        return [f"SQL 구문 오류: {e}"]
+    ast = parse_sql_safe(sql, dialect)
+    if ast is None:
+        return ["SQL 구문을 파싱할 수 없습니다"]
     return []
 
 
@@ -213,6 +211,7 @@ def build_validation_feedback(
 
 def validate_sql_safety(
     raw_sql: str,
+    dialect: str = "postgres",
 ) -> SafetyCheckResult:
     """생성된 SQL의 안전성을 종합 검증한다.
 
@@ -250,13 +249,14 @@ def validate_sql_safety(
 
     errors: list[str] = []
     errors.extend(check_forbidden_patterns(sql))
-    errors.extend(check_sql_syntax(sql))
+    errors.extend(check_sql_syntax(sql, dialect))
     errors.extend(check_pii_columns(sql_upper))
 
-    if (
-        "LIMIT" not in sql_upper
-        and not is_aggregate_query(sql_upper)
-    ):
+    has_row_limit = (
+        "LIMIT" in sql_upper
+        or (dialect == "tsql" and "TOP " in sql_upper)
+    )
+    if not has_row_limit and not is_aggregate_query(sql_upper):
         errors.append(
             "LIMIT 절이 없습니다. "
             "대량 데이터 조회를 방지하기 위해 "

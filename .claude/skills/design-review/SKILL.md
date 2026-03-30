@@ -22,7 +22,7 @@ user_invocable: true
 
 # 산출물 위치
 
-- 검토 보고서: docs/design-reviews/
+- 검토 보고서: - 산출물 위치 : docs/reviews/design/yyyymmddd-(중점사항 또는 design-review)-report.md
 
 # 작업 절차
 

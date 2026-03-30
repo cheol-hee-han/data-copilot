@@ -11,8 +11,10 @@ Gate 실패 시 Legacy 분류 방식으로 자동 폴백한다.
       state.intent, state.intent_confidence, state.query_category 에 기록
 
 위임 구조:
-    - 비즈니스 로직: services/intent_resolver.py (classify_with_gate, classify_legacy)
-    - 프롬프트: nodes/prompts/system_prompts.py 에서 INTENT_GATE, INTENT_CLASSIFICATION 등을
+    - 비즈니스 로직: services/intent_resolver.py
+      (classify_with_gate, classify_legacy)
+    - 프롬프트: system_prompts.py 에서
+      INTENT_CLASSIFIER_SYSTEM 등을
       로드하여 서비스에 주입
 
 폴백:
@@ -24,9 +26,9 @@ from __future__ import annotations
 
 from src.agents.models.user_messages import ERR_GENERIC, format_error
 from src.agents.nodes.system_prompts import (
-    INTENT_CLASSIFICATION,
-    INTENT_GATE,
-    INTENT_GATE_USER,
+    INTENT_CLASSIFIER_LEGACY_SYSTEM,
+    INTENT_CLASSIFIER_SYSTEM,
+    INTENT_CLASSIFIER_USER,
 )
 from src.agents.state.state import (
     PipelineState,
@@ -56,19 +58,19 @@ async def classify_intent_node(
     if settings.normalization_enabled:
         result = await classify_with_gate(
             state.preprocessed_input,
-            system_prompt=INTENT_GATE,
-            user_template=INTENT_GATE_USER,
+            system_prompt=INTENT_CLASSIFIER_SYSTEM,
+            user_template=INTENT_CLASSIFIER_USER,
         )
         # Gate 실패 시 Legacy 폴백
         if result.is_error:
             result = await classify_legacy(
                 state.preprocessed_input,
-                system_prompt=INTENT_CLASSIFICATION,
+                system_prompt=INTENT_CLASSIFIER_LEGACY_SYSTEM,
                 )
     else:
         result = await classify_legacy(
             state.preprocessed_input,
-            system_prompt=INTENT_CLASSIFICATION,
+            system_prompt=INTENT_CLASSIFIER_LEGACY_SYSTEM,
         )
 
     if result.is_error:
@@ -89,16 +91,17 @@ async def classify_intent_node(
     )
 
     # ── 추적: 의도 분류 결정 ──
-    from src.utils.tracker import get_current_tracker
-    tracker = get_current_tracker()
-    if tracker and tracker.enabled:
-        tracker.track_decision(
-            node="intent_classifier",
-            decision_type="intent_classification",
-            chosen=result.intent.value,
-            confidence=result.confidence,
-            reason=f"category={result.category}, {result.reason}",
-        )
+    from src.utils.tracker.dispatch import (
+        dispatch_tracking_event,
+        DECISION_INTENT,
+    )
+    await dispatch_tracking_event(DECISION_INTENT, {
+        "node": "classify_intent",
+        "decision_type": "intent_classification",
+        "chosen": result.intent.value,
+        "confidence": result.confidence,
+        "reason": f"category={result.category}, {result.reason}",
+    })
 
     return {
         "intent": result.intent,

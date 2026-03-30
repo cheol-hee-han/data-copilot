@@ -14,6 +14,7 @@
 
 from src.agents.state.state import (  # noqa: F401
     CandidateTable,
+    CodeMeta,
     ConfidenceStatus,
     DeadEnd,
     ExecutionStep,
@@ -30,8 +31,6 @@ from src.agents.state.state import (  # noqa: F401
     Phase,
     PipelineState,
     ReasoningState,
-    SqlValidationResult,
     StructuralHints,
-    ValidationOverall,
     should_terminate,
 )

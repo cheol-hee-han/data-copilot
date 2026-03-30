@@ -1,9 +1,20 @@
 """result_finalizer 노드 — 성공/실패 최종 출력 구성.
 
-에이전틱 코어의 마지막 노드. 성공/실패에 따라 최종 출력을 구성하고
-PipelineState의 최종 상태를 설정한다.
+reason 계층의 마지막 노드. 3가지 분기로 최종 출력을 구성한다:
+    1. VERIFYING (CONFLICTED 해소) → 명확화 질문 생성, 대기 상태로 전환
+    2. 성공 (validated_sql 존재) → ContextInfo 구성, 탐색 요약 기록
+    3. 실패 → dead_ends 기반 실패 상세 기록, QueryStatus.ERROR 설정
 
-agentic_to_pipeline 변환 로직을 흡수하여 ContextInfo를 직접 구성한다.
+ContextInfo 구성:
+    CONFIRMED 지식 항목에서 테이블명을 추출하고 candidate_tables와 교차하여
+    TableMeta 목록을 생성한다. 이전 agentic_to_pipeline 변환 로직을 흡수.
+
+핵심 함수:
+    - result_finalizer_node: 메인 노드 함수
+    - _build_context_info: CONFIRMED 테이블 → ContextInfo 변환
+    - _build_success_summary: 성공 시 탐색 과정 요약 문자열
+    - _build_failure_output: 실패 시 dead_ends 기반 상세 정보
+    - _build_clarification_question: CONFLICTED 항목 → 사용자 확인 질문
 """
 
 from __future__ import annotations
@@ -14,7 +25,10 @@ from src.agents.state.state import (
     PipelineState,
     ReasoningState,
     ColumnMeta,
+    ConfidenceStatus,
     ContextInfo,
+    FinalStatus,
+    Phase,
     QueryStatus,
     TableMeta,
 )
@@ -23,28 +37,30 @@ from src.agents.state.state import (
 async def result_finalizer_node(state: PipelineState) -> dict:
     """성공/실패에 따라 최종 응답을 구성한다."""
     reason = state.reason.model_copy(deep=True)
-    reason.phase = "DONE"
+    reason.phase = Phase.DONE
     updates: dict[str, Any] = {"reason": reason}
 
     # 사용자 확인 필요 (CONFLICTED 해소)
-    if state.reason.phase == "VERIFYING":
+    if state.reason.phase == Phase.VERIFYING:
         conflicted = [
             ki for ki in reason.knowledge_items
-            if ki.status == "CONFLICTED"
+            if ki.status == ConfidenceStatus.CONFLICTED
         ]
         if conflicted:
             question = _build_clarification_question(
                 conflicted,
             )
-            reason.final_status = "pending"
+            reason.final_status = FinalStatus.PENDING
             updates["reason"] = reason
             updates["awaiting_clarification"] = True
+            updates["clarification_turns"] = state.clarification_turns + 1
             updates["clarification_question"] = question
+            updates["formatted_response"] = question
             return updates
 
     # SQL 검증 성공
     if reason.validated_sql:
-        reason.final_status = "success"
+        reason.final_status = FinalStatus.SUCCESS
         reason.exploration_summary = (
             _build_success_summary(reason)
         )
@@ -56,10 +72,12 @@ async def result_finalizer_node(state: PipelineState) -> dict:
         return updates
 
     # 실패
-    reason.final_status = "failure"
-    reason.exploration_summary = _build_failure_output(
-        reason,
-    )
+    reason.final_status = FinalStatus.FAILURE
+    # recovery_planner가 give_up_reason(LLM 총평)을 이미 기록한 경우 보존
+    if not reason.exploration_summary:
+        reason.exploration_summary = _build_failure_output(
+            reason,
+        )
     updates["reason"] = reason
     updates["error_message"] = reason.exploration_summary
     updates["status"] = QueryStatus.ERROR
@@ -77,21 +95,21 @@ def _build_context_info(
         ki.key.removeprefix("table:")
         for ki in reason.knowledge_items
         if ki.key.startswith("table:")
-        and ki.status == "CONFIRMED"
+        and ki.status == ConfidenceStatus.CONFIRMED
     }
 
     table_metas = [
         TableMeta(
             table_name=ct.table_name,
-            table_description=ct.role,
+            table_description=ct.description,
             columns=[
                 ColumnMeta(
-                    column_name=col,
-                    column_description="",
-                    data_type="",
+                    column_name=col.name,
+                    column_description=col.description,
+                    data_type=col.col_type,
                     is_pii=False,
                 )
-                for col in ct.relevant_columns
+                for col in ct.columns
             ],
         )
         for ct in reason.candidate_tables
@@ -119,7 +137,7 @@ def _build_success_summary(
         ki.key.removeprefix("table:")
         for ki in reason.knowledge_items
         if ki.key.startswith("table:")
-        and ki.status == "CONFIRMED"
+        and ki.status == ConfidenceStatus.CONFIRMED
     ]
     if confirmed_tables:
         parts.append(
@@ -131,9 +149,6 @@ def _build_success_summary(
             "참고 활용사례: "
             f"{len(reason.explored_use_cases)}건",
         )
-
-    if not reason.structural_hints.is_empty():
-        parts.append("sqlglot 구조적 힌트 활용")
 
     return " | ".join(parts)
 
@@ -147,7 +162,7 @@ def _build_failure_output(
     if reason.dead_ends:
         parts.append("시도한 접근 방식:")
         for de in reason.dead_ends:
-            parts.append(f"  - {de.reason}")
+            parts.append(f"  - [{de.failure_type}] {de.reason}")
 
     unresolved = reason.get_unresolved_knowledge()
     if unresolved:

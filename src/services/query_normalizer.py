@@ -17,7 +17,6 @@ LLM이 정확한 쿼리를 작성할 수 있도록 정형 입력을 제공한다
 핵심 함수:
     - run_normalization: 5단계 파이프라인 전체를 오케스트레이션하는 메인 진입점
     - _preprocess_for_normalization: 약어 확장 + 구어체 기호 정리
-    - _parse_llm_json: 코드 펜스 포함 LLM 응답에서 JSON 추출
     - _validate_structure: 8개 슬롯의 Enum 값 검증 및 자동 보정
     - _postprocess: 정합성 보정(집계함수/RANK) + 검색 키워드 최적화 + sql_history 쿼리 합성
 
@@ -32,11 +31,7 @@ import re
 from src.utils.timezone import today_kst
 
 from src.config import settings
-from src.services.domain.domain_synonyms import (
-    ABBREVIATION_MAP,
-    get_output_template_prompt_text,
-    get_synonym_prompt_text,
-)
+from src.utils.resource_loader import load_yaml
 from src.agents.models.normalization import (
     VALID_AGG_FUNCS,
     VALID_CONFIDENCE,
@@ -55,11 +50,40 @@ from src.agents.models.normalization import (
     VALID_TIME_TYPES,
     NormalizedQuery,
 )
-from src.utils.llm import get_llm_client
+from src.utils.llm import llm_call_with_parse_retry
+from src.utils.llm.prompt import (
+    render_prompt,
+    serialize_synonym_dict,
+    serialize_template_registry,
+)
+from src.utils.llm.response import extract_json
 from src.utils.logger import get_logger
 from src.utils.tracker import record_prompt_variables
 
 logger = get_logger(__name__)
+
+
+# ──────────────────────────────────────────────────────────────
+# 도메인 사전 로딩 (resources/domain/ YAML)
+# ──────────────────────────────────────────────────────────────
+
+_synonyms_data: dict = load_yaml(
+    "domain/business_synonyms.yaml", {},
+)
+ALL_SYNONYMS: dict[str, dict[str, list[str]]] = {
+    k: _synonyms_data.get(k, {})
+    for k in ("measures", "entities", "dimensions", "time")
+}
+ABBREVIATION_MAP: dict[str, str] = _synonyms_data.get(
+    "abbreviations", {},
+)
+
+_templates_data: dict = load_yaml(
+    "domain/output_templates.yaml", {},
+)
+OUTPUT_TEMPLATE_REGISTRY: dict[str, dict] = _templates_data.get(
+    "templates", {},
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -88,39 +112,19 @@ def _preprocess_for_normalization(text: str) -> str:
 # JSON 파서
 # ──────────────────────────────────────────────────────────────
 
-def _parse_llm_json(raw_text: str) -> dict:
-    """LLM 응답에서 JSON을 추출하고 파싱한다."""
-    # 코드 펜스가 있으면 내부만 추출
-    if "```" in raw_text:
-        parts = re.split(r"```(?:json)?\s*", raw_text)
-        if len(parts) >= 2:
-            # 코드 펜스 내부에서 닫는 ``` 이전까지
-            inner = parts[1].split("```")[0].strip()
-            try:
-                return json.loads(inner)
-            except json.JSONDecodeError:
-                pass  # 아래 폴백으로 진행
-
-    # 코드 펜스 없거나 내부 추출 실패 시 전체에서 시도
-    cleaned = re.sub(r"```(?:json)?\s*", "", raw_text)
-    cleaned = cleaned.replace("```", "").strip()
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        logger.error("정규화 JSON 파싱 실패", error=str(e))
-        raise ValueError(
-            f"LLM이 유효한 JSON을 반환하지 않았습니다: {e}"
-        ) from e
-
 
 # ──────────────────────────────────────────────────────────────
 # 구조 검증기
 # ──────────────────────────────────────────────────────────────
 
 def _validate_enum(
-    value: str, valid_set: set[str], field_name: str,
+    value: str | None,
+    valid_set: set[str],
+    field_name: str,
 ) -> str | None:
     """Enum 값을 검증하고 대소문자 보정을 시도한다."""
+    if not value:
+        return None
     if value in valid_set:
         return value
     upper = value.upper()
@@ -221,8 +225,11 @@ def _validate_dimensions(data: dict) -> None:
             f"dim[{i}].role",
         ):
             d["role"] = "GROUP"
-        gran = d.get("granularity", "")
-        if gran not in all_gran:
+        if not _validate_enum(
+            d.get("granularity"),
+            all_gran,
+            f"dim[{i}].granularity",
+        ):
             d["granularity"] = "UNKNOWN"
 
 
@@ -485,19 +492,29 @@ def _post_build_sql_history_search(data: dict) -> None:
 # LLM 호출 헬퍼
 # ──────────────────────────────────────────────────────────────
 
-async def _call_llm(system: str, user: str) -> str:
-    """LLM을 호출하고 텍스트 응답을 반환한다."""
-    client = get_llm_client()
-    response = await client.messages.create(
-        model=settings.llm_model,
-        max_tokens=settings.normalization_max_tokens,
-        timeout=settings.llm_long_timeout,
+def _parse_normalization_json(raw: str) -> dict:
+    """정규화 LLM 응답에서 JSON을 추출한다.
+
+    strict=True이므로 파싱 실패 시 ValueError가 자동 raise된다.
+    """
+    return extract_json(raw, strict=True)
+
+
+async def _call_llm_and_parse(
+    system: str,
+    user: str,
+    node_name: str,
+) -> dict:
+    """LLM을 호출하고 JSON 파싱까지 수행한다."""
+    _, parsed = await llm_call_with_parse_retry(
         system=system,
         messages=[{"role": "user", "content": user}],
+        parse_fn=_parse_normalization_json,
+        max_tokens=settings.normalization_max_tokens,
+        timeout=settings.llm_long_timeout,
+        node_name=node_name,
     )
-    if not response.content:
-        raise ValueError("LLM 응답이 비어있습니다")
-    return response.content[0].text
+    return parsed
 
 
 # ──────────────────────────────────────────────────────────────
@@ -570,28 +587,26 @@ async def run_normalization(
 
     # Phase 1 LLM
     today = today_kst().isoformat()
-    synonym_text = get_synonym_prompt_text()
-    template_text = get_output_template_prompt_text()
-
-    p1_system = phase1_system.replace(
-        "{output_template_text}", template_text,
-    )
-    phase1_user = p1_user_tpl.format(
-        query=cleaned,
-        today=today,
-        synonym_dict=synonym_text,
+    synonym_text = serialize_synonym_dict(ALL_SYNONYMS)
+    template_text = serialize_template_registry(
+        OUTPUT_TEMPLATE_REGISTRY,
     )
 
-    logger.info("Phase 1 LLM 호출")
-    phase1_raw = await _call_llm(p1_system, phase1_user)
-    record_prompt_variables({
-        "query": cleaned,
-        "today": today,
-        "synonym_dict": synonym_text[:200] + "..." if len(synonym_text) > 200 else synonym_text,
-        "output_template_text": template_text[:200] + "..." if len(template_text) > 200 else template_text,
+    p1_system, _ = render_prompt(phase1_system, {
+        "{output_template_text}": template_text,
+    })
+    phase1_user, p1_vars = render_prompt(p1_user_tpl, {
+        "{query}": cleaned,
+        "{today}": today,
+        "{synonym_dict}": synonym_text,
     })
 
-    phase1_data = _parse_llm_json(phase1_raw)
+    logger.info("Phase 1 LLM 호출")
+    phase1_data = await _call_llm_and_parse(
+        p1_system, phase1_user, "normalization_phase1",
+    )
+    await record_prompt_variables(p1_vars)
+
     phase1_data, errors1 = _validate_structure(phase1_data)
     phase1_data["original_query"] = raw_query
     if errors1:
@@ -629,18 +644,14 @@ async def _run_phase2(
     phase1_json_str = json.dumps(
         phase1_data, ensure_ascii=False, indent=2,
     )
-    phase2_user = phase2_user_template.format(
-        query=cleaned,
-        phase1_json=phase1_json_str,
-    )
-    phase2_raw = await _call_llm(
-        phase2_system, phase2_user,
-    )
-    record_prompt_variables({
-        "query": cleaned,
-        "phase1_json": phase1_json_str[:500] + "..." if len(phase1_json_str) > 500 else phase1_json_str,
+    phase2_user, p2_vars = render_prompt(phase2_user_template, {
+        "{query}": cleaned,
+        "{phase1_json}": phase1_json_str,
     })
-    final_data = _parse_llm_json(phase2_raw)
+    final_data = await _call_llm_and_parse(
+        phase2_system, phase2_user, "normalization_phase2",
+    )
+    await record_prompt_variables(p2_vars)
     final_data, errors2 = _validate_structure(final_data)
     final_data["original_query"] = raw_query
     if errors2:

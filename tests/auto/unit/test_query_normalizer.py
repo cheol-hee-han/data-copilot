@@ -9,7 +9,7 @@
     │  ─────────────────────── ─────────────────────── ──────────────── │
     │  0. 모델/스키마           TestNormalizationModels  NormalizedQuery  │
     │  1. 전처리 (약어 확장)    TestPreprocessor         _preprocess_*    │
-    │  2. LLM 응답 JSON 파싱   TestJsonParser           _parse_llm_json  │
+    │  2. (삭제됨)              -                        -                │
     │  3. 구조 검증 (Enum)     TestValidator            _validate_*      │
     │  4. 후처리 (정합성 보정)  TestPostProcessor        _postprocess     │
     │  5. 동의어 사전           TestSynonyms             ALL_SYNONYMS 등  │
@@ -55,7 +55,7 @@
     - 외부 의존성 없음 (LLM, DB, ES, Qdrant 불필요)
     - .env 파일 없이도 모든 테스트 통과
     - 테스트 대상 소스: src/services/query_normalizer.py
-    - 동의어 사전 소스: src/services/domain/domain_synonyms.py
+    - 동의어 사전 소스: resources/domain/business_synonyms.yaml (resource_loader 경유)
     - 모델 정의: src/agents/models/normalization.py
 """
 
@@ -73,18 +73,18 @@ from src.agents.models.normalization import (
     VALID_QUERY_CATEGORIES,
 )
 from src.services.query_normalizer import (
-    _parse_llm_json,
     _postprocess,
     _preprocess_for_normalization,
     _validate_structure,
 )
-from src.services.domain.domain_synonyms import (
+from src.services.query_normalizer import (
     ALL_SYNONYMS,
     ABBREVIATION_MAP,
     OUTPUT_TEMPLATE_REGISTRY,
-    build_reverse_lookup,
-    get_output_template_prompt_text,
-    get_synonym_prompt_text,
+)
+from src.utils.llm.prompt import (
+    serialize_synonym_dict,
+    serialize_template_registry,
 )
 
 
@@ -188,29 +188,6 @@ class TestPreprocessor:
         text = "이번 달 연체 현황 조회"
         result = _preprocess_for_normalization(text)
         assert result == text
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# JSON 파서 테스트
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-class TestJsonParser:
-    """LLM JSON 파서 테스트."""
-
-    def test_parse_clean_json(self):
-        raw = '{"intent": {"primary": "EXTRACT"}}'
-        result = _parse_llm_json(raw)
-        assert result["intent"]["primary"] == "EXTRACT"
-
-    def test_parse_json_with_code_block(self):
-        raw = '```json\n{"intent": {"primary": "AGGREGATE"}}\n```'
-        result = _parse_llm_json(raw)
-        assert result["intent"]["primary"] == "AGGREGATE"
-
-    def test_parse_invalid_json_raises(self):
-        with pytest.raises(ValueError, match="유효한 JSON"):
-            _parse_llm_json("not json at all")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -394,19 +371,13 @@ class TestSynonyms:
         assert "연체명세" in OUTPUT_TEMPLATE_REGISTRY
         assert "여신현황" in OUTPUT_TEMPLATE_REGISTRY
 
-    def test_reverse_lookup(self):
-        reverse = build_reverse_lookup()
-        assert reverse.get("대출잔액") == "여신잔액"
-        assert reverse.get("예금주") == "고객"
-        assert reverse.get("영업점") == "지점"
-
     def test_synonym_prompt_text_not_empty(self):
-        text = get_synonym_prompt_text()
+        text = serialize_synonym_dict(ALL_SYNONYMS)
         assert len(text) > 100
         assert "[measures]" in text
 
     def test_output_template_prompt_text_not_empty(self):
-        text = get_output_template_prompt_text()
+        text = serialize_template_registry(OUTPUT_TEMPLATE_REGISTRY)
         assert len(text) > 100
         assert "여신명세" in text
 

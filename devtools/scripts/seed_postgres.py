@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 """PostgreSQL 테스트 데이터 시딩 (전면 재작성).
 
-biz_schema (정보계 DB) + sys_schema (이력 DB)에
+ADWOWN (정보계 DB) + sys_schema (이력 DB)에
 572개 테이블 DDL 생성 + ★ 22개 핵심 테이블 데이터 적재.
 
 사용법:
@@ -496,7 +497,7 @@ def _build_ddl(table_name: str, pk_cols: list[str]) -> str:
 
     col_block = ",\n".join(col_defs)
     return (
-        f"CREATE TABLE IF NOT EXISTS biz_schema.{table_name} (\n"
+        f"CREATE TABLE IF NOT EXISTS ADWOWN.{table_name} (\n"
         f"{col_block}\n"
         f");"
     )
@@ -510,7 +511,7 @@ STAR_DDL: dict[str, str] = {
 
     # ── 공통 ──────────────────────────────────────────────────
     "TB_ADW_COM001M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_COM001M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_COM001M (
     BLNG_BRCD   VARCHAR(10)  NOT NULL,
     BR_NM       VARCHAR(100) NOT NULL,
     RGN_CD      VARCHAR(10),
@@ -522,7 +523,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_COM001M (
 );""",
 
     "TB_ADW_COM002M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_COM002M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_COM002M (
     GRD_CD      VARCHAR(10)  NOT NULL,
     GRD_NM      VARCHAR(50)  NOT NULL,
     GRD_DESC    VARCHAR(500),
@@ -533,7 +534,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_COM002M (
 
     # ── 고객 ──────────────────────────────────────────────────
     "TB_ADW_CSC101M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CSC101M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_CSC101M (
     EDPS_CSN    VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     CSM         VARCHAR(100),
@@ -551,7 +552,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CSC101M (
 );""",
 
     "TB_ADW_CSC102H": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CSC102H (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_CSC102H (
     EDPS_CSN    VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     CSM         VARCHAR(100),
@@ -569,7 +570,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CSC102H (
 );""",
 
     "TB_ADW_CSP103M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CSP103M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_CSP103M (
     EDPS_CSN    VARCHAR(20)  NOT NULL,
     CSM         VARCHAR(100),
     CUS_DCD     VARCHAR(10),
@@ -585,7 +586,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CSP103M (
 
     # ── 수신 ──────────────────────────────────────────────────
     "TB_ADW_DEP201P": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_DEP201P (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_DEP201P (
     ACN         VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     EDPS_CSN    VARCHAR(20),
@@ -603,7 +604,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_DEP201P (
 );""",
 
     "TB_ADW_DEP202S": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_DEP202S (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_DEP202S (
     ACN         VARCHAR(20)  NOT NULL,
     BASE_DT     DATE         NOT NULL,
     EDPS_CSN    VARCHAR(20),
@@ -619,7 +620,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_DEP202S (
 
     # ── 여신 ──────────────────────────────────────────────────
     "TB_ADW_LNB301M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_LNB301M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_LNB301M (
     LN_NO       VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     EDPS_CSN    VARCHAR(20),
@@ -640,7 +641,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_LNB301M (
 );""",
 
     "TB_ADW_LNB302M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_LNB302M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_LNB302M (
     LN_NO       VARCHAR(20)  NOT NULL,
     EDPS_CSN    VARCHAR(20),
     LN_APR_AMT NUMERIC(18,2),
@@ -658,7 +659,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_LNB302M (
 
     # ── 카드 ──────────────────────────────────────────────────
     "TB_ADW_CRD401M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CRD401M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_CRD401M (
     CRD_NO      VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     EDPS_CSN    VARCHAR(20),
@@ -675,7 +676,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_CRD401M (
 
     # ── 외환 ──────────────────────────────────────────────────
     "TB_ADW_FXD501L": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FXD501L (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_FXD501L (
     DL_NO       VARCHAR(20)  NOT NULL,
     FX_DL_DCD   VARCHAR(10),
     CCY_CD      VARCHAR(10),
@@ -690,7 +691,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FXD501L (
 );""",
 
     "TB_ADW_FXB502M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FXB502M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_FXB502M (
     CCY_CD      VARCHAR(10)  NOT NULL,
     BASE_DT     DATE         NOT NULL,
     BASE_RT     NUMERIC(12,6),
@@ -703,7 +704,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FXB502M (
 
     # ── 펀드 ──────────────────────────────────────────────────
     "TB_ADW_FND601P": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FND601P (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_FND601P (
     FND_ACN     VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     EDPS_CSN    VARCHAR(20),
@@ -719,7 +720,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FND601P (
 );""",
 
     "TB_ADW_FND602P": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FND602P (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_FND602P (
     FND_ACN     VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     EDPS_CSN    VARCHAR(20),
@@ -735,7 +736,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FND602P (
 
     # ── 거래 ──────────────────────────────────────────────────
     "TB_ADW_TRX701L": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_TRX701L (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_TRX701L (
     TR_ID       VARCHAR(30)  NOT NULL,
     TR_DT       DATE         NOT NULL,
     ACN         VARCHAR(20),
@@ -751,7 +752,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_TRX701L (
 
     # ── 보험 ──────────────────────────────────────────────────
     "TB_ADW_INS803M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_INS803M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_INS803M (
     INS_NO      VARCHAR(20)  NOT NULL,
     EDPS_CSN    VARCHAR(20),
     INS_DCD     VARCHAR(10),
@@ -769,7 +770,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_INS803M (
 
     # ── 퇴직연금 ──────────────────────────────────────────────
     "TB_ADW_PNB904P": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_PNB904P (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_PNB904P (
     PLAN_NO     VARCHAR(20)  NOT NULL,
     EDPS_CSN    VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
@@ -784,7 +785,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_PNB904P (
 
     # ── 리스크 ────────────────────────────────────────────────
     "TB_ADW_RSK1101M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_RSK1101M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_RSK1101M (
     IND_CD      VARCHAR(20)  NOT NULL,
     STD_DT      DATE         NOT NULL,
     IND_NM      VARCHAR(100),
@@ -799,7 +800,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_RSK1101M (
 
     # ── 마케팅 ────────────────────────────────────────────────
     "TB_ADW_MKT1201M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_MKT1201M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_MKT1201M (
     CAMP_CD     VARCHAR(20)  NOT NULL,
     CAMP_NM     VARCHAR(200),
     CAMP_STCD   VARCHAR(10),
@@ -814,7 +815,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_MKT1201M (
 );""",
 
     "TB_ADW_MKT1202M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_MKT1202M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_MKT1202M (
     CAMP_CD     VARCHAR(20)  NOT NULL,
     EDPS_CSN    VARCHAR(20)  NOT NULL,
     RESP_YN     VARCHAR(1),
@@ -827,7 +828,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_MKT1202M (
 
     # ── 재무 ──────────────────────────────────────────────────
     "TB_ADW_FIN1306S": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FIN1306S (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_FIN1306S (
     BLNG_BRCD   VARCHAR(10)  NOT NULL,
     BASE_YM     VARCHAR(6)   NOT NULL,
     PL_ITEM_CD  VARCHAR(20)  NOT NULL,
@@ -841,7 +842,7 @@ CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_FIN1306S (
 
     # ── WM ────────────────────────────────────────────────────
     "TB_ADW_WMB1401M": """
-CREATE TABLE IF NOT EXISTS biz_schema.TB_ADW_WMB1401M (
+CREATE TABLE IF NOT EXISTS ADWOWN.TB_ADW_WMB1401M (
     EDPS_CSN    VARCHAR(20)  NOT NULL,
     CSM         VARCHAR(100),
     WM_GRD_CD   VARCHAR(20),
@@ -885,7 +886,7 @@ def _gen_email(name: str) -> str:
 
 
 def _base_ym(d: date) -> str:
-    """날짜 → YYYYMM 문자열."""
+    """날짜를 YYYYMM 문자열로 변환."""
     return d.strftime("%Y%m")
 
 
@@ -894,13 +895,13 @@ def _base_ym(d: date) -> str:
 # ══════════════════════════════════════════════════════════════
 
 def seed_info_db() -> None:
-    """biz_schema 테이블 DDL 생성 + ★ 테이블 데이터 적재."""
+    """ADWOWN 테이블 DDL 생성 + ★ 테이블 데이터 적재."""
     conn = _connect(INFO_DB_CONNINFO)
     cur = conn.cursor()
 
     try:
         # 스키마 생성
-        cur.execute("CREATE SCHEMA IF NOT EXISTS biz_schema;")
+        cur.execute("CREATE SCHEMA IF NOT EXISTS ADWOWN;")
 
         # ── 1단계: 모든 테이블 DDL 생성 ──────────────────────
         catalog = parse_table_catalog()
@@ -934,7 +935,7 @@ def seed_info_db() -> None:
             "TB_ADW_COM002M", "TB_ADW_COM001M",
         ]
         for tbl in star_order:
-            cur.execute(f"TRUNCATE TABLE biz_schema.{tbl} CASCADE")
+            cur.execute(f"TRUNCATE TABLE ADWOWN.{tbl} CASCADE")
         conn.commit()
 
         # ── 3단계: 데이터 적재 ────────────────────────────────
@@ -983,7 +984,22 @@ def seed_info_db() -> None:
         _insert_wm_customers(cur, edps_csn_list)
         conn.commit()
 
-        print("\n  → 정보계 DB (biz_schema) 시딩 완료!")
+        # ── 권한 부여: readonly_user ────────────────────────
+        ro_user = os.getenv("INFO_DB_USER", "readonly_user")
+        cur.execute(
+            f"GRANT USAGE ON SCHEMA adwown TO {ro_user};"
+        )
+        cur.execute(
+            f"GRANT SELECT ON ALL TABLES IN SCHEMA adwown TO {ro_user};"
+        )
+        cur.execute(
+            f"ALTER DEFAULT PRIVILEGES IN SCHEMA adwown "
+            f"GRANT SELECT ON TABLES TO {ro_user};"
+        )
+        conn.commit()
+        print(f"  GRANT: {ro_user} → adwown (USAGE + SELECT)")
+
+        print("\n  → 정보계 DB (ADWOWN) 시딩 완료!")
 
     except Exception as e:
         conn.rollback()
@@ -1000,7 +1016,7 @@ def _insert_com001m(cur) -> None:
     """TB_ADW_COM001M: 부점정보기본 (20건)."""
     for b in BRANCHES:
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_COM001M "
+            "INSERT INTO ADWOWN.TB_ADW_COM001M "
             "(BLNG_BRCD, BR_NM, RGN_CD, RGN_NM, BR_DCD) "
             "VALUES (%s,%s,%s,%s,%s)",
             (b[0], b[1], b[2], b[3], "02"),
@@ -1019,7 +1035,7 @@ def _insert_com002m(cur) -> None:
     ]
     for r in rows:
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_COM002M (GRD_CD, GRD_NM, GRD_DESC) "
+            "INSERT INTO ADWOWN.TB_ADW_COM002M (GRD_CD, GRD_NM, GRD_DESC) "
             "VALUES (%s,%s,%s)", r)
     print(f"  TB_ADW_COM002M   : {len(rows):>5}건")
 
@@ -1061,7 +1077,7 @@ def _insert_customers(cur) -> list[str]:
 
         # CSC101M (현재 기준)
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_CSC101M "
+            "INSERT INTO ADWOWN.TB_ADW_CSC101M "
             "(EDPS_CSN, STD_DT, CSM, CUS_DCD, JOIN_DT, BLNG_BRCD, "
             "GNDR_DCD, AGE_GRP_CD, CUS_GRD_CD, TEL_NO, EMAIL_ADR) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1075,7 +1091,7 @@ def _insert_customers(cur) -> list[str]:
             else f"서울시 영등포구 여의도동 {random.randint(1, 100)}"
         )
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_CSC102H "
+            "INSERT INTO ADWOWN.TB_ADW_CSC102H "
             "(EDPS_CSN, STD_DT, CSM, CUS_DCD, RGST_DT, BLNG_BRCD, "
             "GNDR_DCD, AGE_GRP_CD, CUS_GRD_CD, CUS_ADR, PHONE_NO) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1086,7 +1102,7 @@ def _insert_customers(cur) -> list[str]:
         # CSP103M (마케팅 전용 — TYPE-4: MKT_GRD_CD ≠ CUS_GRD_CD)
         pref_ch = random.choice(PREF_CHANNELS)
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_CSP103M "
+            "INSERT INTO ADWOWN.TB_ADW_CSP103M "
             "(EDPS_CSN, CSM, CUS_DCD, MKT_GRD_CD, BLNG_BRCD, "
             "AGE_GRP_CD, GNDR_DCD, PREF_CHN_DCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1129,7 +1145,7 @@ def _insert_deposits(cur, edps_csn_list: list[str]) -> list[str]:
             act_dcd = random.choice(ACCT_TYPES)
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_DEP201P "
+            "INSERT INTO ADWOWN.TB_ADW_DEP201P "
             "(ACN, STD_DT, EDPS_CSN, ACT_DCD, BAL_AMT, OPEN_DT, "
             "BLNG_BRCD, PD_CD, PD_NM, APLY_RT, ACT_STCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1143,7 +1159,7 @@ def _insert_deposits(cur, edps_csn_list: list[str]) -> list[str]:
         base_dt = STD_DT - timedelta(days=1)
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_DEP202S "
+            "INSERT INTO ADWOWN.TB_ADW_DEP202S "
             "(ACN, BASE_DT, EDPS_CSN, ACT_DCD, TOT_BAL_AMT, OPEN_DT, "
             "BLNG_BRCD, PD_CD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1222,7 +1238,7 @@ def _insert_loans(cur, edps_csn_list: list[str]) -> None:
         cltr_dcd = random.choice(CLTR_TYPE_CODES) if ltype == "02" else None
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_LNB301M "
+            "INSERT INTO ADWOWN.TB_ADW_LNB301M "
             "(LN_NO, STD_DT, EDPS_CSN, LN_EXC_AMT, LN_BAL_AMT, LN_DT, MTRTY_DT, "  # noqa: E501
             "APLY_RT, LN_DCD, LN_STCD, OVDU_GRD_CD, OVDU_DY_CN, OVDU_AMT, BLNG_BRCD) "  # noqa: E501
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1231,7 +1247,7 @@ def _insert_loans(cur, edps_csn_list: list[str]) -> None:
         )
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_LNB302M "
+            "INSERT INTO ADWOWN.TB_ADW_LNB302M "
             "(LN_NO, EDPS_CSN, LN_APR_AMT, APPR_DT, LN_DCD, "
             "LN_PUSE_CD, CLTR_DCD, APLY_RT, MTRTY_DT, BLNG_BRCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1267,7 +1283,7 @@ def _insert_cards(cur, edps_csn_list: list[str]) -> None:
         flg_yn = random.choices(["Y", "N"], weights=[80, 20])[0]
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_CRD401M "
+            "INSERT INTO ADWOWN.TB_ADW_CRD401M "
             "(CRD_NO, STD_DT, EDPS_CSN, CRD_DCD, ISS_DT, EXPR_DT, "
             "MON_USE_AMT, FLG_YN, BLNG_BRCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1309,7 +1325,7 @@ def _insert_trx(cur, acn_list: list[str]) -> None:
             tr_dcd = str(random.randint(100, 199))
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_TRX701L "
+            "INSERT INTO ADWOWN.TB_ADW_TRX701L "
             "(TR_ID, TR_DT, ACN, TR_TM, TR_AMT, TR_DCD, BLNG_BRCD, CHN_CD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (tr_id, tr_dt, acn, tr_tm, tr_amt, tr_dcd, brch_cd, chn_cd),
@@ -1353,7 +1369,7 @@ def _insert_fx_deals(cur, edps_csn_list: list[str]) -> None:
         dl_amt = random.randint(100, 5000) * 1000
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_FXD501L "
+            "INSERT INTO ADWOWN.TB_ADW_FXD501L "
             "(DL_NO, FX_DL_DCD, CCY_CD, DL_AMT, DL_RT, SETL_DT, "
             "EDPS_CSN, BLNG_BRCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1378,7 +1394,7 @@ def _insert_fx_rates(cur) -> None:
         for dt in dates:
             rt = round(base_rt * random.uniform(0.97, 1.03), 4)
             cur.execute(
-                "INSERT INTO biz_schema.TB_ADW_FXB502M "
+                "INSERT INTO ADWOWN.TB_ADW_FXB502M "
                 "(CCY_CD, BASE_DT, BASE_RT, BUY_RT, SELL_RT) "
                 "VALUES (%s,%s,%s,%s,%s)",
                 (ccy, dt, rt, round(rt * 0.99, 4), round(rt * 1.01, 4)),
@@ -1410,7 +1426,7 @@ def _insert_fund_bal(cur, edps_csn_list: list[str]) -> None:
             rsk_grd = random.choice(RISK_GRADES)
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_FND601P "
+            "INSERT INTO ADWOWN.TB_ADW_FND601P "
             "(FND_ACN, STD_DT, EDPS_CSN, FUND_CD, BAL_AMT, ORGNL_AMT, "
             "FND_DCD, RSK_GRD_CD, BLNG_BRCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1436,7 +1452,7 @@ def _insert_fund_eval(cur, edps_csn_list: list[str]) -> None:
         fnd_dcd = random.choice(FUND_TYPES)
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_FND602P "
+            "INSERT INTO ADWOWN.TB_ADW_FND602P "
             "(FND_ACN, STD_DT, EDPS_CSN, FUND_CD, EVAL_AMT, ERNS_RT, "
             "FND_DCD, BLNG_BRCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1470,7 +1486,7 @@ def _insert_insurance(cur, edps_csn_list: list[str]) -> None:
         ins_pd_cd = f"IP{random.randint(1, 20):03d}"
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_INS803M "
+            "INSERT INTO ADWOWN.TB_ADW_INS803M "
             "(INS_NO, EDPS_CSN, INS_DCD, INS_PD_CD, INS_STCD, "
             "CNTR_DT, EFF_DT, EXP_DT, INS_AMT, BLNG_BRCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1500,7 +1516,7 @@ def _insert_pension(cur, edps_csn_list: list[str]) -> None:
             pn_dcd = random.choice(PLAN_TYPES)
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_PNB904P "
+            "INSERT INTO ADWOWN.TB_ADW_PNB904P "
             "(PLAN_NO, EDPS_CSN, STD_DT, TOT_BAL_AMT, PN_DCD, "
             "EMPLOYER_NO, BLNG_BRCD) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
@@ -1532,7 +1548,7 @@ def _insert_risk_indicators(cur) -> None:
         for dt in dates:
             ind_val = round(random.uniform(lo, hi), 4)
             cur.execute(
-                "INSERT INTO biz_schema.TB_ADW_RSK1101M "
+                "INSERT INTO ADWOWN.TB_ADW_RSK1101M "
                 "(IND_CD, STD_DT, IND_NM, IND_VAL, IND_UNIT, LIMIT_VAL, CALC_DT) "  # noqa: E501
                 "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (ind_cd, dt, ind_nm, ind_val, unit, limit_val, dt),
@@ -1570,7 +1586,7 @@ def _insert_campaigns(cur, edps_csn_list: list[str]) -> None:
                 ["01", "02", "03"], weights=[20, 50, 30])[0]
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_MKT1201M "
+            "INSERT INTO ADWOWN.TB_ADW_MKT1201M "
             "(CAMP_CD, CAMP_NM, CAMP_STCD, START_DT, END_DT, BUDGET_AMT, BLNG_BRCD) "  # noqa: E501
             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
             (camp_cd, camp_nm, camp_stcd, start_dt, end_dt, budget, brch_cd),
@@ -1590,7 +1606,7 @@ def _insert_campaigns(cur, edps_csn_list: list[str]) -> None:
             contact_dt = _rnd_date(TODAY - timedelta(days=90), TODAY)
             chn_cd = random.choice(CHANNELS)
             cur.execute(
-                "INSERT INTO biz_schema.TB_ADW_MKT1202M "
+                "INSERT INTO ADWOWN.TB_ADW_MKT1202M "
                 "(CAMP_CD, EDPS_CSN, RESP_YN, CONTACT_DT, CONTACT_CHN_CD) "
                 "VALUES (%s,%s,%s,%s,%s)",
                 (camp_cd, csn, resp_yn, contact_dt, chn_cd),
@@ -1612,7 +1628,7 @@ def _insert_pl_summary(cur) -> None:
                 amt = random.randint(-500, 2000) * 1_000_000
                 pl_nm = f"손익항목_{item_cd}"
                 cur.execute(
-                    "INSERT INTO biz_schema.TB_ADW_FIN1306S "
+                    "INSERT INTO ADWOWN.TB_ADW_FIN1306S "
                     "(BLNG_BRCD, BASE_YM, PL_ITEM_CD, AMT, PL_ITEM_NM, CALC_DT) "  # noqa: E501
                     "VALUES (%s,%s,%s,%s,%s,%s)",
                     (brch_cd, base_ym, item_cd, amt, pl_nm, TODAY),
@@ -1640,7 +1656,7 @@ def _insert_wm_customers(cur, edps_csn_list: list[str]) -> None:
             invest_prfl = str(random.randint(1, 5))
 
         cur.execute(
-            "INSERT INTO biz_schema.TB_ADW_WMB1401M "
+            "INSERT INTO ADWOWN.TB_ADW_WMB1401M "
             "(EDPS_CSN, WM_GRD_CD, INVEST_PRFL_CD, PB_EMN, TOT_ASSET_AMT, BLNG_BRCD) "  # noqa: E501
             "VALUES (%s,%s,%s,%s,%s,%s)",
             (csn, wm_grd, invest_prfl, pb_emn, tot_asset, brch_cd),
@@ -1680,15 +1696,15 @@ def seed_history_db() -> None:
     history_records = [
         (
             "이번 달 신규 가입 고객 수",
-            "SELECT COUNT(*) AS new_cust_cnt FROM biz_schema.TB_ADW_CSC101M "
+            "SELECT COUNT(*) AS new_cust_cnt FROM ADWOWN.TB_ADW_CSC101M "
             "WHERE STD_DT = CURRENT_DATE AND JOIN_DT >= DATE_TRUNC('month', CURRENT_DATE)",  # noqa: E501
             True, "SUCCESS", "user01", 45, None,
         ),
         (
             "지점별 여신 잔액 TOP 10",
             "SELECT b.BR_NM, SUM(l.LN_BAL_AMT) AS total_bal "
-            "FROM biz_schema.TB_ADW_LNB301M l "
-            "JOIN biz_schema.TB_ADW_COM001M b ON l.BLNG_BRCD = b.BLNG_BRCD "
+            "FROM ADWOWN.TB_ADW_LNB301M l "
+            "JOIN ADWOWN.TB_ADW_COM001M b ON l.BLNG_BRCD = b.BLNG_BRCD "
             "WHERE l.STD_DT = CURRENT_DATE "
             "GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10",
             True, "SUCCESS", "user02", 120, None,
@@ -1696,8 +1712,8 @@ def seed_history_db() -> None:
         (
             "연체 등급 C 이상 고객 목록",
             "SELECT ci.EDPS_CSN, ci.CSM, li.OVDU_GRD_CD, li.OVDU_AMT "
-            "FROM biz_schema.TB_ADW_LNB301M li "
-            "JOIN biz_schema.TB_ADW_CSC101M ci "
+            "FROM ADWOWN.TB_ADW_LNB301M li "
+            "JOIN ADWOWN.TB_ADW_CSC101M ci "
             "  ON li.EDPS_CSN = ci.EDPS_CSN AND ci.STD_DT = CURRENT_DATE "
             "WHERE li.STD_DT = CURRENT_DATE AND li.OVDU_GRD_CD IN ('C','D','E') "  # noqa: E501
             "ORDER BY li.OVDU_AMT DESC",
@@ -1708,12 +1724,12 @@ def seed_history_db() -> None:
             "SELECT ci.EDPS_CSN, ci.CSM, ci.CUS_GRD_CD, "
             "ab.ACN, ab.PD_NM, ab.BAL_AMT, "
             "li.LN_NO, li.LN_BAL_AMT, cd.CRD_NO "
-            "FROM biz_schema.TB_ADW_CSC101M ci "
-            "LEFT JOIN biz_schema.TB_ADW_DEP201P ab "
+            "FROM ADWOWN.TB_ADW_CSC101M ci "
+            "LEFT JOIN ADWOWN.TB_ADW_DEP201P ab "
             "  ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE "
-            "LEFT JOIN biz_schema.TB_ADW_LNB301M li "
+            "LEFT JOIN ADWOWN.TB_ADW_LNB301M li "
             "  ON ci.EDPS_CSN = li.EDPS_CSN AND li.STD_DT = CURRENT_DATE "
-            "LEFT JOIN biz_schema.TB_ADW_CRD401M cd "
+            "LEFT JOIN ADWOWN.TB_ADW_CRD401M cd "
             "  ON ci.EDPS_CSN = cd.EDPS_CSN AND cd.STD_DT = CURRENT_DATE "
             "WHERE ci.STD_DT = CURRENT_DATE AND ci.CUS_GRD_CD = '01'",
             True, "SUCCESS", "user01", 350, None,
@@ -1722,7 +1738,7 @@ def seed_history_db() -> None:
             "전월 대비 카드 이용금액 증감",
             "WITH monthly AS ("
             "  SELECT EDPS_CSN, STD_DT, SUM(MON_USE_AMT) AS tot_use "
-            "  FROM biz_schema.TB_ADW_CRD401M GROUP BY EDPS_CSN, STD_DT"
+            "  FROM ADWOWN.TB_ADW_CRD401M GROUP BY EDPS_CSN, STD_DT"
             ") SELECT EDPS_CSN, tot_use, "
             "LAG(tot_use) OVER (PARTITION BY EDPS_CSN ORDER BY STD_DT) AS prev_use, "  # noqa: E501
             "tot_use - LAG(tot_use) OVER (PARTITION BY EDPS_CSN ORDER BY STD_DT) AS diff "  # noqa: E501
@@ -1731,9 +1747,9 @@ def seed_history_db() -> None:
         ),
         (
             "평균 잔액보다 높은 계좌 목록",
-            "SELECT ACN, EDPS_CSN, BAL_AMT FROM biz_schema.TB_ADW_DEP201P "
+            "SELECT ACN, EDPS_CSN, BAL_AMT FROM ADWOWN.TB_ADW_DEP201P "
             "WHERE STD_DT = CURRENT_DATE "
-            "AND BAL_AMT > (SELECT AVG(BAL_AMT) FROM biz_schema.TB_ADW_DEP201P "  # noqa: E501
+            "AND BAL_AMT > (SELECT AVG(BAL_AMT) FROM ADWOWN.TB_ADW_DEP201P "  # noqa: E501
             "               WHERE STD_DT = CURRENT_DATE) "
             "ORDER BY BAL_AMT DESC",
             True, "SUCCESS", "user02", 150, None,
@@ -1741,7 +1757,7 @@ def seed_history_db() -> None:
         (
             "거래 10건 이상 활성 계좌",
             "SELECT ACN, COUNT(*) AS trx_cnt "
-            "FROM biz_schema.TB_ADW_TRX701L "
+            "FROM ADWOWN.TB_ADW_TRX701L "
             "WHERE TR_DT >= DATE_TRUNC('month', CURRENT_DATE) "
             "GROUP BY ACN HAVING COUNT(*) >= 10 "
             "ORDER BY trx_cnt DESC",
@@ -1750,7 +1766,7 @@ def seed_history_db() -> None:
         (
             "여신 유형별 실행 건수",
             "SELECT LN_DCD, COUNT(*) AS ln_cnt, SUM(LN_EXC_AMT) AS total_amt "
-            "FROM biz_schema.TB_ADW_LNB301M "
+            "FROM ADWOWN.TB_ADW_LNB301M "
             "WHERE STD_DT = CURRENT_DATE AND LN_DT >= DATE_TRUNC('month', CURRENT_DATE) "  # noqa: E501
             "GROUP BY LN_DCD",
             True, "SUCCESS", "user01", 95, None,
@@ -1758,8 +1774,8 @@ def seed_history_db() -> None:
         (
             "지점별 고객 수",
             "SELECT b.BR_NM, COUNT(ci.EDPS_CSN) AS cust_cnt "
-            "FROM biz_schema.TB_ADW_CSC101M ci "
-            "JOIN biz_schema.TB_ADW_COM001M b ON ci.BLNG_BRCD = b.BLNG_BRCD "
+            "FROM ADWOWN.TB_ADW_CSC101M ci "
+            "JOIN ADWOWN.TB_ADW_COM001M b ON ci.BLNG_BRCD = b.BLNG_BRCD "
             "WHERE ci.STD_DT = CURRENT_DATE "
             "GROUP BY b.BR_NM ORDER BY cust_cnt DESC LIMIT 10",
             True, "SUCCESS", "user02", 85, None,
@@ -1767,7 +1783,7 @@ def seed_history_db() -> None:
         (
             "연령대별 고객 분포",
             "SELECT AGE_GRP_CD, COUNT(*) AS cust_cnt "
-            "FROM biz_schema.TB_ADW_CSC101M "
+            "FROM ADWOWN.TB_ADW_CSC101M "
             "WHERE STD_DT = CURRENT_DATE AND CUS_DCD = '01' "
             "GROUP BY AGE_GRP_CD ORDER BY AGE_GRP_CD",
             True, "SUCCESS", "user05", 55, None,
@@ -1775,7 +1791,7 @@ def seed_history_db() -> None:
         (
             "담보대출 평균 금리",
             "SELECT ROUND(AVG(APLY_RT)::NUMERIC, 2) AS avg_rate "
-            "FROM biz_schema.TB_ADW_LNB301M "
+            "FROM ADWOWN.TB_ADW_LNB301M "
             "WHERE STD_DT = CURRENT_DATE AND LN_DCD = '02'",
             True, "SUCCESS", "user01", 40, None,
         ),
@@ -1784,10 +1800,10 @@ def seed_history_db() -> None:
             "SELECT ci.EDPS_CSN, ci.CSM, "
             "COALESCE(SUM(ab.BAL_AMT), 0) AS deposit_total, "
             "COALESCE(SUM(li.LN_BAL_AMT), 0) AS loan_total "
-            "FROM biz_schema.TB_ADW_CSC101M ci "
-            "LEFT JOIN biz_schema.TB_ADW_DEP201P ab "
+            "FROM ADWOWN.TB_ADW_CSC101M ci "
+            "LEFT JOIN ADWOWN.TB_ADW_DEP201P ab "
             "  ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE "
-            "LEFT JOIN biz_schema.TB_ADW_LNB301M li "
+            "LEFT JOIN ADWOWN.TB_ADW_LNB301M li "
             "  ON ci.EDPS_CSN = li.EDPS_CSN AND li.STD_DT = CURRENT_DATE "
             "WHERE ci.STD_DT = CURRENT_DATE "
             "GROUP BY ci.EDPS_CSN, ci.CSM ORDER BY deposit_total DESC LIMIT 50",  # noqa: E501
@@ -1796,7 +1812,7 @@ def seed_history_db() -> None:
         (
             "계좌 유형별 잔액 합계",
             "SELECT ACT_DCD, COUNT(*) AS acct_cnt, SUM(BAL_AMT) AS total_bal "
-            "FROM biz_schema.TB_ADW_DEP201P "
+            "FROM ADWOWN.TB_ADW_DEP201P "
             "WHERE STD_DT = CURRENT_DATE "
             "GROUP BY ACT_DCD ORDER BY total_bal DESC",
             True, "SUCCESS", "user03", 90, None,
@@ -1804,8 +1820,8 @@ def seed_history_db() -> None:
         (
             "기업 고객 대출 비중",
             "SELECT ci.CUS_DCD, COUNT(*) AS ln_cnt, SUM(li.LN_EXC_AMT) AS total_amt "  # noqa: E501
-            "FROM biz_schema.TB_ADW_LNB301M li "
-            "JOIN biz_schema.TB_ADW_CSC101M ci "
+            "FROM ADWOWN.TB_ADW_LNB301M li "
+            "JOIN ADWOWN.TB_ADW_CSC101M ci "
             "  ON li.EDPS_CSN = ci.EDPS_CSN AND ci.STD_DT = CURRENT_DATE "
             "WHERE li.STD_DT = CURRENT_DATE "
             "GROUP BY ci.CUS_DCD",
@@ -1814,7 +1830,7 @@ def seed_history_db() -> None:
         (
             "리스크 지표 BIS 비율 최근 3개월",
             "SELECT STD_DT, IND_VAL AS bis_ratio "
-            "FROM biz_schema.TB_ADW_RSK1101M "
+            "FROM ADWOWN.TB_ADW_RSK1101M "
             "WHERE IND_CD = 'BIS_RATIO' "
             "AND STD_DT >= CURRENT_DATE - INTERVAL '90 days' "
             "ORDER BY STD_DT",
@@ -1825,16 +1841,16 @@ def seed_history_db() -> None:
             "SELECT m.CAMP_CD, COUNT(*) AS total_cnt, "
             "SUM(CASE WHEN t.RESP_YN = 'Y' THEN 1 ELSE 0 END) AS resp_cnt, "
             "ROUND(SUM(CASE WHEN t.RESP_YN = 'Y' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS resp_rt "  # noqa: E501
-            "FROM biz_schema.TB_ADW_MKT1201M m "
-            "JOIN biz_schema.TB_ADW_MKT1202M t ON m.CAMP_CD = t.CAMP_CD "
+            "FROM ADWOWN.TB_ADW_MKT1201M m "
+            "JOIN ADWOWN.TB_ADW_MKT1202M t ON m.CAMP_CD = t.CAMP_CD "
             "GROUP BY m.CAMP_CD ORDER BY resp_rt DESC LIMIT 10",
             True, "SUCCESS", "user07", 150, None,
         ),
         (
             "지점별 이번 달 손익",
             "SELECT f.BLNG_BRCD, b.BR_NM, SUM(f.AMT) AS tot_pl "
-            "FROM biz_schema.TB_ADW_FIN1306S f "
-            "JOIN biz_schema.TB_ADW_COM001M b ON f.BLNG_BRCD = b.BLNG_BRCD "
+            "FROM ADWOWN.TB_ADW_FIN1306S f "
+            "JOIN ADWOWN.TB_ADW_COM001M b ON f.BLNG_BRCD = b.BLNG_BRCD "
             "WHERE f.BASE_YM = TO_CHAR(CURRENT_DATE, 'YYYYMM') "
             "GROUP BY f.BLNG_BRCD, b.BR_NM ORDER BY tot_pl DESC",
             True, "SUCCESS", "user01", 200, None,
@@ -1842,15 +1858,15 @@ def seed_history_db() -> None:
         # 실패 케이스 — 에이전트 학습용
         (
             "최근 거래 내역 보여줘",
-            "SELECT * FROM biz_schema.TB_ADW_TRX701L",
+            "SELECT * FROM ADWOWN.TB_ADW_TRX701L",
             False, "TIMEOUT", "user08", None,
             "기간 조건 누락으로 전체 파티션 스캔 — 타임아웃 발생",
         ),
         (
             "이번 달 연체 고객",
             "SELECT ci.EDPS_CSN, ci.CSM, li.OVDU_GRD_CD, li.OVDU_AMT "
-            "FROM biz_schema.TB_ADW_LNB301M li "
-            "JOIN biz_schema.TB_ADW_CSC101M ci "
+            "FROM ADWOWN.TB_ADW_LNB301M li "
+            "JOIN ADWOWN.TB_ADW_CSC101M ci "
             "  ON li.EDPS_CSN = ci.EDPS_CSN AND ci.STD_DT = CURRENT_DATE "
             "WHERE li.STD_DT = CURRENT_DATE "
             "AND li.OVDU_GRD_CD IN ('A','B','C','D','E','F','Z')",
@@ -1888,7 +1904,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print("PostgreSQL 테스트 데이터 시딩 (신규 명명규칙)")
     print("=" * 60)
-    print("\n[정보계 DB — biz_schema]")
+    print("\n[정보계 DB — ADWOWN]")
     seed_info_db()
     print("\n[이력 DB — sys_schema]")
     seed_history_db()

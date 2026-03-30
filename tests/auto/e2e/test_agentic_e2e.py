@@ -25,21 +25,27 @@ from src.agents.state.state import (
     PipelineState,
     ReasoningState,
     CandidateTable,
+    ColumnInfo,
+    ConfidenceStatus,
     DeadEnd,
     ExecutionStep,
+    FailureType,
+    FinalStatus,
     Hypothesis,
+    HypothesisStatus,
     KnowledgeItem,
     LoopGuard,
-    SqlValidationResult,
+    Phase,
+    StepStatus,
     StructuralHints,
 )
 from src.agents.graph.pipeline import (
     build_pipeline,
     create_app,
-    _route_after_reason_plan,
-    _route_after_reason_evaluate,
-    _route_after_reason_recover,
-    _route_after_reason_validate_sql,
+    _route_after_planner,
+    _route_after_confidence_evaluator,
+    _route_after_recovery_planner,
+    _route_after_sql_validator,
 )
 from src.agents.nodes.reason.planner import (
     _build_decomposition_from_normalized,
@@ -50,7 +56,6 @@ from src.agents.nodes.reason.planner import (
     planner_node,
 )
 from src.agents.nodes.reason.context_explorer import (
-    _interpret_result,
     context_explorer_node,
 )
 from src.agents.nodes.reason.confidence_evaluator import (
@@ -67,8 +72,6 @@ from src.agents.nodes.reason.sql_validator import (
 from src.agents.nodes.reason.recovery_planner import (
     _build_failure_summary,
     _build_replan_context,
-    _infer_failure_reason,
-    _infer_failure_type,
     recovery_planner_node,
 )
 from src.agents.nodes.reason.result_finalizer import (
@@ -109,7 +112,7 @@ def _state(
 
 
 def _ki(
-    key: str, status: str = "UNRESOLVED",
+    key: str, status: ConfidenceStatus = ConfidenceStatus.UNRESOLVED,
     confidence: float = 0.0, **kw: Any,
 ) -> KnowledgeItem:
     return KnowledgeItem(
@@ -120,7 +123,7 @@ def _ki(
 
 def _hyp(
     hid: str = "H1", desc: str = "test",
-    status: str = "PENDING", **kw: Any,
+    status: HypothesisStatus = HypothesisStatus.PENDING, **kw: Any,
 ) -> Hypothesis:
     return Hypothesis(
         hypothesis_id=hid, description=desc,
@@ -130,7 +133,7 @@ def _hyp(
 
 def _step(
     n: int = 1, tool: str = "search_table_meta",
-    inp: str = "q", status: str = "PENDING",
+    inp: str = "q", status: StepStatus = StepStatus.PENDING,
 ) -> ExecutionStep:
     return ExecutionStep(
         step=n, tool=tool, input=inp,
@@ -142,8 +145,8 @@ def _ct(
     name: str = "TB_CUST", cols: list | None = None,
 ) -> CandidateTable:
     return CandidateTable(
-        table_name=name, role="desc",
-        relevant_columns=cols or ["COL_A"],
+        table_name=name, description="desc",
+        columns=[ColumnInfo(name=c) for c in (cols or ["COL_A"])],
     )
 
 
@@ -186,14 +189,14 @@ class TestClearQueryAccuracy:
 
     def test_04_fast_path_with_all_confirmed(self):
         """모든 지식 확인됨 → Fast-Path 발동."""
-        ki = [_ki("measure:x", "CONFIRMED", 0.9)]
+        ki = [_ki("measure:x", ConfidenceStatus.CONFIRMED, 0.9)]
         hints = StructuralHints(join_patterns=["a=b"])
         cands = [_ct()]
         assert _should_fast_path(ki, hints, cands, None)
 
     def test_05_no_fast_path_with_unresolved(self):
         """미해소 용어 있음 → Fast-Path 미발동."""
-        ki = [_ki("measure:x", "UNRESOLVED")]
+        ki = [_ki("measure:x", ConfidenceStatus.UNRESOLVED)]
         hints = StructuralHints(join_patterns=["a=b"])
         assert not _should_fast_path(ki, hints, [_ct()], None)
 
@@ -202,7 +205,7 @@ class TestClearQueryAccuracy:
         reason = ReasoningState(
             candidate_tables=[_ct("TB_A", ["C1", "C2"])],
             knowledge_items=[
-                _ki("table:TB_A", "CONFIRMED", 0.7),
+                _ki("table:TB_A", ConfidenceStatus.CONFIRMED, 0.7),
             ],
         )
         ctx = _build_context_info(reason)
@@ -224,7 +227,7 @@ class TestClearQueryAccuracy:
                 DeadEnd(
                     hypothesis_id="H1",
                     reason="테이블 없음",
-                    failure_type="no_table",
+                    failure_type=FailureType.NO_TABLE,
                 ),
             ],
         )
@@ -246,12 +249,9 @@ class TestClearQueryAccuracy:
                 total_tool_calls=5, generate_attempts=2,
             ),
             knowledge_items=[
-                _ki("table:TB_X", "CONFIRMED", 0.9),
+                _ki("table:TB_X", ConfidenceStatus.CONFIRMED, 0.9),
             ],
             explored_use_cases=[{"sql": "SELECT 1"}],
-            structural_hints=StructuralHints(
-                join_patterns=["a=b"],
-            ),
         )
         summary = _build_success_summary(reason)
         assert "도구 호출 5회" in summary
@@ -268,7 +268,7 @@ class TestAmbiguousQueryHandling:
     def test_01_conflicted_triggers_ask_user(self):
         """충돌 항목 → ASK_USER 판정."""
         state = _state(
-            knowledge_items=[_ki("x", "CONFLICTED")],
+            knowledge_items=[_ki("x", ConfidenceStatus.CONFLICTED)],
             hypotheses=[_hyp()],
         )
         assert has_conflicted_items(state.reason)
@@ -284,8 +284,8 @@ class TestAmbiguousQueryHandling:
         """복수 충돌 항목 감지."""
         state = _state(
             knowledge_items=[
-                _ki("a", "CONFLICTED"),
-                _ki("b", "CONFLICTED"),
+                _ki("a", ConfidenceStatus.CONFLICTED),
+                _ki("b", ConfidenceStatus.CONFLICTED),
             ],
             hypotheses=[_hyp()],
         )
@@ -298,7 +298,7 @@ class TestAmbiguousQueryHandling:
         )
         items = [
             _ki(
-                "코드값", "CONFLICTED",
+                "코드값", ConfidenceStatus.CONFLICTED,
                 evidence=["A: 01=정상", "B: 01=활성"],
             ),
         ]
@@ -309,7 +309,7 @@ class TestAmbiguousQueryHandling:
     def test_05_low_confidence_triggers_replan(self):
         """낮은 확신도 → REPLAN 판정."""
         state = _state(
-            knowledge_items=[_ki("x", "UNRESOLVED")],
+            knowledge_items=[_ki("x", ConfidenceStatus.UNRESOLVED)],
             hypotheses=[_hyp()],
             execution_plan=[],  # 스텝 없음
         )
@@ -320,8 +320,8 @@ class TestAmbiguousQueryHandling:
         """단일 critical 미해소 → 생성 차단."""
         state = _state(
             knowledge_items=[
-                _ki("table:TB_A", "CONFIRMED", 0.9),
-                _ki("measure:고객수", "UNRESOLVED",
+                _ki("table:TB_A", ConfidenceStatus.CONFIRMED, 0.9),
+                _ki("measure:고객수", ConfidenceStatus.UNRESOLVED,
                     is_critical=True),
             ],
         )
@@ -331,9 +331,9 @@ class TestAmbiguousQueryHandling:
         """비critical 미해소 → 생성 가능."""
         state = _state(
             knowledge_items=[
-                _ki("table:TB_A", "CONFIRMED", 0.9),
+                _ki("table:TB_A", ConfidenceStatus.CONFIRMED, 0.9),
                 _ki(
-                    "보조:지점명", "UNRESOLVED",
+                    "보조:지점명", ConfidenceStatus.UNRESOLVED,
                     is_critical=False,
                 ),
             ],
@@ -350,24 +350,27 @@ class TestAmbiguousQueryHandling:
         """부분 지식 → 중간 점수."""
         state = _state(
             knowledge_items=[
-                _ki("a", "CONFIRMED", 0.9),
-                _ki("b", "UNRESOLVED", 0.0),
+                _ki("a", ConfidenceStatus.CONFIRMED, 0.9),
+                _ki("b", ConfidenceStatus.UNRESOLVED, 0.0),
             ],
         )
         score = calculate_readiness(state.reason)
         assert 0.1 <= score <= 0.7
 
     def test_10_join_needed_but_missing(self):
-        """조인 필요하나 미확인 → 점수 하락."""
+        """조인 필요하나 join_keys 없음 → 점수 하락."""
         state = _state(
             knowledge_items=[
-                _ki("table:A", "CONFIRMED", 0.9),
-                _ki("table:B", "CONFIRMED", 0.9),
+                _ki("table:A", ConfidenceStatus.CONFIRMED, 0.9),
+                _ki("table:B", ConfidenceStatus.CONFIRMED, 0.9),
             ],
-            confirmed_join_path=[],  # 조인 경로 없음
+            candidate_tables=[
+                CandidateTable(table_name="A", join_keys=[]),
+                CandidateTable(table_name="B", join_keys=[]),
+            ],
         )
         score = calculate_readiness(state.reason)
-        # join_path 가중치 20%가 0 → 전체 점수 하락
+        # join_path 가중치 20%가 0.3 → 전체 점수 하락
         assert score <= 0.85
 
 
@@ -380,17 +383,17 @@ class TestExceptionHandling:
 
     @pytest.mark.asyncio
     async def test_01_empty_sql_validation(self):
-        """빈 SQL → FAIL_SYNTAX."""
+        """빈 SQL → SQL_SYNTAX."""
         state = _state(generated_sql=None)
         r = await sql_validator_node(state)
-        assert r["reason"].sql_validation_result.overall == "FAIL_SYNTAX"
+        assert r["reason"].failure_type == FailureType.SQL_SYNTAX
 
     @pytest.mark.asyncio
     async def test_02_empty_sql_string(self):
-        """빈 문자열 SQL → FAIL_SYNTAX."""
+        """빈 문자열 SQL → SQL_SYNTAX."""
         state = _state(generated_sql="")
         r = await sql_validator_node(state)
-        assert r["reason"].sql_validation_result.overall == "FAIL_SYNTAX"
+        assert r["reason"].failure_type == FailureType.SQL_SYNTAX
 
     def test_03_layer1_rejects_dml(self):
         """DML 구문 → Layer1 거부."""
@@ -461,12 +464,12 @@ class TestExceptionHandling:
         """모든 가설 FAILED → rule-based fallback 가설 생성."""
         state = _state(
             preprocessed_input="고객 수",
-            hypotheses=[_hyp(status="FAILED")],
+            hypotheses=[_hyp(status=HypothesisStatus.FAILED)],
             current_hypothesis=None,
         )
         r = await recovery_planner_node(state)
         # rule-based fallback이 새 가설을 생성
-        assert r["reason"].phase == "EXPLORING"
+        assert r["reason"].phase == Phase.EXPLORING
         assert r["reason"].current_hypothesis is not None
 
 
@@ -481,9 +484,9 @@ class TestClarificationQuestions:
     async def test_01_verifying_phase_triggers_question(self):
         """VERIFYING + CONFLICTED → 질문 생성."""
         state = _state(
-            phase="VERIFYING",
+            phase=Phase.VERIFYING,
             knowledge_items=[
-                _ki("코드", "CONFLICTED",
+                _ki("코드", ConfidenceStatus.CONFLICTED,
                      evidence=["출처A", "출처B"]),
             ],
         )
@@ -495,9 +498,9 @@ class TestClarificationQuestions:
     async def test_02_no_conflict_no_question(self):
         """충돌 없음 → 질문 없음."""
         state = _state(
-            phase="VERIFYING",
+            phase=Phase.VERIFYING,
             knowledge_items=[
-                _ki("x", "CONFIRMED", 0.9),
+                _ki("x", ConfidenceStatus.CONFIRMED, 0.9),
             ],
             validated_sql="SELECT 1",
         )
@@ -518,8 +521,8 @@ class TestClarificationQuestions:
             _build_clarification_question,
         )
         items = [
-            _ki("a", "CONFLICTED", evidence=["e1"]),
-            _ki("b", "CONFLICTED", evidence=["e2"]),
+            _ki("a", ConfidenceStatus.CONFLICTED, evidence=["e1"]),
+            _ki("b", ConfidenceStatus.CONFLICTED, evidence=["e2"]),
         ]
         q = _build_clarification_question(items)
         assert "a" in q and "b" in q
@@ -531,18 +534,18 @@ class TestClarificationQuestions:
         )
         assert (
             VERDICT_TO_PHASE[ReadinessVerdict.ASK_USER]
-            == "VERIFYING"
+            == Phase.VERIFYING
         )
 
     @pytest.mark.asyncio
     async def test_06_evaluator_sets_verifying(self):
         """confidence_evaluator가 VERIFYING 설정."""
         state = _state(
-            knowledge_items=[_ki("x", "CONFLICTED")],
+            knowledge_items=[_ki("x", ConfidenceStatus.CONFLICTED)],
             hypotheses=[_hyp()],
         )
         r = await confidence_evaluator_node(state)
-        assert r["reason"].phase == "VERIFYING"
+        assert r["reason"].phase == Phase.VERIFYING
 
     def test_07_finalizer_pending_status(self):
         """명확화 시 final_status=pending."""
@@ -556,7 +559,7 @@ class TestClarificationQuestions:
         )
         items = [
             _ki(
-                "STATUS_CD", "CONFLICTED",
+                "STATUS_CD", ConfidenceStatus.CONFLICTED,
                 evidence=["코드메타: 01=정상", "매뉴얼: 01=활성"],
             ),
         ]
@@ -568,14 +571,14 @@ class TestClarificationQuestions:
         """성공 시 명확화 없음."""
         state = _state(
             validated_sql="SELECT 1",
-            final_status="success",
+            final_status=FinalStatus.SUCCESS,
         )
         assert not state.awaiting_clarification
 
     def test_10_no_clarification_on_failure(self):
         """실패 시 명확화 없음."""
         state = _state(
-            final_status="failure",
+            final_status=FinalStatus.FAILURE,
             exploration_summary="실패",
         )
         assert not state.awaiting_clarification
@@ -696,8 +699,8 @@ class TestSessionTurnManagement:
     def test_02_phase_transitions(self):
         """phase 전환 패턴."""
         phases = [
-            "PLANNING", "EXPLORING", "VERIFYING",
-            "GENERATING", "VALIDATING", "REPLANNING", "DONE",
+            Phase.PLANNING, Phase.EXPLORING, Phase.VERIFYING,
+            Phase.GENERATING, Phase.VALIDATING, Phase.REPLANNING, Phase.DONE,
         ]
         for p in phases:
             s = _state(phase=p)
@@ -714,12 +717,12 @@ class TestSessionTurnManagement:
 
     def test_04_hypothesis_lifecycle(self):
         """가설 상태 전환: PENDING → ACTIVE → FAILED."""
-        h = _hyp(status="PENDING")
+        h = _hyp(status=HypothesisStatus.PENDING)
         h_copy = h.model_copy()
-        h_copy.status = "ACTIVE"
-        assert h_copy.status == "ACTIVE"
-        h_copy.status = "FAILED"
-        assert h_copy.status == "FAILED"
+        h_copy.status = HypothesisStatus.ACTIVE
+        assert h_copy.status == HypothesisStatus.ACTIVE
+        h_copy.status = HypothesisStatus.FAILED
+        assert h_copy.status == HypothesisStatus.FAILED
 
     def test_05_dead_end_accumulation(self):
         """dead-end 누적."""
@@ -728,12 +731,12 @@ class TestSessionTurnManagement:
                 DeadEnd(
                     hypothesis_id="H1",
                     reason="r1",
-                    failure_type="no_table",
+                    failure_type=FailureType.NO_TABLE,
                 ),
                 DeadEnd(
                     hypothesis_id="H2",
                     reason="r2",
-                    failure_type="empty_result",
+                    failure_type=FailureType.EMPTY_RESULT,
                 ),
             ],
         )
@@ -744,31 +747,21 @@ class TestSessionTurnManagement:
         state = _state(searched_queries=["a", "b", "a"])
         assert "a" in state.reason.searched_queries
 
-    def test_07_sampled_tables_tracking(self):
-        """샘플 테이블 추적."""
-        state = _state(sampled_tables=["TB_A"])
-        assert "TB_A" in state.reason.sampled_tables
-
-    def test_08_cache_refs_mapping(self):
-        """캐시 참조 매핑."""
-        state = _state(
-            cache_refs={"step1": "cache_key_1"},
-        )
-        assert state.reason.cache_refs["step1"] == "cache_key_1"
-
-    def test_09_current_step_index(self):
-        """현재 스텝 인덱스."""
-        state = _state(current_step_index=3)
-        assert state.reason.current_step_index == 3
+    def test_07_sampled_tables_via_sample_rows(self):
+        """샘플 테이블 추적 — CandidateTable.sample_rows로 판단."""
+        ct = CandidateTable(table_name="TB_A", sample_rows=[{"col": 1}])
+        state = _state(candidate_tables=[ct])
+        sampled = [t for t in state.reason.candidate_tables if t.sample_rows]
+        assert any(t.table_name == "TB_A" for t in sampled)
 
     def test_10_execution_plan_mixed_status(self):
         """실행계획 혼합 상태."""
         plan = [
-            _step(1, status="DONE"),
-            _step(2, status="PENDING"),
-            _step(3, status="SKIPPED"),
+            _step(1, status=StepStatus.DONE),
+            _step(2, status=StepStatus.PENDING),
+            _step(3, status=StepStatus.SKIPPED),
         ]
-        pending = [s for s in plan if s.status == "PENDING"]
+        pending = [s for s in plan if s.status == StepStatus.PENDING]
         assert len(pending) == 1
 
 
@@ -782,7 +775,7 @@ class TestIndependentQueryDuringConversation:
     def test_01_new_query_fresh_state(self):
         """새 질의 → 깨끗한 상태."""
         state = _state(preprocessed_input="새 질의")
-        assert state.reason.phase == "PLANNING"
+        assert state.reason.phase == Phase.PLANNING
         assert len(state.reason.dead_ends) == 0
         assert len(state.reason.knowledge_items) == 0
 
@@ -794,7 +787,7 @@ class TestIndependentQueryDuringConversation:
                 DeadEnd(
                     hypothesis_id="H1",
                     reason="r",
-                    failure_type="no_table",
+                    failure_type=FailureType.NO_TABLE,
                 ),
             ],
         )
@@ -818,67 +811,38 @@ class TestIndependentQueryDuringConversation:
         assert len(plan) == 1
         assert "지점별" in plan[0].input
 
+    @pytest.mark.skip(reason="_interpret_result 삭제됨 (simplify 리팩터링)")
     @pytest.mark.asyncio
     async def test_05_interpret_empty_result(self):
         """빈 도구 결과 해석."""
-        step = _step(tool="search_table_meta")
-        insight, ki, tables = await _interpret_result(
-            step, [], "테스트 질의",
-        )
-        assert "결과 없음" in insight
-        assert len(ki) == 0
 
+    @pytest.mark.skip(reason="_interpret_result 삭제됨 (simplify 리팩터링)")
     @pytest.mark.asyncio
     async def test_06_interpret_table_meta(self):
         """테이블 메타 결과 해석."""
-        step = _step(tool="search_table_meta")
-        result = [
-            {"table_name": "TB_X",
-             "table_description": "테스트",
-             "columns": [{"column_name": "C1"}]},
-        ]
-        insight, ki, tables = await _interpret_result(
-            step, result, "테스트 질의",
-        )
-        assert "TB_X" in insight
-        assert len(tables) == 1
-        assert ki[0].key == "table:TB_X"
 
+    @pytest.mark.skip(reason="_interpret_result 삭제됨 (simplify 리팩터링)")
     @pytest.mark.asyncio
     async def test_07_interpret_code_meta(self):
         """코드 메타 결과 해석 (MongoDB 형식 호환)."""
-        step = _step(tool="search_code_meta")
-        # MongoDB 실제 반환 형식: code_field + codes dict
-        result = [
-            {"code_field": "STATUS_CD",
-             "codes": {"01": "정상", "02": "휴면"}},
-        ]
-        insight, ki, _ = await _interpret_result(
-            step, result, "테스트 질의",
-        )
-        assert "코드값" in insight
-        assert ki[0].status == "PROBABLE"
-        assert "STATUS_CD" in ki[0].key
 
-    def test_08_failure_type_inference(self):
-        """실패 유형 추론."""
+    def test_08_failure_type_direct_setting(self):
+        """failure_type 직접 설정 확인."""
         reason = ReasoningState(
-            sql_validation_result=SqlValidationResult(
-                overall="FAIL_EMPTY",
-            ),
+            failure_type=FailureType.EMPTY_RESULT,
+            failure_reason="실행 결과 0건",
         )
-        ft = _infer_failure_type(reason)
-        assert ft == "empty_result"
+        assert reason.failure_type == FailureType.EMPTY_RESULT
+        assert reason.failure_reason == "실행 결과 0건"
 
-    def test_09_failure_reason_inference(self):
-        """실패 사유 추론."""
+    def test_09_failure_reason_direct_setting(self):
+        """failure_reason 직접 설정 확인."""
         reason = ReasoningState(
-            sql_validation_result=SqlValidationResult(
-                overall="FAIL_STRUCTURAL",
-            ),
+            failure_type=FailureType.SQL_STRUCTURAL,
+            failure_reason="미확인 테이블: TB_X",
         )
-        r = _infer_failure_reason(reason)
-        assert "구조적" in r
+        assert reason.failure_type == FailureType.SQL_STRUCTURAL
+        assert "미확인" in reason.failure_reason
 
     def test_10_replan_context_includes_history(self):
         """재계획 컨텍스트에 이력 포함."""
@@ -888,15 +852,14 @@ class TestIndependentQueryDuringConversation:
                 DeadEnd(
                     hypothesis_id="H1",
                     reason="no table",
-                    failure_type="no_table",
-                    tried_tables=["TB_X"],
+                    failure_type=FailureType.NO_TABLE,
                 ),
             ],
             execution_plan=[
-                _step(1, status="DONE"),
+                _step(1, status=StepStatus.DONE),
             ],
             knowledge_items=[
-                _ki("table:TB_A", "CONFIRMED", 0.9),
+                _ki("table:TB_A", ConfidenceStatus.CONFIRMED, 0.9),
             ],
             searched_queries=["query1"],
         )

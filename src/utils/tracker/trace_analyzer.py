@@ -1,6 +1,6 @@
 """트레이스 자동 분석 유틸리티 — e2e 테스트 후 보완점 도출.
 
-EvaluationTracker가 생성한 JSON 트레이스 파일을 읽어서
+DataCopilotCallbackHandler가 생성한 JSON 트레이스 파일을 읽어서
 SQL 정확도에 영향을 주는 병목, 실패 패턴, 개선 기회를 자동으로 도출한다.
 
 사용 방법:
@@ -22,6 +22,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from src.models.enums import FinalStatus
 
 
 @dataclass
@@ -92,6 +94,15 @@ class BatchReport:
 def analyze_trace(path: str | Path) -> TraceReport:
     """JSON 트레이스 파일을 분석하여 보완점을 도출한다."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return analyze_trace_data(data)
+
+
+def analyze_trace_data(data: dict[str, Any]) -> TraceReport:
+    """dict 형태의 트레이스를 분석하여 보완점을 도출한다.
+
+    ``analyze_trace`` 의 dict 입력 버전.
+    visualizer에서 JSON 파싱 없이 직접 호출할 때 사용한다.
+    """
     report = TraceReport(
         run_id=data.get("run_id", ""),
         user_input=data.get("user_input", ""),
@@ -142,10 +153,20 @@ def _collect_metrics(data: dict) -> dict[str, Any]:
 # ── 분석 규칙 ──────────────────────────────────────────────────
 
 
+_NON_SQL_STATUSES = frozenset({
+    "casual_response", "clarification",
+    "greeting", "out_of_scope",
+})
+
+
 def _check_context_retrieval(data: dict) -> list[Finding]:
     """컨텍스트 수집 관련 문제를 점검한다."""
     findings: list[Finding] = []
     retrievals = data.get("context_retrievals", [])
+
+    # 비 SQL 파이프라인이면 컨텍스트 수집 누락은 정상
+    if data.get("final_status") in _NON_SQL_STATUSES:
+        return findings
 
     if not retrievals:
         findings.append(Finding(
@@ -276,7 +297,7 @@ def _check_decisions(data: dict) -> list[Finding]:
         findings.append(Finding(
             severity="INFO",
             category="pipeline",
-            stage="reason_evaluate",
+            stage="confidence_evaluator",
             message="readiness 판정 기록 없음 — evaluator 추적 미적용 가능성",
         ))
     else:
@@ -289,7 +310,7 @@ def _check_decisions(data: dict) -> list[Finding]:
                 findings.append(Finding(
                     severity="WARNING",
                     category="accuracy",
-                    stage="reason_evaluate",
+                    stage="confidence_evaluator",
                     message=(
                         f"낮은 확신도({r.get('confidence', 0):.2f})로 "
                         f"SQL 생성 진입 — 정확도 위험"
@@ -323,9 +344,7 @@ def _check_sql_quality(data: dict) -> list[Finding]:
     sql_rec = data.get("sql", {})
 
     if not sql_rec.get("generated_sql"):
-        if data.get("final_status") not in (
-            "casual_response", "clarification",
-        ):
+        if data.get("final_status") not in _NON_SQL_STATUSES:
             findings.append(Finding(
                 severity="CRITICAL",
                 category="sql",
@@ -386,7 +405,7 @@ def _check_pipeline_flow(data: dict) -> list[Finding]:
     node_path = data.get("node_path", [])
 
     # replan 횟수
-    replan_count = node_path.count("reason_replan")
+    replan_count = node_path.count("recovery_planner")
     if replan_count >= 2:
         findings.append(Finding(
             severity="WARNING",
@@ -396,7 +415,7 @@ def _check_pipeline_flow(data: dict) -> list[Finding]:
         ))
 
     # 최종 실패
-    if data.get("final_status") == "failure":
+    if data.get("final_status") == FinalStatus.FAILURE:
         findings.append(Finding(
             severity="CRITICAL",
             category="pipeline",
@@ -543,7 +562,7 @@ def analyze_batch(trace_dir: str | Path) -> BatchReport:
         trace_report = analyze_trace(path)
         report.per_run.append(trace_report)
         report.total_runs += 1
-        if trace_report.final_status == "success":
+        if trace_report.final_status == FinalStatus.SUCCESS:
             report.success_count += 1
         else:
             report.failure_count += 1

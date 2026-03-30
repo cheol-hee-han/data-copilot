@@ -9,8 +9,10 @@ UI의 '💡 통찰' 패널에 표시할 구조화된 딕셔너리를 반환한�
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
+from src.models.enums import TableSelectionStatus
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,20 +32,54 @@ def build_insight(state: dict[str, Any]) -> dict[str, Any]:
     trace_log = state.get("trace_log", [])
     sql_result = state.get("sql_result")
 
+    is_success = bool(
+        reason and _get_attr_or_key(reason, "validated_sql", ""),
+    )
+
+    # SQL에서 실제 사용된 테이블명 추출
+    sql_tables = _extract_tables_from_sql(reason)
+
     return {
+        "is_success": is_success,
         "query_interpretation": _build_query_interpretation(state, normalized),
-        "tables_used": _build_tables_used(reason),
+        "reasoning_trail": _build_reasoning_trail(reason),
+        # 성공 전용
+        "tables_used": _build_tables_used(reason, sql_tables),
+        "tables_candidate": _build_tables_candidate(reason, sql_tables),
         "tables_rejected": _build_tables_rejected(reason),
-        "sql_summary": _build_sql_summary(reason),
+        "validation_detail": _build_validation_detail(reason),
+        "sql_summary": _build_sql_summary(reason, sql_tables),
         "sql_code": _extract_sql(reason),
         "join_path": _format_join_path(reason),
         "references": _build_references(reason),
-        "total_elapsed": _calc_total_elapsed(trace_log),
-        "step_timings": _build_step_timings(trace_log),
         "confidence": _assess_confidence(reason),
         "caveats": _build_caveats(state, reason),
+        "total_elapsed": _calc_total_elapsed(trace_log),
+        "step_timings": _build_step_timings(trace_log),
         "result_stats": _build_result_stats(sql_result),
+        # 실패 전용
+        "failure_narrative": _build_failure_narrative(state, reason),
+        "dead_end_trail": _build_dead_end_trail(reason),
     }
+
+
+def _extract_tables_from_sql(reason: Any) -> set[str]:
+    """validated_sql에서 실제 사용된 테이블명을 sqlglot으로 추출한다."""
+    sql = (
+        _get_attr_or_key(reason, "validated_sql", "")
+        or _get_attr_or_key(reason, "generated_sql", "")
+    )
+    if not sql:
+        return set()
+
+    try:
+        from src.utils.sqlglot_analyzer import parse_sql_safe, get_real_tables
+        ast = parse_sql_safe(sql)
+        if ast is None:
+            return set()
+        return set(get_real_tables(ast))
+    except Exception:
+        return set()
 
 
 def _build_query_interpretation(
@@ -68,25 +104,57 @@ def _build_query_interpretation(
     }
 
 
-def _build_tables_used(reason: Any) -> list[dict[str, Any]]:
-    """사용된 테이블 목록을 구성한다."""
+def _build_tables_used(
+    reason: Any,
+    sql_tables: set[str],
+) -> list[dict[str, Any]]:
+    """SQL에 실제 사용된 테이블 목록을 구성한다."""
+    if not reason or not sql_tables:
+        return []
+
+    candidates = _get_attr_or_key(reason, "candidate_tables", [])
+    tables = []
+    for t in candidates:
+        td = _to_dict(t)
+        if td is None:
+            continue
+        table_name = td.get("table_name", td.get("name", ""))
+        if table_name not in sql_tables:
+            continue
+        tables.append({
+            "name": table_name,
+            "alt_name": td.get("alt_name", ""),
+            "desc": td.get("selection_reason", "") or td.get("description", ""),
+            "reason": td.get("selection_reason", ""),
+            "columns": td.get("columns_used", td.get("key_columns", [])),
+        })
+    return tables
+
+
+def _build_tables_candidate(
+    reason: Any,
+    sql_tables: set[str],
+) -> list[dict[str, Any]]:
+    """후보였으나 SQL에 미사용된 테이블 목록을 구성한다."""
     if not reason:
         return []
 
     candidates = _get_attr_or_key(reason, "candidate_tables", [])
     tables = []
     for t in candidates:
-        if hasattr(t, "model_dump"):
-            td = t.model_dump()
-        elif isinstance(t, dict):
-            td = t
-        else:
+        td = _to_dict(t)
+        if td is None:
+            continue
+        table_name = td.get("table_name", td.get("name", ""))
+        status = td.get("selection_status", "")
+        # REJECTED는 별도 분류, SQL에 사용된 것도 제외
+        if status == TableSelectionStatus.REJECTED or table_name in sql_tables:
             continue
         tables.append({
-            "name": td.get("table_name", td.get("name", "")),
-            "desc": td.get("description", td.get("table_desc", "")),
-            "reason": td.get("selection_reason", td.get("reason", "")),
-            "columns": td.get("columns_used", td.get("key_columns", [])),
+            "name": table_name,
+            "alt_name": td.get("alt_name", ""),
+            "desc": td.get("selection_reason", "") or td.get("description", ""),
+            "reason": td.get("selection_reason", ""),
         })
     return tables
 
@@ -96,38 +164,39 @@ def _build_tables_rejected(reason: Any) -> list[dict[str, Any]]:
     if not reason:
         return []
 
-    rejected = _get_attr_or_key(reason, "rejected_tables", [])
+    candidates = _get_attr_or_key(reason, "candidate_tables", [])
     tables = []
-    for t in rejected:
-        if hasattr(t, "model_dump"):
-            td = t.model_dump()
-        elif isinstance(t, dict):
-            td = t
-        else:
+    for t in candidates:
+        td = _to_dict(t)
+        if td is None:
+            continue
+        status = td.get("selection_status", "")
+        if status != TableSelectionStatus.REJECTED:
             continue
         tables.append({
             "name": td.get("table_name", td.get("name", "")),
-            "desc": td.get("description", td.get("table_desc", "")),
-            "reason": td.get("rejection_reason", td.get("reason", "")),
+            "alt_name": td.get("alt_name", ""),
+            "desc": td.get("description", ""),
+            "reason": td.get("selection_reason", ""),
         })
     return tables
 
 
-def _build_sql_summary(reason: Any) -> str:
+def _build_sql_summary(reason: Any, sql_tables: set[str]) -> str:
     """SQL 요약 설명을 생성한다."""
-    if not reason:
+    if not reason or not sql_tables:
         return ""
 
     candidates = _get_attr_or_key(reason, "candidate_tables", [])
-    if not candidates:
-        return ""
-
     table_names = []
     for t in candidates:
         name = _get_attr_or_key(t, "table_name", "")
+        if name not in sql_tables:
+            continue
+        alt_name = _get_attr_or_key(t, "alt_name", "")
         desc = _get_attr_or_key(t, "description", "")
-        if name:
-            table_names.append(f"{desc}({name})" if desc else name)
+        label = alt_name or desc
+        table_names.append(f"{label}({name})" if label else name)
 
     if not table_names:
         return ""
@@ -146,25 +215,36 @@ def _extract_sql(reason: Any) -> str:
 
 
 def _format_join_path(reason: Any) -> str:
-    """JOIN 경로를 사용자 친화적 문자열로 변환한다."""
+    """후보 테이블의 join_keys로 조인 힌트를 구성한다."""
     if not reason:
         return ""
 
-    join_path = _get_attr_or_key(reason, "confirmed_join_path", None)
-    if not join_path:
-        return ""
+    candidates = _get_attr_or_key(reason, "candidate_tables", [])
+    entries = [
+        f"{_table_name(ct)}({', '.join(_join_keys(ct))})"
+        for ct in candidates
+        if _join_keys(ct)
+        and _get_attr_or_key(ct, "selection_status", "") != TableSelectionStatus.REJECTED
+    ]
+    return " ↔ ".join(entries) if entries else ""
 
-    if isinstance(join_path, str):
-        return join_path
 
-    if isinstance(join_path, list):
-        return " → ".join(str(p) for p in join_path)
+def _table_name(ct: Any) -> str:
+    """CandidateTable 또는 dict에서 테이블명을 추출한다."""
+    if hasattr(ct, "qualified_name"):
+        return ct.qualified_name
+    if isinstance(ct, dict):
+        return ct.get("table_name", "")
+    return str(ct)
 
-    if hasattr(join_path, "model_dump"):
-        jp = join_path.model_dump()
-        return str(jp)
 
-    return str(join_path)
+def _join_keys(ct: Any) -> list[str]:
+    """CandidateTable 또는 dict에서 join_keys를 추출한다."""
+    if hasattr(ct, "join_keys"):
+        return ct.join_keys
+    if isinstance(ct, dict):
+        return ct.get("join_keys", [])
+    return []
 
 
 def _build_references(reason: Any) -> list[dict[str, str]]:
@@ -205,13 +285,17 @@ def _build_references(reason: Any) -> list[dict[str, str]]:
             "detail": f"{manual_count}건의 업무 규정을 확인했습니다.",
         })
 
-    # 샘플 데이터
-    sampled = _get_attr_or_key(reason, "sampled_tables", [])
-    if sampled:
+    # 샘플 데이터 — candidate_tables에서 sample_rows가 있는 것을 카운트
+    candidates = _get_attr_or_key(reason, "candidate_tables", [])
+    sampled_count = sum(
+        1 for t in candidates
+        if _get_attr_or_key(t, "sample_rows", [])
+    )
+    if sampled_count:
         refs.append({
             "source": "data_sample",
             "title": "데이터 샘플",
-            "detail": f"{len(sampled)}개 테이블의 샘플 데이터를 확인했습니다.",
+            "detail": f"{sampled_count}개 테이블의 샘플 데이터를 확인했습니다.",
         })
 
     return refs
@@ -233,8 +317,6 @@ def _calc_total_elapsed(trace_log: list[Any]) -> float:
 
     # TraceEntry는 timestamp가 ISO 형식이므로 간단 파싱
     try:
-        from datetime import datetime
-
         first = datetime.fromisoformat(timestamps[0])
         last = datetime.fromisoformat(timestamps[-1])
         return max((last - first).total_seconds(), 0.0)
@@ -249,13 +331,13 @@ def _build_step_timings(trace_log: list[Any]) -> list[dict[str, Any]]:
         "resolve_history": "대화 이력 분석",
         "classify_intent": "질문 의도 분석",
         "normalize_query": "질문 정규화",
-        "reason_plan": "탐색 계획 수립",
-        "reason_explore": "데이터 탐색",
-        "reason_evaluate": "탐색 평가",
-        "reason_generate_sql": "SQL 생성",
-        "reason_validate_sql": "SQL 검증",
-        "reason_recover": "대안 탐색",
-        "reason_finalize": "결과 확정",
+        "planner": "탐색 계획 수립",
+        "context_explorer": "데이터 탐색",
+        "confidence_evaluator": "탐색 평가",
+        "sql_generator": "SQL 생성",
+        "sql_validator": "SQL 검증",
+        "recovery_planner": "대안 탐색",
+        "result_finalizer": "결과 확정",
         "execute_sql": "데이터 조회",
         "analyze_data": "결과 분석",
         "format_response": "보고서 작성",
@@ -273,7 +355,6 @@ def _build_step_timings(trace_log: list[Any]) -> list[dict[str, Any]]:
             continue
 
         try:
-            from datetime import datetime
             t = datetime.fromisoformat(ts).timestamp()
         except (ValueError, TypeError):
             continue
@@ -340,17 +421,17 @@ def _build_caveats(
             "처음 시도한 방법이 적합하지 않아 다른 접근을 시도했습니다.",
         )
 
-    if _get_attr_or_key(reason, "structural_hints", None):
-        caveats.append(
-            "일부 컬럼 설명이 불완전하여 유사 SQL과 데이터 샘플을 참고하여 추론했습니다.",
-        )
-
     candidates = _get_attr_or_key(reason, "candidate_tables", [])
-    join_path = _get_attr_or_key(reason, "confirmed_join_path", None)
-    if not join_path and len(candidates) > 1:
-        caveats.append(
-            "테이블 간 연결 경로가 명시되지 않아 컬럼명으로 추론했습니다.",
-        )
+    selected = [
+        ct for ct in candidates
+        if _get_attr_or_key(ct, "selection_status", "") != TableSelectionStatus.REJECTED
+    ]
+    if len(selected) > 1:
+        has_keys = any(_join_keys(ct) for ct in selected)
+        if not has_keys:
+            caveats.append(
+                "테이블 간 연결 경로가 명시되지 않아 컬럼명으로 추론했습니다.",
+            )
 
     dead_ends = _get_attr_or_key(reason, "dead_ends", [])
     if dead_ends:
@@ -373,6 +454,140 @@ def _build_result_stats(sql_result: Any) -> dict[str, Any]:
             sql_result, "execution_time_ms", 0.0,
         ),
     }
+
+
+def _build_reasoning_trail(reason: Any) -> list[dict[str, str]]:
+    """추론 과정을 단계별 리스트로 구성한다.
+
+    execution_plan의 완료된 스텝 중 insight가 존재하는 것만 추출한다.
+    """
+    if not reason:
+        return []
+
+    plan = _get_attr_or_key(reason, "execution_plan", [])
+    trail: list[dict[str, str]] = []
+
+    for step in plan:
+        if hasattr(step, "model_dump"):
+            sd = step.model_dump()
+        elif isinstance(step, dict):
+            sd = step
+        else:
+            continue
+
+        insight_text = sd.get("insight") or ""
+        if not insight_text:
+            continue
+
+        # ⚠️ 표시: 한계/부재/실패 관련 insight
+        is_warning = any(
+            kw in insight_text
+            for kw in ("부재", "부족", "불가", "없어", "없음", "실패", "제한")
+        )
+
+        trail.append({
+            "text": insight_text,
+            "tool": sd.get("tool", ""),
+            "warning": is_warning,
+        })
+
+    return trail
+
+
+def _build_validation_detail(reason: Any) -> list[dict[str, str]]:
+    """SQL 검증 결과 체크 항목을 구성한다.
+
+    sql_validator Layer2b PASS 시 저장된 checks를 사용자 친화적으로 변환한다.
+    """
+    if not reason:
+        return []
+
+    checks = _get_attr_or_key(reason, "validation_checks", {})
+    if not checks:
+        return []
+
+    label_map = {
+        "measure_reflected": "측정값 반영",
+        "filters_reflected": "필터 반영",
+        "group_by_reflected": "그룹핑 반영",
+        "order_limit_reflected": "정렬/제한 반영",
+        "no_unconfirmed_values": "미확인 값 사용 여부",
+        "no_dead_end_repeat": "실패 패턴 반복 여부",
+        "logical_consistency": "논리적 정합성",
+    }
+
+    items: list[dict[str, str]] = []
+    for key, value in checks.items():
+        if not isinstance(value, dict):
+            continue
+        detail = value.get("detail", "")
+        if not detail:
+            continue
+        items.append({
+            "label": label_map.get(key, key),
+            "detail": detail,
+            "pass": value.get("pass", True),
+        })
+
+    return items
+
+
+def _build_failure_narrative(
+    state: dict[str, Any],
+    reason: Any,
+) -> str:
+    """실패 원인 내러티브를 구성한다.
+
+    give_up_reason(LLM 총평) > exploration_summary > error_message 우선순위.
+    """
+    if not reason:
+        return state.get("error_message", "")
+
+    summary = _get_attr_or_key(reason, "exploration_summary", "")
+
+    # exploration_summary가 있고, 단순 규칙 기반 메시지("SQL 생성 실패"로 시작)가
+    # 아닌 경우 → give_up_reason(LLM 총평)으로 간주하여 그대로 사용
+    if summary:
+        return summary
+
+    return state.get("error_message", "")
+
+
+def _build_dead_end_trail(reason: Any) -> list[dict[str, str]]:
+    """시도한 접근 경로를 구성한다.
+
+    dead_ends 배열에서 실패 유형, 사유, 교훈을 추출한다.
+    """
+    if not reason:
+        return []
+
+    dead_ends = _get_attr_or_key(reason, "dead_ends", [])
+    trail: list[dict[str, str]] = []
+
+    for de in dead_ends:
+        if hasattr(de, "model_dump"):
+            dd = de.model_dump()
+        elif isinstance(de, dict):
+            dd = de
+        else:
+            continue
+
+        trail.append({
+            "failure_type": str(dd.get("failure_type", "")),
+            "reason": dd.get("reason", ""),
+            "lessons_learned": dd.get("lessons_learned", ""),
+        })
+
+    return trail
+
+
+def _to_dict(obj: Any) -> dict[str, Any] | None:
+    """Pydantic 모델 또는 dict를 dict로 변환한다."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return obj
+    return None
 
 
 def _get_attr_or_key(obj: Any, key: str, default: Any = None) -> Any:

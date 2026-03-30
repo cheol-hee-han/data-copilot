@@ -1,37 +1,59 @@
 """planner 노드 — 질의 분해 + 초기 가설 수립 + 실행계획 생성.
 
-최초 진입 전용 노드. 재계획은 recovery_planner 노드가 담당한다.
-8-Slot 정규화 결과를 시드로 활용하여 query_decomposition을 구성하고,
-UNRESOLVED 용어를 목록화한 뒤 가설과 실행계획을 수립한다.
+reason 계층의 첫 번째 노드. 최초 진입 전용이며 재계획은 recovery_planner가 담당한다.
+8-Slot 정규화 결과(normalized_query)를 시드로 활용하여 query_decomposition을 구성하고,
+UNRESOLVED 용어를 KnowledgeItem으로 목록화한 뒤 LLM으로 가설과 실행계획을 수립한다.
 
 Fast-Path 판정:
-  유사 SQL 이력 고유사도 매칭 시 탐색 루프를 건너뛰고 즉시 SQL 생성.
+    유사 SQL 이력에서 고유사도 매칭(≥ threshold)이 발견되면
+    탐색 루프(context_explorer)를 건너뛰고 즉시 sql_generator로 진행한다.
+
+핵심 함수:
+    - planner_node: 메인 노드 함수
+    - _build_decomposition_from_normalized: NormalizedQuery → query_decomposition 변환
+    - _initialize_knowledge_items: 정규화 슬롯에서 UNRESOLVED 용어 추출
+    - _build_initial_candidates: 유사 SQL에서 초기 후보 테이블 목록 구성
+    - _should_fast_path: Fast-Path 진입 조건 판정
+    - _build_fallback_plan: LLM 실패 시 rule-based 기본 실행계획 생성
+
+위임 구조:
+    - 프롬프트: system_prompts.py의 REASON_PLAN
 
 v2.0 (2026-03-25): LLM 기반 가설 생성으로 전환 — 외부 프롬프트 사용.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.agents.models.normalization import NormalizedQuery
 
 from src.agents.state.state import (
     PipelineState,
     CandidateTable,
+    ConfidenceStatus,
     ExecutionStep,
     Hypothesis,
+    HypothesisStatus,
     KnowledgeItem,
+    Phase,
     StructuralHints,
 )
-from src.utils.db_routing import parse_db_source
 from src.agents.nodes.reason.tools import (
     extract_hints_from_use_cases,
     search_table_meta,
     search_use_cases,
 )
-from src.agents.nodes.system_prompts import REASON_PLAN_SYSTEM
+from src.agents.nodes.system_prompts import PLANNER_SYSTEM
+from src.utils.llm import llm_call_with_parse_retry, ParseError
+from src.utils.llm.response import extract_json
+from src.utils.llm.prompt import render_prompt
 from src.utils.logger import get_logger
 from src.utils.tracker import record_prompt_variables
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -39,7 +61,7 @@ logger = get_logger(__name__)
 async def planner_node(state: PipelineState) -> dict:
     """질의를 분해하고 초기 탐색 가설을 수립한다."""
     reason = state.reason.model_copy(deep=True)
-    reason.phase = "PLANNING"
+    reason.phase = Phase.PLANNING
 
     nq = state.normalized_query
     decomposition = _build_decomposition_from_normalized(nq)
@@ -61,7 +83,6 @@ async def planner_node(state: PipelineState) -> dict:
     structural_hints = extract_hints_from_use_cases(
         initial_context.get("use_cases", []),
     )
-    reason.structural_hints = structural_hints
     reason.explored_use_cases = initial_context.get("use_cases", [])
 
     # 초기 후보 테이블
@@ -73,7 +94,7 @@ async def planner_node(state: PipelineState) -> dict:
     # Fast-Path 판정
     if _should_fast_path(knowledge_items, structural_hints, candidate_tables, nq):
         reason.fast_path_triggered = True
-        reason.phase = "GENERATING"
+        reason.phase = Phase.GENERATING
         logger.info("planner: Fast-Path 트리거")
         return {"reason": reason}
 
@@ -83,14 +104,14 @@ async def planner_node(state: PipelineState) -> dict:
         initial_context, knowledge_items,
         structural_hints,
         searched_queries=searched_queries,
-        sampled_tables=list(reason.sampled_tables),
+        candidate_tables=candidate_tables,
     )
     reason.hypotheses = hypotheses
 
     # 최우선 가설 선택 + 실행계획 생성 (C-07: 직접 mutation 방지)
     if hypotheses:
         top = hypotheses[0].model_copy()
-        top.status = "ACTIVE"
+        top.status = HypothesisStatus.ACTIVE
         hypotheses[0] = top
         reason.hypotheses = hypotheses
         reason.current_hypothesis = top
@@ -116,7 +137,7 @@ async def planner_node(state: PipelineState) -> dict:
             description="키워드 기반 직접 테이블 탐색",
             strategy="질의 키워드로 테이블 메타를 직접 검색",
             priority=0.1,
-            status="ACTIVE",
+            status=HypothesisStatus.ACTIVE,
         )
         reason.hypotheses = [fallback]
         reason.current_hypothesis = fallback
@@ -124,15 +145,14 @@ async def planner_node(state: PipelineState) -> dict:
             state.preprocessed_input, decomposition,
         )
 
-    reason.current_step_index = 0
-    reason.phase = "EXPLORING"
+    reason.phase = Phase.EXPLORING
 
     # ── 추적: planner 결과 ──
     logger.info(
         "planner 완료",
         hypotheses=len(reason.hypotheses),
         top_hypothesis=(
-            reason.current_hypothesis.description[:80]
+            truncate_log(reason.current_hypothesis.description)
             if reason.current_hypothesis else "(없음)"
         ),
         execution_steps=len(reason.execution_plan),
@@ -148,46 +168,34 @@ async def planner_node(state: PipelineState) -> dict:
 # 내부 함수
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _build_decomposition_from_normalized(nq: Any) -> dict:
+def _build_decomposition_from_normalized(
+    nq: NormalizedQuery | None,
+) -> dict:
     """8-Slot NormalizedQuery에서 query_decomposition을 구성한다."""
+    empty = {"measures": [], "filters": [], "group_by": [], "order_limit": []}
     if nq is None:
-        return {"measures": [], "filters": [], "group_by": [], "order_limit": []}
+        return empty
 
-    measures = []
-    if hasattr(nq, "measures"):
-        for m in nq.measures:
-            measures.append({
-                "term": getattr(m, "term", ""),
-                "agg_function": getattr(m, "agg_function", ""),
-            })
+    measures = [
+        {"term": m.term, "agg_function": m.agg_function}
+        for m in nq.measures
+    ]
 
-    filters = []
-    if hasattr(nq, "filters"):
-        for f in nq.filters:
-            filters.append({
-                "term": getattr(f, "column", ""),
-                "operator": getattr(f, "operator", ""),
-                "value": getattr(f, "value", ""),
-            })
+    filters = [
+        {"term": f.target, "operator": f.filter_type, "value": f.values}
+        for f in nq.filters
+    ]
 
-    group_by = []
-    if hasattr(nq, "dimensions"):
-        for d in nq.dimensions:
-            if getattr(d, "role", "") == "GROUP":
-                group_by.append(getattr(d, "term", ""))
+    group_by = [
+        d.term for d in nq.dimensions if d.role == "GROUP"
+    ]
 
-    order_limit = []
-    if hasattr(nq, "modifiers"):
-        for mod in nq.modifiers:
-            order_limit.append({
-                "type": getattr(mod, "type", ""),
-                "value": getattr(mod, "value", ""),
-            })
+    order_limit = [
+        {"type": mod.type, "value": str(mod.limit or mod.by or "")}
+        for mod in nq.modifiers
+    ]
 
-    required_concepts = []
-    if hasattr(nq, "entities"):
-        for e in nq.entities:
-            required_concepts.append(getattr(e, "term", ""))
+    required_concepts = [e.term for e in nq.entities]
     required_concepts.extend(m.get("term", "") for m in measures)
 
     return {
@@ -218,7 +226,7 @@ def _initialize_knowledge_items(
         if term:
             items.append(KnowledgeItem(
                 key=f"measure:{term}",
-                status="UNRESOLVED",
+                status=ConfidenceStatus.UNRESOLVED,
             ))
 
     for f in decomposition.get("filters", []):
@@ -227,15 +235,15 @@ def _initialize_knowledge_items(
         if term and value:
             items.append(KnowledgeItem(
                 key=f"filter:{term}={value}",
-                status="UNRESOLVED",
+                status=ConfidenceStatus.UNRESOLVED,
             ))
 
     if nq and hasattr(nq, "ambiguities"):
         for amb in (nq.ambiguities or []):
             items.append(KnowledgeItem(
-                key=f"ambiguity:{amb[:50]}",
+                key=f"ambiguity:{amb}",
                 value=amb,
-                status="CONFLICTED",
+                status=ConfidenceStatus.CONFLICTED,
                 confidence=0.0,
                 is_critical=True,
                 source="normalizer_ambiguity",
@@ -326,7 +334,7 @@ def _build_output_scope_item() -> KnowledgeItem:
     return KnowledgeItem(
         key="output_scope",
         value="",
-        status="CONFLICTED",
+        status=ConfidenceStatus.CONFLICTED,
         confidence=0.0,
         source="planner",
         evidence=[
@@ -374,12 +382,13 @@ async def _collect_initial_context(query: str, nq: Any) -> dict:
     table_metas: list[dict] = []
 
     if query:
-        # Qdrant 벡터 검색은 원본 자연어가 더 적합
-        use_cases = await search_use_cases(query)
-
-        # MongoDB $text 검색은 도메인 키워드만 전달
+        # Qdrant 벡터 검색(원본 자연어)과
+        # MongoDB $text 검색(도메인 키워드)은 독립적이므로 병렬 실행
         meta_query = _extract_meta_search_query(nq, query)
-        table_metas = await search_table_meta(meta_query)
+        use_cases, table_metas = await asyncio.gather(
+            search_use_cases(query),
+            search_table_meta(meta_query),
+        )
 
     return {
         "use_cases": use_cases,
@@ -399,33 +408,9 @@ def _build_initial_candidates(
     """
     candidates: list[CandidateTable] = []
     for meta in table_metas:
-        # 신규 필드 우선, 구 필드 폴백
-        table_name = meta.get("name", "") or meta.get("table_name", "")
-        desc = (
-            meta.get("description")
-            or meta.get("alt_name", "")
-            or meta.get("table_description", "")
-        )
-        raw_cols = meta.get("columns", [])
-        if isinstance(raw_cols, list) and raw_cols:
-            if isinstance(raw_cols[0], dict):
-                # 신규 필드 name 우선, 구 필드 column_name 폴백
-                columns = [
-                    c.get("name", "") or c.get("column_name", "")
-                    for c in raw_cols
-                ]
-            else:
-                columns = raw_cols
-        else:
-            columns = []
-
-        if table_name:
-            candidates.append(CandidateTable(
-                table_name=table_name,
-                db_source=parse_db_source(table_name),
-                role=desc,
-                relevant_columns=columns,
-            ))
+        ct = CandidateTable.from_meta(meta)
+        if ct is not None:
+            candidates.append(ct)
     return candidates
 
 
@@ -439,20 +424,11 @@ def _should_fast_path(
     return (
         not hints.is_empty()
         and len(candidates) >= 1
-        and all(ki.status != "UNRESOLVED" for ki in knowledge_items)
+        and all(ki.status != ConfidenceStatus.UNRESOLVED for ki in knowledge_items)
         and not (nq and hasattr(nq, "ambiguities") and nq.ambiguities)
     )
 
 
-def _render_prompt(template: str, variables: dict[str, str]) -> str:
-    """프롬프트 템플릿의 플레이스홀더를 .replace()로 치환한다.
-
-    JSON few-shot 예제와 충돌하지 않도록 .format() 대신 .replace() 사용.
-    """
-    result = template
-    for key, value in variables.items():
-        result = result.replace(f"{{{key}}}", str(value))
-    return result
 
 
 async def _generate_hypotheses(
@@ -463,12 +439,11 @@ async def _generate_hypotheses(
     structural_hints: StructuralHints,
     *,
     searched_queries: list[str] | None = None,
-    sampled_tables: list[str] | None = None,
+    candidate_tables: list | None = None,
     conversation_history: str = "",
 ) -> list[Hypothesis]:
     """LLM을 사용하여 탐색 가설을 수립한다."""
     from src.config import settings
-    from src.utils.llm import get_llm_client
 
     # 초기 수집 결과 요약
     use_cases = initial_context.get("use_cases", [])
@@ -476,7 +451,7 @@ async def _generate_hypotheses(
     context_summary = ""
     if use_cases:
         context_summary += f"유사 활용사례 {len(use_cases)}건 발견\n"
-        for uc in use_cases[:3]:
+        for uc in use_cases:
             desc = uc.get("description", "")
             score = uc.get("_score", 0)
             context_summary += f"  - (유사도 {score:.2f}) {desc}\n"
@@ -486,7 +461,7 @@ async def _generate_hypotheses(
     if table_metas:
         names = [
             m.get("table_name") or m.get("name", "")
-            for m in table_metas[:5]
+            for m in table_metas
         ]
         context_summary += f"관련 테이블 {len(table_metas)}건: {', '.join(n for n in names if n)}\n"
     if not context_summary:
@@ -498,7 +473,9 @@ async def _generate_hypotheses(
         "query_decomposition": json.dumps(decomposition, ensure_ascii=False),
         "initial_context_summary": context_summary,
         "searched_queries": ", ".join(searched_queries or []) or "(없음)",
-        "sampled_tables": ", ".join(sampled_tables or []) or "(없음)",
+        "sampled_tables": ", ".join(
+            t.table_name for t in (candidate_tables or []) if t.sample_rows
+        ) or "(없음)",
         "vague_output_keywords": ", ".join(
             f'"{kw}"' for kw in VAGUE_OUTPUT_KEYWORDS
         ),
@@ -506,39 +483,37 @@ async def _generate_hypotheses(
             f'"{kw}"' for kw in EXTRACTION_KEYWORDS
         ),
     }
-    prompt = _render_prompt(REASON_PLAN_SYSTEM, plan_vars)
+    render_vars = {f"{{{k}}}": v for k, v in plan_vars.items()}
+    prompt, variables = render_prompt(PLANNER_SYSTEM, render_vars)
+
+    def _parse_fn(raw_text: str) -> list[Hypothesis]:
+        parsed = _parse_plan_response(raw_text)
+        if not parsed:
+            raise ValueError("가설 파싱 결과 0건")
+        return parsed
 
     try:
-        client = get_llm_client()
-        response = await client.messages.create(
-            model=settings.llm_model,
-            max_tokens=2048,
-            timeout=settings.llm_long_timeout,
+        _, parsed = await llm_call_with_parse_retry(
             system=prompt,
             messages=[
                 {"role": "user", "content": query},
             ],
+            parse_fn=_parse_fn,
+            max_tokens=2048,
+            timeout=settings.llm_long_timeout,
+            node_name="planner",
         )
-        record_prompt_variables(plan_vars)
-        raw = response.content[0].text
-        parsed = _parse_plan_response(raw)
+        await record_prompt_variables(variables)
         return parsed
-    except Exception as e:
+    except (ParseError, Exception) as e:
         logger.warning("planner LLM 호출 실패, rule-based fallback", error=str(e))
         return _generate_hypotheses_fallback(initial_context)
 
 
 def _parse_plan_response(raw: str) -> list[Hypothesis]:
     """LLM 응답 JSON에서 hypotheses를 파싱한다."""
-    import re
-
-    json_match = re.search(r"\{[\s\S]*\}", raw)
-    if not json_match:
-        return []
-
-    try:
-        data = json.loads(json_match.group())
-    except json.JSONDecodeError:
+    data = extract_json(raw)
+    if not data:
         return []
 
     priority_map = {"high": 0.9, "medium": 0.5, "low": 0.1}
@@ -638,7 +613,7 @@ def _build_execution_plan(
             step_num += 1
 
     for ki in knowledge_items:
-        if ki.status == "UNRESOLVED" and "filter:" in ki.key:
+        if ki.status == ConfidenceStatus.UNRESOLVED and "filter:" in ki.key:
             col_name = ki.key.split(":")[1].split("=")[0]
             steps.append(ExecutionStep(
                 step=step_num,
@@ -656,7 +631,7 @@ def _build_fallback_plan(query: str, decomposition: dict) -> list[ExecutionStep]
     """Cold Start fallback 실행계획."""
     keywords = decomposition.get("required_concepts", [])
     if not keywords:
-        keywords = query.split()[:3]
+        keywords = query.split()
 
     return [
         ExecutionStep(

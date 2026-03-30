@@ -29,6 +29,7 @@ from src.connectors.dummy_data import (
 from src.connectors.interfaces import SearchConnector
 from src.utils.logger import get_logger
 from src.utils.resource_loader import load_mongo_pipeline
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -241,7 +242,7 @@ class MongoConnector(SearchConnector):
 
         logger.info(
             "MongoDB 테이블 메타 검색",
-            query=query[:60] if not table_names else str(table_names),
+            query=truncate_log(query) if not table_names else str(table_names),
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )
@@ -296,12 +297,13 @@ class MongoConnector(SearchConnector):
             }
             results.append({
                 "code_field": item.get("code_field", ""),
+                "code_field_desc": item.get("code_field_desc", ""),
                 "codes": codes,
             })
 
         logger.info(
             "MongoDB 코드 메타 검색",
-            query=query[:60] if not code_names else str(code_names),
+            query=truncate_log(query) if not code_names else str(code_names),
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )
@@ -351,7 +353,7 @@ class MongoConnector(SearchConnector):
 
         logger.info(
             "MongoDB 용어사전 검색",
-            query=query[:60] if not term_names else str(term_names),
+            query=truncate_log(query) if not term_names else str(term_names),
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )

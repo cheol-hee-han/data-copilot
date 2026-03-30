@@ -35,7 +35,6 @@ class TestImports:
             KnowledgeItem,
             LoopGuard,
             Phase,
-            SqlValidationResult,
             StructuralHints,
             should_terminate,
         )
@@ -50,8 +49,8 @@ class TestImports:
         )
         assert ReadinessVerdict.GENERATE.value == "generate_sql"
 
-    def test_sql_hint_extractor_imports(self):
-        from src.services.sql_hint_extractor import (
+    def test_sqlglot_analyzer_imports(self):
+        from src.utils.sqlglot_analyzer import (
             extract_structural_hints,
             merge_hints,
             parse_sql_safe,
@@ -102,21 +101,23 @@ class TestReasoningState:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
+            Phase,
         )
         state = PipelineState(reason=ReasoningState())
-        assert state.reason.phase == "PLANNING"
-        assert state.reason.final_status == "pending"
+        assert state.reason.phase == Phase.PLANNING
+        from src.agents.state.state import FinalStatus
+        assert state.reason.final_status == FinalStatus.PENDING
         assert state.reason.loop_guard.total_tool_calls == 0
         assert not state.reason.fast_path_triggered
 
     def test_knowledge_item_promote(self):
-        from src.agents.state.state import KnowledgeItem
+        from src.agents.state.state import KnowledgeItem, ConfidenceStatus
         ki = KnowledgeItem(key="test:key")
-        assert ki.status == "UNRESOLVED"
+        assert ki.status == ConfidenceStatus.UNRESOLVED
         ki.promote(
-            "CONFIRMED", "value", 0.9, "샘플", "근거",
+            ConfidenceStatus.CONFIRMED, "value", 0.9, "샘플", "근거",
         )
-        assert ki.status == "CONFIRMED"
+        assert ki.status == ConfidenceStatus.CONFIRMED
         assert ki.confidence == 0.9
         assert len(ki.evidence) == 1
 
@@ -172,6 +173,7 @@ class TestReasoningState:
             PipelineState,
             ReasoningState,
             Hypothesis,
+            HypothesisStatus,
             should_terminate,
         )
         state = PipelineState(
@@ -180,7 +182,7 @@ class TestReasoningState:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="test",
-                        status="PENDING",
+                        status=HypothesisStatus.PENDING,
                     ),
                 ],
             ),
@@ -192,15 +194,16 @@ class TestReasoningState:
             PipelineState,
             ReasoningState,
             KnowledgeItem,
+            ConfidenceStatus,
         )
         state = PipelineState(
             reason=ReasoningState(
                 knowledge_items=[
                     KnowledgeItem(
-                        key="a", status="CONFIRMED", confidence=0.9,
+                        key="a", status=ConfidenceStatus.CONFIRMED, confidence=0.9,
                     ),
                     KnowledgeItem(
-                        key="b", status="UNRESOLVED",
+                        key="b", status=ConfidenceStatus.UNRESOLVED,
                     ),
                 ],
             ),
@@ -249,7 +252,9 @@ class TestConfidenceScorer:
             PipelineState,
             ReasoningState,
             Hypothesis,
+            HypothesisStatus,
             KnowledgeItem,
+            ConfidenceStatus,
         )
         from src.services.confidence_scorer import (
             ReadinessVerdict,
@@ -259,14 +264,14 @@ class TestConfidenceScorer:
             reason=ReasoningState(
                 knowledge_items=[
                     KnowledgeItem(
-                        key="x", status="CONFLICTED",
+                        key="x", status=ConfidenceStatus.CONFLICTED,
                     ),
                 ],
                 hypotheses=[
                     Hypothesis(
                         hypothesis_id="H1",
                         description="t",
-                        status="PENDING",
+                        status=HypothesisStatus.PENDING,
                     ),
                 ],
             ),
@@ -281,6 +286,8 @@ class TestConfidenceScorer:
             ReasoningState,
             ExecutionStep,
             Hypothesis,
+            HypothesisStatus,
+            StepStatus,
         )
         from src.services.confidence_scorer import (
             ReadinessVerdict,
@@ -294,14 +301,14 @@ class TestConfidenceScorer:
                         tool="search_table_meta",
                         input="test",
                         purpose="test",
-                        status="PENDING",
+                        status=StepStatus.PENDING,
                     ),
                 ],
                 hypotheses=[
                     Hypothesis(
                         hypothesis_id="H1",
                         description="t",
-                        status="PENDING",
+                        status=HypothesisStatus.PENDING,
                     ),
                 ],
             ),
@@ -315,21 +322,21 @@ class TestSqlHintExtractor:
     """sqlglot 기반 힌트 추출 검증."""
 
     def test_parse_simple_sql(self):
-        from src.services.sql_hint_extractor import (
+        from src.utils.sqlglot_analyzer import (
             parse_sql_safe,
         )
         ast = parse_sql_safe("SELECT 1 FROM t")
         assert ast is not None
 
     def test_parse_invalid_sql(self):
-        from src.services.sql_hint_extractor import (
+        from src.utils.sqlglot_analyzer import (
             parse_sql_safe,
         )
         ast = parse_sql_safe("NOT VALID SQL !!!")
         assert ast is None
 
     def test_extract_join_patterns(self):
-        from src.services.sql_hint_extractor import (
+        from src.utils.sqlglot_analyzer import (
             extract_structural_hints,
         )
         sql = (
@@ -337,34 +344,32 @@ class TestSqlHintExtractor:
             "JOIN t2 b ON a.id = b.t1_id"
         )
         hints = extract_structural_hints(sql)
-        assert len(hints.join_patterns) >= 1
+        assert len(hints["join_patterns"]) >= 1
 
     def test_extract_agg_expressions(self):
-        from src.services.sql_hint_extractor import (
+        from src.utils.sqlglot_analyzer import (
             extract_structural_hints,
         )
         sql = "SELECT COUNT(*), SUM(amt) FROM t"
         hints = extract_structural_hints(sql)
-        assert len(hints.agg_expressions) >= 1
+        assert len(hints["agg_expressions"]) >= 1
 
     def test_merge_hints(self):
-        from src.agents.state.state import (
-            StructuralHints,
-        )
-        from src.services.sql_hint_extractor import merge_hints
-        h1 = StructuralHints(
-            join_patterns=["a.id = b.id"],
-        )
-        h2 = StructuralHints(
-            join_patterns=["a.id = b.id"],
-            agg_expressions=["COUNT(*)"],
-        )
+        from src.utils.sqlglot_analyzer import merge_hints
+        h1 = {
+            "join_patterns": ["a.id = b.id"],
+            "agg_expressions": [],
+        }
+        h2 = {
+            "join_patterns": ["a.id = b.id"],
+            "agg_expressions": ["COUNT(*)"],
+        }
         merged = merge_hints([h1, h2])
-        assert len(merged.join_patterns) == 1  # 중복 제거
-        assert len(merged.agg_expressions) == 1
+        assert len(merged["join_patterns"]) == 1
+        assert len(merged["agg_expressions"]) == 1
 
     def test_get_real_tables(self):
-        from src.services.sql_hint_extractor import (
+        from src.utils.sqlglot_analyzer import (
             get_real_tables,
             parse_sql_safe,
         )
@@ -400,24 +405,30 @@ class TestStateConversion:
             PipelineState,
             ReasoningState,
             CandidateTable,
+            ColumnInfo,
+            FinalStatus,
             KnowledgeItem,
+            ConfidenceStatus,
         )
         state = PipelineState(
             reason=ReasoningState(
                 validated_sql="SELECT 1",
                 generated_sql="SELECT 1",
-                final_status="success",
+                final_status=FinalStatus.SUCCESS,
                 candidate_tables=[
                     CandidateTable(
                         table_name="TB_CUST",
-                        role="고객",
-                        relevant_columns=["CUST_NO", "NAME"],
+                        description="고객",
+                        columns=[
+                            ColumnInfo(name="CUST_NO"),
+                            ColumnInfo(name="NAME"),
+                        ],
                     ),
                 ],
                 knowledge_items=[
                     KnowledgeItem(
                         key="table:TB_CUST",
-                        status="CONFIRMED",
+                        status=ConfidenceStatus.CONFIRMED,
                         confidence=0.9,
                     ),
                 ],
@@ -434,14 +445,15 @@ class TestStateConversion:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
+            FinalStatus,
         )
         state = PipelineState(
             reason=ReasoningState(
-                final_status="failure",
+                final_status=FinalStatus.FAILURE,
                 exploration_summary="테이블 미발견",
             ),
         )
-        assert state.reason.final_status == "failure"
+        assert state.reason.final_status == FinalStatus.FAILURE
         assert "테이블 미발견" in state.reason.exploration_summary
 
     def test_reason_ask_user_state(self):
@@ -472,11 +484,11 @@ class TestGraphBuilding:
         compiled = graph.compile()
         assert compiled is not None
 
-    def test_pipeline_has_reason_plan(self):
+    def test_pipeline_has_planner(self):
         from src.agents.graph.pipeline import build_pipeline
         graph = build_pipeline()
         node_names = list(graph.nodes.keys())
-        assert "reason_plan" in node_names
+        assert "planner" in node_names
 
     def test_pipeline_no_legacy_nodes(self):
         from src.agents.graph.pipeline import build_pipeline
@@ -484,8 +496,8 @@ class TestGraphBuilding:
         node_names = list(graph.nodes.keys())
         assert "collect_context" not in node_names
         assert "enrich_context" not in node_names
-        assert "generate_sql" not in node_names
-        assert "validate_sql" not in node_names
+        assert "reason_plan" not in node_names
+        assert "reason_explore" not in node_names
 
 
 class TestRoutingFunctions:
@@ -497,14 +509,14 @@ class TestRoutingFunctions:
             ReasoningState,
         )
         from src.agents.graph.pipeline import (
-            _route_after_reason_plan,
+            _route_after_planner,
         )
         state = PipelineState(
             reason=ReasoningState(fast_path_triggered=True),
         )
         assert (
-            _route_after_reason_plan(state)
-            == "reason_generate_sql"
+            _route_after_planner(state)
+            == "sql_generator"
         )
 
     def test_route_after_planner_normal(self):
@@ -513,34 +525,31 @@ class TestRoutingFunctions:
             ReasoningState,
         )
         from src.agents.graph.pipeline import (
-            _route_after_reason_plan,
+            _route_after_planner,
         )
         state = PipelineState(
             reason=ReasoningState(fast_path_triggered=False),
         )
         assert (
-            _route_after_reason_plan(state)
-            == "reason_explore"
+            _route_after_planner(state)
+            == "context_explorer"
         )
 
     def test_route_from_validator_success(self):
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
-            SqlValidationResult,
         )
         from src.agents.graph.pipeline import (
-            _route_after_reason_validate_sql,
+            _route_after_sql_validator,
         )
         state = PipelineState(
             reason=ReasoningState(
-                sql_validation_result=SqlValidationResult(
-                    overall="SUCCESS",
-                ),
+                failure_type=None,
             ),
         )
         assert (
-            _route_after_reason_validate_sql(state)
+            _route_after_sql_validator(state)
             == "conclude_success"
         )
 
@@ -548,20 +557,18 @@ class TestRoutingFunctions:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
-            SqlValidationResult,
+            FailureType,
         )
         from src.agents.graph.pipeline import (
-            _route_after_reason_validate_sql,
+            _route_after_sql_validator,
         )
         state = PipelineState(
             reason=ReasoningState(
                 fast_path_triggered=True,
-                sql_validation_result=SqlValidationResult(
-                    overall="FAIL_SYNTAX",
-                ),
+                failure_type=FailureType.SQL_SYNTAX,
             ),
         )
-        assert _route_after_reason_validate_sql(state) == (
+        assert _route_after_sql_validator(state) == (
             "explore_after_fast_path"
         )
 
@@ -569,20 +576,18 @@ class TestRoutingFunctions:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
-            SqlValidationResult,
+            FailureType,
         )
         from src.agents.graph.pipeline import (
-            _route_after_reason_validate_sql,
+            _route_after_sql_validator,
         )
         state = PipelineState(
             reason=ReasoningState(
-                sql_validation_result=SqlValidationResult(
-                    overall="FAIL_STRUCTURAL",
-                ),
+                failure_type=FailureType.SQL_STRUCTURAL,
             ),
         )
         assert (
-            _route_after_reason_validate_sql(state)
+            _route_after_sql_validator(state)
             == "replan"
         )
 
@@ -590,30 +595,32 @@ class TestRoutingFunctions:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
+            Phase,
         )
         from src.agents.graph.pipeline import (
-            _route_after_reason_recover,
+            _route_after_recovery_planner,
         )
         state = PipelineState(
-            reason=ReasoningState(phase="DONE"),
+            reason=ReasoningState(phase=Phase.DONE),
         )
         assert (
-            _route_after_reason_recover(state) == "conclude"
+            _route_after_recovery_planner(state) == "conclude"
         )
 
     def test_route_from_replan_continue(self):
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
+            Phase,
         )
         from src.agents.graph.pipeline import (
-            _route_after_reason_recover,
+            _route_after_recovery_planner,
         )
         state = PipelineState(
-            reason=ReasoningState(phase="EXPLORING"),
+            reason=ReasoningState(phase=Phase.EXPLORING),
         )
         assert (
-            _route_after_reason_recover(state) == "explore"
+            _route_after_recovery_planner(state) == "explore"
         )
 
 
@@ -626,6 +633,7 @@ class TestNodeLogic:
             PipelineState,
             ReasoningState,
             LoopGuard,
+            Phase,
         )
         from src.agents.nodes.reason.confidence_evaluator import (
             confidence_evaluator_node,
@@ -636,13 +644,14 @@ class TestNodeLogic:
             ),
         )
         result = await confidence_evaluator_node(state)
-        assert result["reason"].phase == "DONE"
+        assert result["reason"].phase == Phase.DONE
 
     @pytest.mark.asyncio
     async def test_result_finalizer_success(self):
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
+            Phase,
         )
         from src.agents.nodes.reason.result_finalizer import (
             result_finalizer_node,
@@ -651,14 +660,16 @@ class TestNodeLogic:
             reason=ReasoningState(validated_sql="SELECT 1"),
         )
         result = await result_finalizer_node(state)
-        assert result["reason"].final_status == "success"
-        assert result["reason"].phase == "DONE"
+        from src.agents.state.state import FinalStatus
+        assert result["reason"].final_status == FinalStatus.SUCCESS
+        assert result["reason"].phase == Phase.DONE
 
     @pytest.mark.asyncio
     async def test_result_finalizer_failure(self):
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
+            FinalStatus,
         )
         from src.agents.nodes.reason.result_finalizer import (
             result_finalizer_node,
@@ -669,7 +680,7 @@ class TestNodeLogic:
             ),
         )
         result = await result_finalizer_node(state)
-        assert result["reason"].final_status == "failure"
+        assert result["reason"].final_status == FinalStatus.FAILURE
 
     @pytest.mark.asyncio
     async def test_result_finalizer_ask_user(self):
@@ -677,17 +688,19 @@ class TestNodeLogic:
             PipelineState,
             ReasoningState,
             KnowledgeItem,
+            ConfidenceStatus,
+            Phase,
         )
         from src.agents.nodes.reason.result_finalizer import (
             result_finalizer_node,
         )
         state = PipelineState(
             reason=ReasoningState(
-                phase="VERIFYING",
+                phase=Phase.VERIFYING,
                 knowledge_items=[
                     KnowledgeItem(
                         key="test",
-                        status="CONFLICTED",
+                        status=ConfidenceStatus.CONFLICTED,
                         evidence=["소스A: 값1", "소스B: 값2"],
                     ),
                 ],
@@ -695,7 +708,8 @@ class TestNodeLogic:
         )
         result = await result_finalizer_node(state)
         assert result["awaiting_clarification"] is True
-        assert result["reason"].final_status == "pending"
+        from src.agents.state.state import FinalStatus
+        assert result["reason"].final_status == FinalStatus.PENDING
 
     @pytest.mark.asyncio
     async def test_recovery_planner_with_fallback(self):
@@ -704,6 +718,8 @@ class TestNodeLogic:
             PipelineState,
             ReasoningState,
             Hypothesis,
+            HypothesisStatus,
+            Phase,
         )
         from src.agents.nodes.reason.recovery_planner import (
             recovery_planner_node,
@@ -715,7 +731,7 @@ class TestNodeLogic:
                     Hypothesis(
                         hypothesis_id="H1",
                         description="t",
-                        status="FAILED",
+                        status=HypothesisStatus.FAILED,
                     ),
                 ],
                 current_hypothesis=None,
@@ -723,7 +739,7 @@ class TestNodeLogic:
         )
         result = await recovery_planner_node(state)
         # rule-based fallback으로 새 가설 생성됨
-        assert result["reason"].phase == "EXPLORING"
+        assert result["reason"].phase == Phase.EXPLORING
         assert result["reason"].current_hypothesis is not None
 
     @pytest.mark.asyncio
@@ -731,6 +747,7 @@ class TestNodeLogic:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
+            FailureType,
         )
         from src.agents.nodes.reason.sql_validator import (
             sql_validator_node,
@@ -739,10 +756,7 @@ class TestNodeLogic:
             reason=ReasoningState(generated_sql=None),
         )
         result = await sql_validator_node(state)
-        assert (
-            result["reason"].sql_validation_result.overall
-            == "FAIL_SYNTAX"
-        )
+        assert result["reason"].failure_type == FailureType.SQL_SYNTAX
 
     def test_planner_decomposition(self):
         from src.agents.nodes.reason.planner import (

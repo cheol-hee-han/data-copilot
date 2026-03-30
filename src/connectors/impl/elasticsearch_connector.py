@@ -27,6 +27,7 @@ from src.connectors.dummy_data import (
     search_dummy_table_meta,
 )
 from src.utils.logger import get_logger
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -118,7 +119,7 @@ class ElasticSearchConnector(SearchConnector):
         _elapsed = (_time.perf_counter() - _start) * 1000
         logger.info(
             "ES 테이블 메타 검색",
-            query=query[:60],
+            query=truncate_log(query),
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )
@@ -155,7 +156,7 @@ class ElasticSearchConnector(SearchConnector):
         _elapsed = (_time.perf_counter() - _start) * 1000
         logger.info(
             "ES 보고서 SQL 검색",
-            query=query[:60],
+            query=truncate_log(query),
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )
@@ -192,7 +193,7 @@ class ElasticSearchConnector(SearchConnector):
         _elapsed = (_time.perf_counter() - _start) * 1000
         logger.info(
             "ES 코드 메타 검색",
-            query=query[:60],
+            query=truncate_log(query),
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )

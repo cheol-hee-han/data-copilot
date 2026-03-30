@@ -17,6 +17,7 @@ import pytest
 
 from src.agents.state.state import (
     CandidateTable,
+    ColumnInfo,
     KeyDateColumn,
     ObservedDateColumn,
 )
@@ -122,15 +123,16 @@ class TestParseMetaColumns:
             {"name": "COL_A", "alt_name": "컬럼A", "is_pk": True},
             {"name": "COL_B", "alt_name": "컬럼B", "is_pk": False},
         ]
-        columns, alt_names, pk_cols = _parse_meta_columns(raw)
-        assert columns == ["COL_A", "COL_B"]
-        assert alt_names == {"COL_A": "컬럼A", "COL_B": "컬럼B"}
+        column_infos, pk_cols = _parse_meta_columns(raw)
+        assert [c.name for c in column_infos] == ["COL_A", "COL_B"]
+        assert {c.name: c.alt_name for c in column_infos} == {
+            "COL_A": "컬럼A", "COL_B": "컬럼B",
+        }
         assert pk_cols == ["COL_A"]
 
     def test_non_list_input(self):
-        columns, alt_names, pk_cols = _parse_meta_columns(None)
-        assert columns == []
-        assert alt_names == {}
+        column_infos, pk_cols = _parse_meta_columns(None)
+        assert column_infos == []
         assert pk_cols == []
 
 
@@ -288,7 +290,7 @@ class TestExtractTables:
     """_extract_tables 함수 테스트."""
 
     def test_extracts_with_alt_names(self):
-        """한글 컬럼명(alt_name)을 column_alt_names에 저장."""
+        """한글 컬럼명(alt_name)을 ColumnInfo.alt_name에 저장."""
         step = SimpleNamespace(tool="search_table_meta")
         result = [{
             "name": "TB_LN_BAL_D",
@@ -305,8 +307,9 @@ class TestExtractTables:
         tables = _extract_tables(step, result)
         assert len(tables) == 1
         ct = tables[0]
-        assert ct.column_alt_names["BASE_YMD"] == "기준일자"
-        assert ct.column_alt_names["BAL_AMT"] == "잔액"
+        alt_map = {c.name: c.alt_name for c in ct.columns}
+        assert alt_map["BASE_YMD"] == "기준일자"
+        assert alt_map["BAL_AMT"] == "잔액"
         # PK 날짜 컬럼 식별
         assert len(ct.key_date_columns) == 1
         assert ct.key_date_columns[0].column_name == "BASE_YMD"
@@ -328,12 +331,12 @@ class TestBuildTableBlock:
         """주요 컬럼에 한글명이 포함된다."""
         ct = CandidateTable(
             table_name="TB_LN_BAL_D",
-            role="여신잔액일별",
-            relevant_columns=["BASE_YMD", "LOAN_NO", "BAL_AMT"],
-            column_alt_names={
-                "BASE_YMD": "기준일자",
-                "BAL_AMT": "잔액",
-            },
+            description="여신잔액일별",
+            columns=[
+                ColumnInfo(name="BASE_YMD", alt_name="기준일자"),
+                ColumnInfo(name="LOAN_NO"),
+                ColumnInfo(name="BAL_AMT", alt_name="잔액"),
+            ],
         )
         lines = _build_table_block(ct)
         block = "\n".join(lines)
@@ -346,7 +349,7 @@ class TestBuildTableBlock:
         """갱신 주기가 별도 라인으로 출력된다."""
         ct = CandidateTable(
             table_name="TB_X",
-            role="테스트",
+            description="테스트",
             inferred_data_refresh_hint="일별 적재(D+1)",
         )
         lines = _build_table_block(ct)
@@ -358,7 +361,7 @@ class TestBuildTableBlock:
         """관찰된 날짜 분포가 출력된다."""
         ct = CandidateTable(
             table_name="TB_X",
-            role="테스트",
+            description="테스트",
             key_date_columns=[
                 KeyDateColumn(column_name="BASE_YMD", suffix="YMD"),
             ],
@@ -383,9 +386,11 @@ class TestFormatTableForSqlPrompt:
         """3측면 정보가 SQL 프롬프트에 포함된다."""
         ct = CandidateTable(
             table_name="TB_LN_BAL_D",
-            role="여신잔액일별",
-            relevant_columns=["BASE_YMD", "BAL_AMT"],
-            column_alt_names={"BASE_YMD": "기준일자", "BAL_AMT": "잔액"},
+            description="여신잔액일별",
+            columns=[
+                ColumnInfo(name="BASE_YMD", alt_name="기준일자"),
+                ColumnInfo(name="BAL_AMT", alt_name="잔액"),
+            ],
             inferred_entity_scope="전체 여신 계좌의 일별 잔액",
             inferred_functional_usage="잔액 조회용",
             inferred_data_refresh_hint="일별 적재(D+1)",
@@ -405,23 +410,26 @@ class TestFormatTableForSqlPrompt:
         assert "기준컬럼 BASE_YMD:" in text
 
     def test_minimal_table(self):
-        """3측면 정보 없으면 기본 라인만 출력."""
+        """3측면 정보 없으면 헤더 + 컬럼만 출력."""
         ct = CandidateTable(
             table_name="TB_X",
-            role="테스트",
-            relevant_columns=["COL_A"],
+            description="테스트",
+            columns=[ColumnInfo(name="COL_A")],
         )
         text = _format_table_for_sql_prompt(ct)
         assert "TB_X" in text
-        assert "\n" not in text  # 추가 정보 없으면 한 줄
+        assert "COL_A" in text
 
     def test_schema_qualified_name(self):
         """스키마명이 있으면 스키마명.테이블명으로 출력된다."""
         ct = CandidateTable(
             table_name="TB_ADW_LNB301M",
             schema_name="ADWOWN",
-            role="여신잔액월별",
-            relevant_columns=["BASE_YM", "BAL_AMT"],
+            description="여신잔액월별",
+            columns=[
+                ColumnInfo(name="BASE_YM"),
+                ColumnInfo(name="BAL_AMT"),
+            ],
         )
         text = _format_table_for_sql_prompt(ct)
         assert "ADWOWN.TB_ADW_LNB301M" in text
@@ -430,8 +438,8 @@ class TestFormatTableForSqlPrompt:
         """스키마명 없으면 테이블명만 출력된다."""
         ct = CandidateTable(
             table_name="TB_LOAN_INFO",
-            role="여신기본",
-            relevant_columns=["LOAN_NO"],
+            description="여신기본",
+            columns=[ColumnInfo(name="LOAN_NO")],
         )
         text = _format_table_for_sql_prompt(ct)
         assert "TB_LOAN_INFO" in text
@@ -470,7 +478,7 @@ class TestBuildTableBlockWithSchema:
         ct = CandidateTable(
             table_name="TB_ADW_LNB301M",
             schema_name="ADWOWN",
-            role="여신잔액월별",
+            description="여신잔액월별",
         )
         lines = _build_table_block(ct)
         block = "\n".join(lines)

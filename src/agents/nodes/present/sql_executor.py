@@ -31,7 +31,11 @@ from src.config import settings
 from src.connectors.manager import get_connector_manager
 from src.utils.logger import get_logger
 from src.utils.security import validate_sql_safety
-from src.utils.tracker import get_current_tracker
+from src.utils.truncate import format_sql
+from src.utils.tracker.dispatch import (
+    dispatch_tracking_event,
+    CONTEXT_SQL_EXECUTED,
+)
 
 logger = get_logger(__name__)
 
@@ -40,7 +44,10 @@ async def execute_sql_node(
     state: PipelineState,
 ) -> dict:
     """검증된 SQL을 실행한다."""
-    logger.info("SQL 실행 시작", sql=state.reason.validated_sql)
+    logger.info(
+        "SQL 실행 시작",
+        sql="\n" + format_sql(state.reason.validated_sql or ""),
+    )
 
     # 이중 방어
     is_safe, safety_errors = validate_sql_safety(
@@ -81,25 +88,23 @@ async def execute_sql_node(
             execution_time_ms=elapsed,
         )
 
-        tracker = get_current_tracker()
-        if tracker and tracker.enabled:
-            tracker.track_context_retrieval(
-                source="info_db_execute",
-                query=state.reason.validated_sql,
-                results_count=result.row_count,
-                results_summary=[
-                    f"컬럼: {', '.join(columns)}",
-                    f"행 수: {result.row_count}건",
-                    f"소요: {round(elapsed, 1)}ms",
-                    f"절삭: {truncated}",
-                    *(
-                        [f"샘플: {rows[0]}"]
-                        if rows
-                        else []
-                    ),
-                ],
-                latency_ms=elapsed,
-            )
+        await dispatch_tracking_event(CONTEXT_SQL_EXECUTED, {
+            "source": "info_db_execute",
+            "query": state.reason.validated_sql,
+            "results_count": result.row_count,
+            "results_summary": [
+                f"컬럼: {', '.join(columns)}",
+                f"행 수: {result.row_count}건",
+                f"소요: {round(elapsed, 1)}ms",
+                f"절삭: {truncated}",
+                *(
+                    [f"샘플: {rows[0]}"]
+                    if rows
+                    else []
+                ),
+            ],
+            "latency_ms": elapsed,
+        })
 
         logger.info(
             "SQL 실행 완료",

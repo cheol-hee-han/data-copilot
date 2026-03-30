@@ -25,6 +25,7 @@ from src.config import settings
 from src.connectors.interfaces import DatabaseConnector
 from src.connectors.dummy_data import generate_dummy_data
 from src.utils.logger import get_logger
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -35,6 +36,14 @@ class ImpalaConnector(DatabaseConnector):
     HiveServer2 Thrift 프로토콜로 Impala 데몬에 연결한다.
     impyla(동기)를 asyncio.to_thread()로 래핑하여 async 인터페이스를 제공한다.
     """
+
+    @property
+    def dialect(self) -> str:
+        return "hive"
+
+    @property
+    def default_schema(self) -> str:
+        return "BDPOWN"
 
     def __init__(self, use_dummy: bool = True) -> None:
         self._use_dummy = use_dummy
@@ -129,7 +138,7 @@ class ImpalaConnector(DatabaseConnector):
         _elapsed = (_time.perf_counter() - _start) * 1000
         logger.info(
             "Impala 쿼리 실행",
-            sql=query[:80],
+            sql=truncate_log(query),
             row_count=len(rows),
             latency_ms=round(_elapsed, 1),
         )

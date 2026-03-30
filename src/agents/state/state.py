@@ -18,14 +18,21 @@ re-export 대상:
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 # ── 공유 모델 re-export (기존 import 경로 호환) ──
 from src.models.enums import (  # noqa: F401
+    ConfidenceStatus,
+    FailureType,
+    FinalStatus,
+    HypothesisStatus,
     IntentType,
+    Phase,
     QueryStatus,
+    StepStatus,
+    TableSelectionStatus,
     VisualizationType,
 )
 from src.models.context import (  # noqa: F401
@@ -46,56 +53,15 @@ from src.models.trace import (  # noqa: F401
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 타입 별칭
+# 루프 제어 상수 (config.py 설정값 참조)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-ConfidenceStatus = Literal[
-    "UNRESOLVED",
-    "CANDIDATE",
-    "PROBABLE",
-    "CONFIRMED",
-    "CONFLICTED",
-]
+from src.config import settings as _settings
 
-FailureType = Literal[
-    "no_use_case",
-    "no_table",
-    "term_unresolvable",
-    "sql_syntax",
-    "sql_semantic_local",
-    "sql_structural",
-    "empty_result",
-    "db_error",
-]
-
-ValidationOverall = Literal[
-    "SUCCESS",
-    "FAIL_SYNTAX",
-    "FAIL_SEMANTIC_LOCAL",
-    "FAIL_STRUCTURAL",
-    "FAIL_EMPTY",
-    "FAIL_DB_ERROR",
-]
-
-Phase = Literal[
-    "PLANNING",
-    "EXPLORING",
-    "VERIFYING",
-    "GENERATING",
-    "VALIDATING",
-    "REPLANNING",
-    "DONE",
-]
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 루프 제어 상수
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-MAX_TOOL_CALLS = 20
-MAX_REPLANS = 3
-MAX_GENERATES = 4
-MAX_LOCAL_FIXES = 2
+MAX_TOOL_CALLS = _settings.max_tool_calls
+MAX_REPLANS = _settings.max_replans
+MAX_GENERATES = _settings.max_generates
+MAX_LOCAL_FIXES = _settings.max_local_fixes
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -108,7 +74,7 @@ class KnowledgeItem(BaseModel):
     key: str
     value: str = ""
     confidence: float = 0.0
-    status: ConfidenceStatus = "UNRESOLVED"
+    status: ConfidenceStatus = ConfidenceStatus.UNRESOLVED
     source: str = ""
     evidence: list[str] = Field(default_factory=list)
     is_critical: bool = True
@@ -130,13 +96,11 @@ class Hypothesis(BaseModel):
 
     hypothesis_id: str
     description: str = ""
-    based_on_use_case: Optional[str] = None
+    based_on_use_case: str | None = None
     missing_terms: list[str] = Field(default_factory=list)
     priority: float = 0.5
     strategy: str = ""
-    status: Literal[
-        "PENDING", "ACTIVE", "SUCCESS", "FAILED",
-    ] = "PENDING"
+    status: HypothesisStatus = HypothesisStatus.PENDING
 
 
 class ExecutionStep(BaseModel):
@@ -147,11 +111,9 @@ class ExecutionStep(BaseModel):
     input: str
     purpose: str
     expected_output: str = ""
-    status: Literal[
-        "PENDING", "DONE", "SKIPPED", "FAILED",
-    ] = "PENDING"
-    result_ref: Optional[str] = None
-    insight: Optional[str] = None
+    status: StepStatus = StepStatus.PENDING
+    result_ref: str | None = None
+    insight: str | None = None
 
 
 class KeyDateColumn(BaseModel):
@@ -172,35 +134,86 @@ class ObservedDateColumn(BaseModel):
     date_pattern: str = ""
 
 
+class ColumnInfo(BaseModel):
+    """컬럼 상세 정보."""
+
+    name: str
+    alt_name: str = ""
+    description: str = ""
+    col_type: str = ""
+    is_pk: bool = False
+
+
 class CandidateTable(BaseModel):
     """탐색 중 발견된 후보 테이블."""
 
+    # ── 메타 원본 (ES에서 파싱) ──
     table_name: str
+    alt_name: str = ""
+    description: str = ""
     schema_name: str = ""
     db_source: str = ""
-    role: str = ""
-    relevant_columns: list[str] = Field(default_factory=list)
-    column_alt_names: dict[str, str] = Field(default_factory=dict)
+    columns: list[ColumnInfo] = Field(default_factory=list)
     join_keys: list[str] = Field(default_factory=list)
-    missing_coverage: list[str] = Field(default_factory=list)
 
-    # 기준 컬럼 (rule-based 식별)
+    # ── 관찰 사실 (rule-based, DB 쿼리) ──
     key_date_columns: list[KeyDateColumn] = Field(
         default_factory=list,
     )
-
-    # 관찰 사실 (rule-based, 검증 가능)
     observed_date_columns: list[ObservedDateColumn] = Field(
         default_factory=list,
     )
     sample_rows: list[dict] = Field(default_factory=list)
 
-    # LLM 추론 (출처 태그 부착하여 비교 프롬프트에도 전달)
+    # ── LLM 추론 (출처 구분 필요) ──
     inferred_entity_scope: str = ""
     inferred_functional_usage: str = ""
     inferred_data_refresh_hint: str = ""
     inferred_key_date_column: str = ""
     inference_confidence: float = 0.0
+
+    # ── 판정 결과 (batch_interpret 후) ──
+    selection_status: TableSelectionStatus = TableSelectionStatus.PENDING
+    selection_reason: str = ""
+
+    @classmethod
+    def from_meta(cls, meta: dict) -> CandidateTable | None:
+        """MongoDB 메타 dict → CandidateTable 변환 팩토리.
+
+        신규 필드(name, description, columns[].name)를 우선 참조하고
+        하위 호환을 위해 table_name / table_description도 폴백 지원한다.
+        테이블명이 없으면 None을 반환한다.
+        """
+        table_name = meta.get("name", "") or meta.get("table_name", "")
+        if not table_name:
+            return None
+
+        raw_cols = meta.get("columns", [])
+        col_infos: list[ColumnInfo] = []
+        if isinstance(raw_cols, list):
+            for c in raw_cols:
+                if isinstance(c, dict) and c.get("name"):
+                    col_infos.append(ColumnInfo(
+                        name=c["name"],
+                        alt_name=c.get("alt_name", ""),
+                        description=c.get("description", ""),
+                        col_type=c.get("type", ""),
+                        is_pk=bool(c.get("is_pk")),
+                    ))
+
+        from src.connectors.manager import ConnectorManager
+
+        return cls(
+            table_name=table_name,
+            alt_name=meta.get("alt_name", ""),
+            description=(
+                meta.get("description")
+                or meta.get("table_description", "")
+            ),
+            schema_name=meta.get("schema_name", ""),
+            db_source=ConnectorManager.parse_db_source(table_name),
+            columns=col_infos,
+        )
 
     @property
     def qualified_name(self) -> str:
@@ -210,41 +223,26 @@ class CandidateTable(BaseModel):
         return self.table_name
 
 
+class CodeMeta(BaseModel):
+    """코드 컬럼의 코드값 매핑 정보.
+
+    search_code_meta 결과를 컬럼 단위로 저장하여
+    sql_generator, recovery_planner 등에서 풍부한 추론에 활용한다.
+    """
+
+    column_name: str          # "LOAN_STS_CD"
+    column_desc: str = ""     # "대출상태코드"
+    codes: dict[str, str] = Field(default_factory=dict)
+    # codes 예시: {"01": "정상", "02": "연체", "03": "상환완료"}
+
+
 class DeadEnd(BaseModel):
     """실패한 탐색 경로 기록."""
 
     hypothesis_id: str
-    reason: str
-    tried_tables: list[str] = Field(default_factory=list)
-    # 부적합 판정으로 제외된 테이블
-    rejected_tables: list[str] = Field(default_factory=list)
-    tried_terms: list[str] = Field(default_factory=list)
-    failure_type: FailureType = "no_use_case"
-
-
-class ColumnMapping(BaseModel):
-    """질의 필요 정보 ↔ 테이블 컬럼 매핑."""
-
-    need: str = ""
-    table: str = ""
-    column: str = ""
-    confidence: str = "추정"
-
-
-class TableResolution(BaseModel):
-    """테이블 충족성 검증 결과."""
-
-    can_resolve: bool = False
-    column_mapping: list[ColumnMapping] = Field(
-        default_factory=list,
-    )
-    missing_info: list[str] = Field(
-        default_factory=list,
-    )
-    join_needed: bool = False
-    join_path: str = ""
-    main_table: str = ""
-    reasoning: str = ""
+    failure_type: FailureType = FailureType.NO_USE_CASE
+    reason: str = ""
+    lessons_learned: str = ""
 
 
 class LoopGuard(BaseModel):
@@ -269,22 +267,6 @@ class LoopGuard(BaseModel):
 
     def should_escalate_to_structural(self) -> bool:
         return self.local_fix_count >= MAX_LOCAL_FIXES
-
-
-class SqlValidationResult(BaseModel):
-    """3-레이어 SQL 검증 결과."""
-
-    layer1_status: Literal["PASS", "FAIL", "SKIP"] = "SKIP"
-    layer2_status: Literal["PASS", "FAIL", "SKIP"] = "SKIP"
-    layer2_passed: list[str] = Field(default_factory=list)
-    layer2_failed: list[str] = Field(default_factory=list)
-    layer2_failure_type: Optional[
-        Literal["semantic_local", "structural"]
-    ] = None
-    layer3_status: Literal["PASS", "FAIL", "SKIP"] = "SKIP"
-    layer3_row_count: Optional[int] = None
-    layer3_is_sane: Optional[bool] = None
-    overall: ValidationOverall = "SUCCESS"
 
 
 class StructuralHints(BaseModel):
@@ -381,114 +363,159 @@ class ReasoningState(BaseModel):
     """에이전틱 추론 루프의 내부 상태.
 
     PipelineState.reason 필드로 중첩되며,
-    reason 계층 노드(planner, explorer, generator 등)가 사용한다.
+    reason 계층 노드(planner → context_explorer → confidence_evaluator →
+    sql_generator → sql_validator → recovery_planner → result_finalizer)가
+    사용한다.
+
+    W/R 표기: W=기록(Write), R=참조(Read) 하는 노드.
+    약어: PLN=planner, EXP=context_explorer, EVL=confidence_evaluator,
+          GEN=sql_generator, VAL=sql_validator, RCV=recovery_planner,
+          FIN=result_finalizer
     """
 
     # ── 진행 상태 ──
-    phase: Phase = "PLANNING"
+    # W: PLN/EXP/EVL/GEN/VAL/RCV/FIN  R: pipeline 라우팅
+    phase: Phase = Phase.PLANNING
 
     # ── 플래너 산출물 ──
+    # W: PLN  R: GEN/VAL (SQL 생성 시 체크리스트)
     query_decomposition: dict = Field(default_factory=dict)
+    # W: PLN/RCV  R: RCV (PENDING 가설 소비)
     hypotheses: list[Hypothesis] = Field(
         default_factory=list,
     )
-    current_hypothesis: Optional[Hypothesis] = None
+    # W: PLN/RCV  R: RCV (FAILED 전환 시)
+    current_hypothesis: Hypothesis | None = None
+    # W: PLN/RCV  R: EXP (스텝 순차 실행)
     execution_plan: list[ExecutionStep] = Field(
         default_factory=list,
     )
-    current_step_index: int = 0
 
     # ── 누적 지식 ──
+    # W: PLN/EXP  R: EVL/GEN/VAL/RCV/FIN
     knowledge_items: list[KnowledgeItem] = Field(
         default_factory=list,
     )
+    # W: PLN/EXP (search_use_cases 결과)  R: PLN/GEN/FIN
     explored_use_cases: list[dict] = Field(
         default_factory=list,
     )
+    # W: PLN/EXP  R: GEN/VAL/RCV/FIN
     candidate_tables: list[CandidateTable] = Field(
         default_factory=list,
     )
-    confirmed_join_path: list[dict] = Field(
-        default_factory=list,
-    )
-    table_resolution: Optional[TableResolution] = None
+    # W: PLN/EXP  R: PLN/EXP/RCV (중복 검색 방지)
     searched_queries: list[str] = Field(
         default_factory=list,
     )
-    sampled_tables: list[str] = Field(
+    # W: EXP  R: RCV (도구 실행 결과 해석 누적)
+    discovered_facts: list[str] = Field(
         default_factory=list,
     )
-    # 배치 해석에서 부적합 판정된 테이블명 목록
-    rejected_tables: list[str] = Field(
-        default_factory=list,
+    # W: EXP (search_code_meta)  R: GEN/RCV (코드값 기반 SQL 추론)
+    code_map: dict[str, CodeMeta] = Field(
+        default_factory=dict,
     )
-    structural_hints: StructuralHints = Field(
-        default_factory=StructuralHints,
-    )
-
     # ── 실패 기록 ──
+    # W: RCV  R: RCV/GEN/VAL/FIN (반복 방지, 실패 상세)
     dead_ends: list[DeadEnd] = Field(
         default_factory=list,
     )
 
     # ── SQL ──
-    generated_sql: Optional[str] = None
-    validated_sql: Optional[str] = None
-    sql_fix_instruction: Optional[str] = None
-    sql_validation_result: Optional[SqlValidationResult] = None
+    # W: GEN  R: VAL/FIN
+    generated_sql: str | None = None
+    # W: VAL  R: FIN/pipeline 라우팅
+    validated_sql: str | None = None
+
+    # ── SQL 검증 상세 (Layer2b PASS 시 체크 항목별 판정 사유) ──
+    # W: VAL(PASS)  R: insight_builder
+    # 구조: {"check_name": {"pass": bool, "detail": str}}
+    validation_checks: dict[str, Any] = Field(
+        default_factory=dict,
+    )
+
+    # ── 실패 맥락 (VAL/EVL → pipeline 라우팅/GEN/RCV) ──
+    # W: VAL/EVL  R: pipeline 라우팅, GEN(fix 피드백), RCV(DeadEnd)
+    failure_type: FailureType | None = None
+    # W: VAL/EVL  R: GEN(fix 피드백), RCV(DeadEnd reason)
+    failure_reason: str | None = None
 
     # ── 루프 제어 ──
+    # W: EXP/RCV/GEN/VAL  R: EVL (종료 조건), pipeline 라우팅
     loop_guard: LoopGuard = Field(
         default_factory=LoopGuard,
     )
 
     # ── Fast-Path ──
+    # W: PLN  R: pipeline 라우팅 (_route_after_planner)
     fast_path_triggered: bool = False
 
     # ── 최종 출력 ──
-    final_status: Literal[
-        "success", "failure", "pending",
-    ] = "pending"
+    # W: RCV/FIN  R: pipeline 라우팅
+    final_status: FinalStatus = FinalStatus.PENDING
+    # W: RCV/FIN  R: 외부 (응답 메시지)
     exploration_summary: str = ""
 
-    # ── 외부 캐시 참조 ──
-    cache_refs: dict[str, str] = Field(
-        default_factory=dict,
-    )
-
     # ── 헬퍼 메서드 ──
+
     def get_confirmed_knowledge(self) -> list[KnowledgeItem]:
         """CONFIRMED 상태인 지식 항목만 반환."""
         return [
             ki for ki in self.knowledge_items
-            if ki.status == "CONFIRMED"
+            if ki.status == ConfidenceStatus.CONFIRMED
         ]
+
+    def format_confirmed_text(self) -> str:
+        """CONFIRMED 지식 항목을 프롬프트용 텍스트로 직렬화."""
+        confirmed = self.get_confirmed_knowledge()
+        if not confirmed:
+            return "(확인된 항목 없음)"
+        return "\n".join(
+            f"- {ki.key}: {ki.value} ({ki.source})"
+            for ki in confirmed
+        )
+
+    def format_dead_ends_text(self) -> str:
+        """dead_ends를 프롬프트용 텍스트로 직렬화."""
+        if not self.dead_ends:
+            return "(없음)"
+        lines: list[str] = []
+        for de in self.dead_ends:
+            line = f"- [{de.failure_type}] {de.reason}"
+            if de.lessons_learned:
+                line += f"\n  교훈: {de.lessons_learned}"
+            lines.append(line)
+        return "\n".join(lines)
 
     def get_unresolved_knowledge(self) -> list[KnowledgeItem]:
         """UNRESOLVED 상태인 지식 항목만 반환."""
         return [
             ki for ki in self.knowledge_items
-            if ki.status == "UNRESOLVED"
+            if ki.status == ConfidenceStatus.UNRESOLVED
         ]
 
     def get_pending_hypotheses(self) -> list[Hypothesis]:
         """PENDING 상태인 가설만 반환."""
         return [
             h for h in self.hypotheses
-            if h.status == "PENDING"
+            if h.status == HypothesisStatus.PENDING
         ]
 
 
 def should_terminate(reason: ReasoningState) -> bool:
-    """루프 강제 종료 조건."""
+    """루프 강제 종료 조건.
+
+    5가지 조건 중 하나라도 충족하면 추론 루프를 종료한다.
+    """
     g = reason.loop_guard
     pending = reason.get_pending_hypotheses()
     return (
-        g.total_tool_calls >= MAX_TOOL_CALLS
-        or g.replan_count >= MAX_REPLANS
-        or g.generate_attempts >= MAX_GENERATES
-        or reason.final_status == "failure"
-        or (
+        g.total_tool_calls >= MAX_TOOL_CALLS      # 도구 호출 총량 한도
+        or g.replan_count >= MAX_REPLANS            # 재계획 횟수 한도
+        or g.generate_attempts >= MAX_GENERATES     # SQL 생성 시도 한도
+        or reason.final_status == FinalStatus.FAILURE  # 명시적 실패 선언
+        or (                                        # 가설 소진: 시도할 경로 없음
             len(pending) == 0
             and reason.current_hypothesis is None
         )
@@ -504,51 +531,76 @@ class PipelineState(BaseModel):
 
     3계층(interpret → reason → present)의 모든 데이터를 보유한다.
     reason 계층의 에이전틱 추론 상태는 reason 필드에 중첩된다.
+
+    W/R 표기: W=기록, R=참조 하는 노드/계층.
+    약어: PRE=preprocess, HIS=resolve_history, INT=classify_intent,
+          NRM=normalize_query, CLR=clarify, EXE=execute_sql,
+          ANL=analyze_data, FMT=format_response
     """
 
     # ── 공통 ──
+    # W: runner (초기값)  R: PRE/HIS
     user_input: str = ""
     session_id: str = ""
+    # W: runner (초기값)  R: HIS (대화 맥락)
     conversation_history: list[dict[str, str]] = Field(
         default_factory=list,
     )
 
     # ── Interpret 계층 ──
+    # W: PRE  R: INT/NRM/CLR/reason 계층 전체
     preprocessed_input: str = ""
+    # W: INT  R: pipeline 라우팅/CLR/NRM
     intent: IntentType = IntentType.UNKNOWN
+    # W: INT  R: 로깅
     intent_confidence: float = 0.0
+    # W: INT  R: 로깅
     query_category: str = ""
+    # W: NRM  R: reason 계층 (planner 시드)
     normalized_query: Any = None
+    # W: CLR/result_finalizer  R: pipeline 라우팅/runner
     clarification_question: str = ""
+    # W: runner (재진입 시)  R: HIS
     clarification_response: str = ""
+    # W: CLR/result_finalizer  R: pipeline 라우팅/runner
     awaiting_clarification: bool = False
+    # W: CLR/result_finalizer  R: pipeline 라우팅 (max_turns 체크)
     clarification_turns: int = 0
 
     # ── Reason 계층 (에이전틱 추론) ──
+    # W/R: reason 계층 전체 (상세는 ReasoningState 참조)
     reason: ReasoningState = Field(
         default_factory=ReasoningState,
     )
 
     # ── Present 계층 ──
+    # W: result_finalizer  R: EXE/ANL/FMT
     context: ContextInfo = Field(
         default_factory=ContextInfo,
     )
+    # W: EXE  R: ANL/FMT/runner
     sql_result: SQLResult = Field(
         default_factory=SQLResult,
     )
+    # W: ANL  R: FMT/runner
     analysis_result: AnalysisResult = Field(
         default_factory=AnalysisResult,
     )
+    # W: ANL  R: runner
     visualization: VisualizationData = Field(
         default_factory=VisualizationData,
     )
+    # W: FMT/error_end  R: runner (최종 응답)
     formatted_response: str = ""
 
     # ── 상태 관리 ──
+    # W: 각 노드 (에러 시)  R: pipeline 라우팅
     status: QueryStatus = QueryStatus.PENDING
+    # W: 각 노드 (에러 시)  R: error_end/runner
     error_message: str = ""
 
     # ── 추론 추적 로그 ──
+    # W: 각 노드 (add_trace)  R: FMT/runner
     trace_log: list[TraceEntry] = Field(
         default_factory=list,
     )

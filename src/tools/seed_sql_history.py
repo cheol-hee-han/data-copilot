@@ -291,9 +291,12 @@ class SQLHistorySeeder:
             VectorParams,
         )
 
-        from src.services.search_query_embedder import get_search_query_embedder
+        from src.connectors.impl.qdrant_connector import (
+            QdrantConnector,
+        )
 
-        emb_service = get_search_query_embedder()
+        # 임베딩은 QdrantConnector에 통합됨
+        qdrant = QdrantConnector(use_dummy=False)
         collection = settings.qdrant_sql_history_collection
 
         # Qdrant 클라이언트 (동기)
@@ -331,7 +334,7 @@ class SQLHistorySeeder:
             texts = [r.enriched for r in chunk]
 
             start = time.perf_counter()
-            embeddings = emb_service.encode_batch(texts)
+            embeddings = qdrant.encode_batch(texts)
             embed_ms = (time.perf_counter() - start) * 1000
 
             points: list[PointStruct] = []
@@ -380,9 +383,11 @@ class SQLHistorySeeder:
             SparseVector,
         )
 
-        from src.services.search_query_embedder import get_search_query_embedder
+        from src.connectors.impl.qdrant_connector import (
+            QdrantConnector,
+        )
 
-        emb_service = get_search_query_embedder()
+        qdrant = QdrantConnector(use_dummy=False)
         collection = settings.qdrant_sql_history_collection
 
         client = QdrantClient(
@@ -392,7 +397,7 @@ class SQLHistorySeeder:
         logger.info("저장 검증 시작", sample_count=len(_VERIFY_QUERIES))
 
         for query in _VERIFY_QUERIES:
-            emb = emb_service.encode(query)
+            emb = qdrant.encode(query)
 
             results = client.query_points(
                 collection_name=collection,

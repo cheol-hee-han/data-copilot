@@ -47,6 +47,16 @@ class SearchConnector(BaseConnector):
 class DatabaseConnector(BaseConnector):
     """DB 커넥터 인터페이스."""
 
+    @property
+    @abstractmethod
+    def dialect(self) -> str:
+        """sqlglot 호환 dialect을 반환한다 ('postgres' | 'tsql' | 'hive')."""
+
+    @property
+    @abstractmethod
+    def default_schema(self) -> str:
+        """이 커넥터의 기본 스키마명을 반환한다 (없으면 빈 문자열)."""
+
     @abstractmethod
     async def execute_query(
         self, query: str, params: dict[str, Any] | None = None

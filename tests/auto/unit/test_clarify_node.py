@@ -86,12 +86,12 @@ def test_build_messages_format():
     from src.agents.nodes.interpret.clarifier import _build_messages
 
     state = _make_state(preprocessed_input="어떤 데이터가 있어?")
-    messages = _build_messages(state)
+    messages, _ = _build_messages(state)
 
     passed = (
         len(messages) >= 1
         and messages[-1]["role"] == "user"
-        and messages[-1]["content"] == "어떤 데이터가 있어?"
+        and "어떤 데이터가 있어?" in messages[-1]["content"]
     )
     log_test_case(
         logger,
@@ -117,7 +117,7 @@ def test_build_messages_limits_history():
         preprocessed_input="최신 질의",
         conversation_history=history,
     )
-    messages = _build_messages(state)
+    messages, _ = _build_messages(state)
 
     # 히스토리 4턴 + 현재 입력 1 = 최대 5
     # 히스토리는 최근 4턴이므로 "질의 2" ~ "질의 5" 포함, "질의 1" 제외
@@ -144,9 +144,9 @@ def test_build_messages_no_history():
     from src.agents.nodes.interpret.clarifier import _build_messages
 
     state = _make_state(preprocessed_input="고객 수 알려줘")
-    messages = _build_messages(state)
+    messages, _ = _build_messages(state)
 
-    passed = len(messages) == 1 and messages[0]["content"] == "고객 수 알려줘"
+    passed = len(messages) == 1 and "고객 수 알려줘" in messages[0]["content"]
     log_test_case(
         logger,
         "test_build_messages_no_history",
@@ -171,12 +171,12 @@ def test_build_messages_with_history_included():
         preprocessed_input="후속 질의",
         conversation_history=history,
     )
-    messages = _build_messages(state)
+    messages, _ = _build_messages(state)
 
     passed = (
         len(messages) == 4
         and messages[0]["content"] == "이전 질의"
-        and messages[-1]["content"] == "후속 질의"
+        and "후속 질의" in messages[-1]["content"]
     )
     log_test_case(
         logger,
@@ -201,7 +201,7 @@ def test_build_messages_conversation_history_used():
         preprocessed_input="월별로 알려줘",
         conversation_history=history,
     )
-    messages = _build_messages(state)
+    messages, _ = _build_messages(state)
 
     # assistant role 이 유지되는지 확인
     roles = [m["role"] for m in messages]

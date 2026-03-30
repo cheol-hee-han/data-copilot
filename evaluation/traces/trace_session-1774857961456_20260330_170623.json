@@ -1,0 +1,594 @@
+{
+  "run_id": "session-1774857961456",
+  "user_input": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+  "session_id": "session-1774857961456",
+  "start_time": "2026-03-30 17:06:04.413",
+  "end_time": "2026-03-30 17:06:23.204",
+  "total_duration_ms": 18790.965699998196,
+  "final_intent": "clarification_needed",
+  "final_status": "awaiting_clarification",
+  "final_response_summary": "어떤 기간 기준으로 지점별 여신 잔액을 확인하시겠어요?\n\n1) 오늘(최신) 기준 잔액\n2) 이번 달 말 기준 잔액\n3) 지난달 말 기준 잔액\n4) 다른 기간 (직접 입력해 주세요)",
+  "error_message": "",
+  "nodes": [
+    {
+      "node": "preprocess",
+      "input_summary": {},
+      "output_summary": {
+        "preprocessed_input": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+        "status": "preprocessing",
+        "trace_log": "(list, len=1)"
+      },
+      "duration_ms": 4.1,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-30 17:06:04.507"
+    },
+    {
+      "node": "resolve_history",
+      "input_summary": {},
+      "output_summary": {
+        "awaiting_clarification": false,
+        "clarification_response": "",
+        "clarification_question": "",
+        "trace_log": "(list, len=2)"
+      },
+      "duration_ms": 3249.4,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-30 17:06:07.757"
+    },
+    {
+      "node": "classify_intent",
+      "input_summary": {},
+      "output_summary": {
+        "intent": "data_extraction",
+        "intent_confidence": 0.95,
+        "query_category": "DATA_EXTRACTION",
+        "status": "intent_classified",
+        "trace_log": "(list, len=3)"
+      },
+      "duration_ms": 2275.9,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-30 17:06:10.034"
+    },
+    {
+      "node": "normalize_query",
+      "input_summary": {},
+      "output_summary": {
+        "normalized_query": {
+          "original_query": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+          "rewritten_query": "지점별 여신 잔액 합계를 조회하여 합계가 큰 순서로 지점명과 여신잔액을 상위 10개 출력한다",
+          "intent": {
+            "primary": "RANK",
+            "secondary": [
+              "AGGREGATE"
+            ]
+          },
+          "entities": [
+            {
+              "term": "지점",
+              "type": "DIRECT",
+              "confidence": "MEDIUM",
+              "normalized_term": "지점",
+              "note": null
+            },
+            {
+              "term": "여신",
+              "type": "DIRECT",
+              "confidence": "MEDIUM",
+              "normalized_term": "대출",
+              "note": null
+            }
+          ],
+          "measures": [
+            {
+              "term": "잔액",
+              "measure_type": "RAW",
+              "agg_function": "SUM",
+              "confidence": "MEDIUM",
+              "normalized_term": "잔액",
+              "note": "여신 잔액의 합계"
+            }
+          ],
+          "dimensions": [
+            {
+              "term": "지점",
+              "role": "GROUP",
+              "granularity": "INDIVIDUAL",
+              "confidence": "MEDIUM",
+              "normalized_term": "지점",
+              "is_time_dimension": false,
+              "note": "지점별 그룹화"
+            },
+            {
+              "term": "지점명",
+              "role": "DISPLAY",
+              "granularity": "INDIVIDUAL",
+              "confidence": "MEDIUM",
+              "normalized_term": "지점명",
+              "is_time_dimension": false,
+              "note": null
+            }
+          ],
+          "filters": [],
+          "time": {
+            "type": "NONE",
+            "base_period": null,
+            "compare_period": null
+          },
+          "modifiers": [
+            {
+              "type": "RANK",
+              "direction": "DESC",
+              "limit": 10,
+              "by": "잔액",
+              "note": "상위 10개"
+            }
+          ],
+          "output_hint": {
+            "format": "SUMMARY",
+            "doc_type": null,
+            "expected_columns": [
+              "지점명",
+              "여신잔액"
+            ],
+            "confidence": "MEDIUM",
+            "note": null
+          },
+          "ambiguities": [
+            "조회 기준 시점(기준일)이 명시되지 않음 — 시스템 당일 기준 여신 잔액으로 해석"
+          ],
+          "search_keywords": {
+            "meta_search": [
+              "지점",
+              "지점명",
+              "여신",
+              "대출",
+              "잔액",
+              "여신잔액"
+            ],
+            "vector_search": "지점별 여신 잔액 합계 상위 10개 조회",
+            "sql_history_search": "지점별 여신 잔액 합계를 조회하여 합계가 큰 순서로 지점명과 여신잔액을 상위 10개 출력한다 순위 대출 지점명별"
+          }
+        },
+        "status": "query_normalized",
+        "trace_log": "(list, len=4)",
+        "intent": "clarification_needed"
+      },
+      "duration_ms": 10980.4,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-30 17:06:21.016"
+    },
+    {
+      "node": "clarify",
+      "input_summary": {},
+      "output_summary": {
+        "clarification_question": "어떤 기간 기준으로 지점별 여신 잔액을 확인하시겠어요?\n\n1) 오늘(최신) 기준 잔액\n2) 이번 달 말 기준 잔액\n3) 지난달 말 기준 잔액\n4) 다른 기간 (직접 입력해 주세요)",
+        "formatted_response": "어떤 기간 기준으로 지점별 여신 잔액을 확인하시겠어요?\n\n1) 오늘(최신) 기준 잔액\n2) 이번 달 말 기준 잔액\n3) 지난달 말 기준 잔액\n4) 다른 기간 (직접 입력해 주세요)",
+        "awaiting_clarification": true,
+        "clarification_turns": 1,
+        "status": "awaiting_clarification",
+        "trace_log": "(list, len=5)"
+      },
+      "duration_ms": 2186.3,
+      "status": "success",
+      "error_message": "",
+      "timestamp": "2026-03-30 17:06:23.203"
+    }
+  ],
+  "llm_calls": [
+    {
+      "node": "이력해소",
+      "prompt_summary": "[S] 당신은 은행 데이터 분석 시스템의 대화 맥락 판단 전문가입니다.\n사용자의 현재 입력이 이전 대화에 이어지는 것인지 판단하고, 필요한 경우 사용자 질의(query)를 재작성하세요.\n\n\n[판단 기준]\n\nCONTINUE — '현재 입력'이 '이전 대화'의 연장선\n  ✓ 이전 | [U] [이전 대화]\n\n  사용자: 지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘\n\n\n[현재 입력]\n\n지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+      "prompt_variables": {
+        "query": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+        "history": "  사용자: 지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘"
+      },
+      "prompt_tokens": 1407,
+      "response_text": "{\n  \"decision\": \"NEW\",\n  \"query\": \"지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘\"\n}",
+      "response_tokens": 40,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2224.5160000165924,
+      "timestamp": "2026-03-30 17:06:07.755"
+    },
+    {
+      "node": "intent_gate",
+      "prompt_summary": "[S] 당신은 사용자 입력의 의도를 분류하는 전문가입니다.\n사용자가 데이터 분석 시스템에 입력한 문장을 받아, 아래 6개 카테고리 중 하나로 분류합니다.\n\n[분류 카테고리]\n\nDATA_ANALYSIS — 데이터에 대한 분석·비교·인사이트·판단을 요청\n  판별 기준: 아래 중  | [U] 다음 입력을 분류해 주세요.\n\n[입력]\n지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘\n\nJSON만 출력하세요.",
+      "prompt_variables": {
+        "query": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘"
+      },
+      "prompt_tokens": 1062,
+      "response_text": "{\n  \"category\": \"DATA_EXTRACTION\",\n  \"confidence\": \"HIGH\",\n  \"reason\": \"지점별 여신 잔액이라는 구체적 수치와 상위 10개라는 조회 조건을 명시하여 데이터를 추출하려는 의도가 명확함\"\n}",
+      "response_tokens": 64,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2272.284899983788,
+      "timestamp": "2026-03-30 17:06:10.031"
+    },
+    {
+      "node": "normalization_phase1",
+      "prompt_summary": "[S] 당신은 은행 업무 자연어 질의를 구조화된 의미 슬롯으로 분해하는 전문가입니다.\n사용자가 데이터 추출 또는 분석을 요청하는 자연어 문장을 입력하면,\n이를 아래 8개 슬롯으로 분해하여 JSON으로 출력합니다.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ | [U] 다음 자연어 질의를 8-Slot 구조로 분해하여 JSON으로 출력해 주세요.\n\n[입력 질의]\n지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘\n\n[오늘 날짜]\n2026-03-30\n\n[동의어 사전]\n\n[measures]\n  \"여신잔액\" ← 대출잔액, 대출금액, ",
+      "prompt_variables": {
+        "query": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+        "today": "2026-03-30",
+        "synonym_dict": "\n[measures]\n  \"여신잔액\" ← 대출잔액, 대출금액, 론잔액, 여신금액, 대여금잔액\n  \"신규여신액\" ← 신규대출액, 신규대출금액, 신규실행액, 여신실행액\n  \"연체금액\" ← 연체액, 연체잔액, 부실채권액\n  \"연체율\" ← 연체비율, 연체률\n  \"부실채권비율\" ← NPL비율, NPL율, 고정이하여신비율\n  \"예금잔액\" ← 수신잔액, 예금금액, 수신금액, 예적금잔액\n  \"신규수신액\" ← 신규예금액, 신규예치액\n  \"거래금액\" ← 이체금액, 송금금액, 거래액, 입출금액\n  \"거래건수\" ← 이체건수, 송금건수, 트랜잭션수\n  \"고객수\" ← 회원수, 가입자수, 고객건수, 명수\n  \"신규고객수\" ← 신규가입자수, 신규회원수\n  \"BIS비율\" ← BIS자기자본비율, 자기자본비율, BIS ratio\n  \"NIM\" ← 순이자마진, net interest margin\n  \"LCR\" ← 유동성커버리지비율, liquidity coverage ratio\n  \"ROA\" ← 총자산이익률, 총자산수익률\n  \"ROE\" ← 자기자본이익률, 자기자본수익률\n  \"매출액\" ← 매출, 수익, 수익금, revenue\n  \"이익\" ← 영업이익, 순이익, 당기순이익, profit\n  \"비용\" ← 원가, 경비, 지출, cost\n  \"건수\" ← 횟수, 카운트, count\n  \"금액\" ← 액수, 합계, 총액\n  \"잔액\" ← 밸런스, balance, 현재잔액\n  \"비율\" ← 퍼센트, 비중, %, 점유율\n  \"평균\" ← 평균값, avg, mean\n\n[entities]\n  \"고객\" ← 회원, 차주, 예금주, 수신고객, 여신고객, 거래고객, customer\n  \"개인고객\" ← 개인, 개인회원, 리테일고객, 소매고객\n  \"기업고객\" ← 법인, 기업, 법인고객, 기업체, 사업자\n  \"계좌\" ← 어카운트, 통장, 예금계좌, 수신계좌, account\n  \"대출\" ← 여신, 론, 대여금, 대출금, credit, loan\n  \"예금\" ← 수신, 예적금, 예치금, deposit\n  \"거래\" ← 트랜잭션, 이체, 송금, 입출금, transaction\n  \"카드\" ← 신용카드, 체크카드, 카드거래, card\n  \"지점\" ← 영업점, 지사, 브랜치, branch, 영업부서\n  \"직원\" ← 행원, 임직원, 담당자, 사원, employee\n  \"상품\" ← 금융상품, 상품코드, product\n  \"담보\" ← 담보물, 보증, collateral\n\n[dimensions]\n  \"지역\" ← 지방, 권역, 시도, 도시, 영업구역, area, region\n  \"기간\" ← 기간, 날짜, 일자, 년도, 연도, 분기, 반기, 월, 주, 일\n  \"채널\" ← 채널, 경로, 유입경로, channel, 영업채널\n  \"등급\" ← 등급, 신용등급, 고객등급, tier, grade, VIP\n  \"부서\" ← 부서, 팀, 본부, 실, department\n  \"상품유형\" ← 상품종류, 상품분류, 상품군, product type\n\n[time]\n  \"올해\" ← 올해, 금년, 이번 해, 이번 년도\n  \"작년\" ← 작년, 전년, 지난해, 전년도, 직전년도\n  \"이번달\" ← 이번달, 이번 달, 당월, 금월\n  \"지난달\" ← 지난달, 지난 달, 전월, 전달, 직전월\n  \"이번분기\" ← 이번분기, 이번 분기, 당분기, 금분기\n  \"지난분기\" ← 지난분기, 지난 분기, 전분기, 직전분기\n  \"상반기\" ← 상반기, 1반기, H1\n  \"하반기\" ← 하반기, 2반기, H2"
+      },
+      "prompt_tokens": 8424,
+      "response_text": "{\n  \"original_query\": \"지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘\",\n  \"rewritten_query\": \"지점별로 여신(대출) 잔액의 합계를 집계하여, 합계가 큰 순서로 상위 10개 지점의 지점명과 잔액을 조회한다\",\n  \"intent\": {\n    \"primary\": \"RANK\",\n    \"secondary\": [\n      \"AGGREGATE\"\n    ]\n  },\n  \"entities\": [\n    {\n      \"term\": \"지점\",\n      \"type\": \"DIRECT\",\n      \"normalized_term\": \"지점\",\n      \"note\": null\n    },\n    {\n      \"term\": \"여신\",\n      \"type\": \"DIRECT\",\n      \"normalized_term\": \"대출\",\n      \"note\": null\n    }\n  ],\n  \"measures\": [\n    {\n      \"term\": \"잔액\",\n      \"measure_type\": \"RAW\",\n      \"agg_function\": \"SUM\",\n      \"normalized_term\": \"잔액\",\n      \"note\": \"여신 잔액의 합계\"\n    }\n  ],\n  \"dimensions\": [\n    {\n      \"term\": \"지점\",\n      \"role\": \"GROUP\",\n      \"granularity\": \"INDIVIDUAL\",\n      \"normalized_term\": \"지점\",\n      \"is_time_dimension\": false,\n      \"note\": \"지점별 그룹화\"\n    },\n    {\n      \"term\": \"지점명\",\n      \"role\": \"DISPLAY\",\n      \"granularity\": \"INDIVIDUAL\",\n      \"normalized_term\": null,\n      \"is_time_dimension\": false,\n      \"note\": null\n    }\n  ],\n  \"filters\": [],\n  \"time\": {\n    \"type\": \"NONE\",\n    \"base_period\": null,\n    \"compare_period\": null\n  },\n  \"modifiers\": [\n    {\n      \"type\": \"RANK\",\n      \"direction\": \"DESC\",\n      \"limit\": 10,\n      \"by\": \"잔액\",\n      \"note\": \"상위 10개\"\n    }\n  ],\n  \"output_hint\": {\n    \"format\": \"SUMMARY\",\n    \"doc_type\": null,\n    \"expected_columns\": [\n      \"지점명\",\n      \"여신잔액\"\n    ],\n    \"note\": null\n  },\n  \"ambiguities\": [\n    \"조회 기준 시점(기준일)이 명시되지 않음 — 시스템 당일 기준 여신 잔액으로 해석\"\n  ],\n  \"search_keywords\": {\n    \"meta_search\": [\n      \"지점\",\n      \"지점명\",\n      \"여신\",\n      \"대출\",\n      \"잔액\"\n    ],\n    \"vector_search\": \"지점별 여신 잔액 합계 상위 10개 조회\"\n  }\n}",
+      "response_tokens": 696,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 6552.600199996959,
+      "timestamp": "2026-03-30 17:06:16.589"
+    },
+    {
+      "node": "normalization_phase2",
+      "prompt_summary": "[S] 당신은 구조화된 질의 분석 결과를 교차 검증하는 전문 검수자입니다.\nPhase 1에서 생성된 정규화 JSON을 받아, 아래 검증 규칙에 따라 수정된 JSON을 출력합니다.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[교차 | [U] 아래는 원본 질의와 Phase 1에서 생성된 정규화 JSON입니다.\n교차 검증 규칙 R1~R12를 모두 적용하여 수정된 JSON을 출력해 주세요.\n\n[원본 질의]\n지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘\n\n[Phase 1 결과 JSON]\n{\n  \"or",
+      "prompt_variables": {
+        "intent": "clarification_needed",
+        "ambiguities_block": "[ambiguities]: 조회 기준 시점(기준일)이 명시되지 않음 — 시스템 당일 기준 여신 잔액으로 해석\n",
+        "query": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘"
+      },
+      "prompt_tokens": 1716,
+      "response_text": "{\n  \"original_query\": \"지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘\",\n  \"rewritten_query\": \"지점별 여신 잔액 합계를 조회하여 합계가 큰 순서로 지점명과 여신잔액을 상위 10개 출력한다\",\n  \"intent\": {\n    \"primary\": \"RANK\",\n    \"secondary\": [\n      \"AGGREGATE\"\n    ]\n  },\n  \"entities\": [\n    {\n      \"term\": \"지점\",\n      \"type\": \"DIRECT\",\n      \"normalized_term\": \"지점\",\n      \"note\": null\n    },\n    {\n      \"term\": \"여신\",\n      \"type\": \"DIRECT\",\n      \"normalized_term\": \"대출\",\n      \"note\": null\n    }\n  ],\n  \"measures\": [\n    {\n      \"term\": \"잔액\",\n      \"measure_type\": \"RAW\",\n      \"agg_function\": \"SUM\",\n      \"normalized_term\": \"잔액\",\n      \"note\": \"여신 잔액의 합계\"\n    }\n  ],\n  \"dimensions\": [\n    {\n      \"term\": \"지점\",\n      \"role\": \"GROUP\",\n      \"granularity\": \"INDIVIDUAL\",\n      \"normalized_term\": \"지점\",\n      \"is_time_dimension\": false,\n      \"note\": \"지점별 그룹화\"\n    },\n    {\n      \"term\": \"지점명\",\n      \"role\": \"DISPLAY\",\n      \"granularity\": \"INDIVIDUAL\",\n      \"normalized_term\": \"지점명\",\n      \"is_time_dimension\": false,\n      \"note\": null\n    }\n  ],\n  \"filters\": [],\n  \"time\": {\n    \"type\": \"NONE\",\n    \"base_period\": null,\n    \"compare_period\": null\n  },\n  \"modifiers\": [\n    {\n      \"type\": \"RANK\",\n      \"direction\": \"DESC\",\n      \"limit\": 10,\n      \"by\": \"잔액\",\n      \"note\": \"상위 10개\"\n    }\n  ],\n  \"output_hint\": {\n    \"format\": \"SUMMARY\",\n    \"doc_type\": null,\n    \"expected_columns\": [\n      \"지점명\",\n      \"여신잔액\"\n    ],\n    \"note\": null\n  },\n  \"ambiguities\": [\n    \"조회 기준 시점(기준일)이 명시되지 않음 — 시스템 당일 기준 여신 잔액으로 해석\"\n  ],\n  \"search_keywords\": {\n    \"meta_search\": [\n      \"지점\",\n      \"지점명\",\n      \"여신\",\n      \"대출\",\n      \"잔액\",\n      \"여신잔액\"\n    ],\n    \"vector_search\": \"지점별 여신 잔액 합계 상위 10개 조회\"\n  }\n}",
+      "response_tokens": 698,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 4421.168800006853,
+      "timestamp": "2026-03-30 17:06:21.012"
+    },
+    {
+      "node": "",
+      "prompt_summary": "[S] <role>\n당신은 은행 직원의 요청을 돕는 AI 어시스턴트입니다.\n사용자의 의도 유형(intent)과 입력이 주어집니다. intent에 따라 응답하세요.\n</role>\n\n<intent_actions>\nclarification_needed — 모호한 데이터 요청\n  → | [U] 지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘 | [U] [intent]: clarification_needed\n[ambiguities]: 조회 기준 시점(기준일)이 명시되지 않음 — 시스템 당일 기준 여신 잔액으로 해석\n[사용자 입력]: 지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+      "prompt_variables": {},
+      "prompt_tokens": 1453,
+      "response_text": "어떤 기간 기준으로 지점별 여신 잔액을 확인하시겠어요?\n\n1) 오늘(최신) 기준 잔액\n2) 이번 달 말 기준 잔액\n3) 지난달 말 기준 잔액\n4) 다른 기간 (직접 입력해 주세요)",
+      "response_tokens": 58,
+      "model": "gemini-3.1-flash-lite-preview",
+      "latency_ms": 2183.9410999964457,
+      "timestamp": "2026-03-30 17:06:23.201"
+    }
+  ],
+  "decisions": [
+    {
+      "node": "classify_intent",
+      "decision_type": "intent_classification",
+      "chosen": "data_extraction",
+      "alternatives": [],
+      "confidence": 0.95,
+      "reason": "category=DATA_EXTRACTION, 지점별 여신 잔액이라는 구체적 수치와 상위 10개라는 조회 조건을 명시하여 데이터를 추출하려는 의도가 명확함",
+      "detail": {},
+      "timestamp": "2026-03-30 17:06:10.033"
+    },
+    {
+      "node": "normalize_query",
+      "decision_type": "normalization",
+      "chosen": "RANK",
+      "alternatives": [],
+      "confidence": 0.0,
+      "reason": "entities=['지점', '여신'], measures=['잔액'], filters=0, ambiguities=1",
+      "detail": {},
+      "timestamp": "2026-03-30 17:06:21.014"
+    }
+  ],
+  "context_retrievals": [],
+  "sql": {
+    "generated_sql": "",
+    "validated": false,
+    "validation_errors": [],
+    "retry_count": 0,
+    "validation_feedback": "",
+    "execution_success": false,
+    "row_count": 0,
+    "execution_time_ms": 0.0
+  },
+  "timeline": [
+    {
+      "seq": 1,
+      "event_type": "node_start",
+      "node": "preprocess",
+      "parent_seq": null,
+      "summary": "preprocess 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:04.502"
+    },
+    {
+      "seq": 2,
+      "event_type": "node_end",
+      "node": "preprocess",
+      "parent_seq": 1,
+      "summary": "preprocess 완료",
+      "detail": {
+        "state_changes": [
+          {
+            "field": "preprocessed_input",
+            "after": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘"
+          },
+          {
+            "field": "status",
+            "after": "preprocessing"
+          }
+        ]
+      },
+      "duration_ms": 4.10109999938868,
+      "status": "success",
+      "timestamp": "2026-03-30 17:06:04.507"
+    },
+    {
+      "seq": 3,
+      "event_type": "node_start",
+      "node": "resolve_history",
+      "parent_seq": null,
+      "summary": "resolve_history 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:04.509"
+    },
+    {
+      "seq": 4,
+      "event_type": "llm_call",
+      "node": "이력해소",
+      "parent_seq": null,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 1447tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 1407,
+        "response_tokens": 40
+      },
+      "duration_ms": 2224.5160000165924,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:07.755"
+    },
+    {
+      "seq": 5,
+      "event_type": "node_end",
+      "node": "resolve_history",
+      "parent_seq": 3,
+      "summary": "resolve_history 완료",
+      "detail": {
+        "state_changes": [
+          {
+            "field": "awaiting_clarification",
+            "after": "False"
+          },
+          {
+            "field": "clarification_response",
+            "after": ""
+          },
+          {
+            "field": "clarification_question",
+            "after": ""
+          }
+        ]
+      },
+      "duration_ms": 3249.390200013295,
+      "status": "success",
+      "timestamp": "2026-03-30 17:06:07.757"
+    },
+    {
+      "seq": 6,
+      "event_type": "node_start",
+      "node": "classify_intent",
+      "parent_seq": null,
+      "summary": "classify_intent 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:07.759"
+    },
+    {
+      "seq": 7,
+      "event_type": "llm_call",
+      "node": "intent_gate",
+      "parent_seq": null,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 1126tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 1062,
+        "response_tokens": 64
+      },
+      "duration_ms": 2272.284899983788,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:10.031"
+    },
+    {
+      "seq": 8,
+      "event_type": "decision",
+      "node": "classify_intent",
+      "parent_seq": 6,
+      "summary": "intent_classification: data_extraction",
+      "detail": {
+        "confidence": 0.95,
+        "alternatives": [],
+        "reason": "category=DATA_EXTRACTION, 지점별 여신 잔액이라는 구체적 수치와 상위 10개라는 조회 조건을 명시하여 데이터를 추출하려는 의도가 명확함"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:10.033"
+    },
+    {
+      "seq": 9,
+      "event_type": "node_end",
+      "node": "classify_intent",
+      "parent_seq": 6,
+      "summary": "classify_intent 완료",
+      "detail": {
+        "state_changes": [
+          {
+            "field": "intent",
+            "after": "data_extraction"
+          },
+          {
+            "field": "intent_confidence",
+            "after": "0.95"
+          },
+          {
+            "field": "query_category",
+            "after": "DATA_EXTRACTION"
+          },
+          {
+            "field": "status",
+            "after": "intent_classified"
+          }
+        ]
+      },
+      "duration_ms": 2275.8500000054482,
+      "status": "success",
+      "timestamp": "2026-03-30 17:06:10.034"
+    },
+    {
+      "seq": 10,
+      "event_type": "node_start",
+      "node": "normalize_query",
+      "parent_seq": null,
+      "summary": "normalize_query 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:10.035"
+    },
+    {
+      "seq": 11,
+      "event_type": "llm_call",
+      "node": "normalization_phase1",
+      "parent_seq": null,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 9120tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 8424,
+        "response_tokens": 696
+      },
+      "duration_ms": 6552.600199996959,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:16.590"
+    },
+    {
+      "seq": 12,
+      "event_type": "llm_call",
+      "node": "normalization_phase2",
+      "parent_seq": null,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 2414tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 1716,
+        "response_tokens": 698
+      },
+      "duration_ms": 4421.168800006853,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:21.012"
+    },
+    {
+      "seq": 13,
+      "event_type": "decision",
+      "node": "normalize_query",
+      "parent_seq": 10,
+      "summary": "normalization: RANK",
+      "detail": {
+        "confidence": 0.0,
+        "alternatives": [],
+        "reason": "entities=['지점', '여신'], measures=['잔액'], filters=0, ambiguities=1"
+      },
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:21.014"
+    },
+    {
+      "seq": 14,
+      "event_type": "node_end",
+      "node": "normalize_query",
+      "parent_seq": 10,
+      "summary": "normalize_query 완료",
+      "detail": {
+        "state_changes": [
+          {
+            "field": "normalized_query",
+            "after": "original_query='지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘' rewritten_query='지점별 여신 잔액 합계를 조회하여 합계가 큰 순서로 지점명과"
+          },
+          {
+            "field": "status",
+            "after": "query_normalized"
+          },
+          {
+            "field": "intent",
+            "after": "clarification_needed"
+          }
+        ]
+      },
+      "duration_ms": 10980.448399990564,
+      "status": "success",
+      "timestamp": "2026-03-30 17:06:21.015"
+    },
+    {
+      "seq": 15,
+      "event_type": "node_start",
+      "node": "clarify",
+      "parent_seq": null,
+      "summary": "clarify 시작",
+      "detail": {},
+      "duration_ms": 0.0,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:21.016"
+    },
+    {
+      "seq": 16,
+      "event_type": "llm_call",
+      "node": "",
+      "parent_seq": null,
+      "summary": "LLM(gemini-3.1-flash-lite-preview) 1511tok",
+      "detail": {
+        "model": "gemini-3.1-flash-lite-preview",
+        "prompt_tokens": 1453,
+        "response_tokens": 58
+      },
+      "duration_ms": 2183.9410999964457,
+      "status": "",
+      "timestamp": "2026-03-30 17:06:23.201"
+    },
+    {
+      "seq": 17,
+      "event_type": "node_end",
+      "node": "clarify",
+      "parent_seq": 15,
+      "summary": "clarify 완료",
+      "detail": {
+        "state_changes": [
+          {
+            "field": "clarification_question",
+            "after": "어떤 기간 기준으로 지점별 여신 잔액을 확인하시겠어요?\n\n1) 오늘(최신) 기준 잔액\n2) 이번 달 말 기준 잔액\n3) 지난달 말 기준 잔액\n4) 다른 기간 (직접 입력해 주세요)"
+          },
+          {
+            "field": "formatted_response",
+            "after": "어떤 기간 기준으로 지점별 여신 잔액을 확인하시겠어요?\n\n1) 오늘(최신) 기준 잔액\n2) 이번 달 말 기준 잔액\n3) 지난달 말 기준 잔액\n4) 다른 기간 (직접 입력해 주세요)"
+          },
+          {
+            "field": "awaiting_clarification",
+            "after": "True"
+          },
+          {
+            "field": "clarification_turns",
+            "after": "1"
+          },
+          {
+            "field": "status",
+            "after": "awaiting_clarification"
+          }
+        ]
+      },
+      "duration_ms": 2186.3313000067137,
+      "status": "success",
+      "timestamp": "2026-03-30 17:06:23.203"
+    }
+  ],
+  "total_llm_calls": 5,
+  "total_llm_latency_ms": 17654.51100000064,
+  "total_llm_tokens": 15618,
+  "node_path": [
+    "preprocess",
+    "resolve_history",
+    "classify_intent",
+    "normalize_query",
+    "clarify"
+  ]
+}

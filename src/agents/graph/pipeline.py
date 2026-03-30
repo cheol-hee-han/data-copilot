@@ -1,20 +1,31 @@
 """LangGraph 단일 파이프라인 정의.
 
 3계층(interpret → reason → present) 전체 흐름을 단일 그래프로 정의한다.
+노드 선언, 조건부 엣지 연결, 라우팅 함수를 한 곳에서 관리하여
+파이프라인의 구조를 단일 진실 공급원으로 유지한다.
 
 흐름:
-  사용자 입력 → 전처리 → 이력 해소 → 의도 분류 → [명확화 필요?]
-    ├─ YES → 명확화 질문 → (종료, 사용자 응답 대기)
-    └─ NO (DATA) → 질의 정규화 (8-Slot)
+  사용자 입력 → preprocess → resolve_history → classify_intent → [명확화 필요?]
+    ├─ YES → clarify → (종료, 사용자 응답 대기)
+    └─ NO (DATA) → normalize_query (8-Slot)
          → [reason 계층 추론 루프]
-           planner → explorer → evaluator
-           → generator → validator → recovery
-           → finalizer
-         → SQL 실행
+           planner → context_explorer → confidence_evaluator
+           → sql_generator → sql_validator → recovery_planner
+           → result_finalizer
+         → execute_sql
          → [분석 필요?]
-           ├─ YES → 데이터 분석 → 포맷팅
-           └─ NO → 포맷팅
+           ├─ YES → analyze_data → format_response
+           └─ NO → format_response
          → 응답 반환
+
+노드 명명 규칙:
+    그래프 노드 이름 = 파일명 = 함수명(_node 접미사 제외).
+    예: "context_explorer" → context_explorer.py → context_explorer_node()
+
+핵심 함수:
+    - build_pipeline: StateGraph를 구성하여 반환
+    - create_app: build_pipeline + compile()
+    - _route_after_*: 각 노드 뒤의 조건부 라우팅 함수
 """
 
 from __future__ import annotations
@@ -29,7 +40,9 @@ from src.agents.models.user_messages import (
     REPHRASE_GUIDE,
 )
 from src.agents.state.state import (
+    FailureType,
     IntentType,
+    Phase,
     PipelineState,
     QueryStatus,
 )
@@ -52,9 +65,6 @@ from src.agents.nodes.reason.planner import planner_node
 from src.agents.nodes.reason.context_explorer import (
     context_explorer_node,
 )
-from src.agents.nodes.reason.table_verifier import (
-    table_verifier_node,
-)
 from src.agents.nodes.reason.confidence_evaluator import (
     confidence_evaluator_node,
 )
@@ -76,8 +86,8 @@ from src.agents.nodes.present.sql_executor import execute_sql_node
 from src.agents.nodes.present.analyzer import analyze_data_node
 from src.agents.nodes.present.formatter import format_response_node
 
+from src.agents.state.state import MAX_GENERATES
 from src.services.confidence_scorer import evaluate_readiness
-from src.utils.tracker import EvaluationTracker
 from src.config import settings
 from src.utils.logger import get_logger
 
@@ -113,10 +123,15 @@ def _route_after_history_resolve(
 def _route_after_intent(
     state: PipelineState,
 ) -> str:
-    """의도 분류 후 라우팅."""
+    """의도 분류 후 라우팅.
+
+    비데이터 의도(명확화/일반질문/잡담/메타질문)는 clarify로 보내되,
+    명확화 왕복이 상한에 도달하면 강제로 데이터 처리 경로로 진행한다.
+    """
     if state.status == QueryStatus.ERROR:
         return "error_end"
 
+    # 데이터 추출/분석이 아닌 의도는 모두 명확화 대상
     needs_clarification = state.intent in (
         IntentType.CLARIFICATION_NEEDED,
         IntentType.GENERAL_QUESTION,
@@ -125,6 +140,7 @@ def _route_after_intent(
     )
 
     if needs_clarification:
+        # 명확화 왕복 상한 초과 시 현재 입력으로 강제 진행
         if state.clarification_turns >= CLARIFICATION_MAX_TURNS:
             return _next_after_intent()
         return "clarify"
@@ -136,76 +152,83 @@ def _next_after_intent() -> str:
     """의도 분류 후 데이터 처리 경로."""
     if settings.normalization_enabled:
         return "normalize_query"
-    return "reason_plan"
+    return "planner"
 
 
 def _route_after_normalize(
     state: PipelineState,
 ) -> str:
     """정규화 후 라우팅 — ambiguities가 있으면 즉시 명확화."""
-    nq = state.normalized_query
-    if nq and hasattr(nq, "ambiguities") and nq.ambiguities:
+    if state.intent == IntentType.CLARIFICATION_NEEDED:
         if state.clarification_turns < CLARIFICATION_MAX_TURNS:
-            state.intent = IntentType.CLARIFICATION_NEEDED
             return "clarify"
-    return "reason_plan"
+    return "planner"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Reason 계층 라우팅
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _route_after_reason_plan(
+def _route_after_planner(
     state: PipelineState,
 ) -> str:
     """planner 후 Fast-Path 판정."""
     if state.reason.fast_path_triggered:
-        return "reason_generate_sql"
-    return "reason_explore"
+        return "sql_generator"
+    return "context_explorer"
 
 
-def _route_after_reason_evaluate(
+def _route_after_confidence_evaluator(
     state: PipelineState,
 ) -> str:
     """confidence_evaluator 후 다음 행동."""
     return evaluate_readiness(state.reason).value
 
 
-def _route_after_reason_validate_sql(
+def _route_after_sql_validator(
     state: PipelineState,
 ) -> str:
-    """sql_validator 후 실패 유형별 라우팅."""
-    result = state.reason.sql_validation_result
-    if result is None:
-        return "conclude_failure"
+    """sql_validator 후 failure_type 기반 라우팅.
 
-    if (
-        state.reason.fast_path_triggered
-        and result.overall != "SUCCESS"
-    ):
+    6가지 분기:
+      1. failure_type=None → result_finalizer (SQL 확정, 검증 통과)
+      2. SQL_SYNTAX → sql_generator 재시도 (생성 횟수 미달 시)
+      3. SQL_SEMANTIC_LOCAL → 로컬 수정 or 에스컬레이션
+      4. SQL_STRUCTURAL / EMPTY_RESULT / DB_ERROR → recovery_planner
+      5. fast-path 실패 → context_explorer (정상 탐색 전환)
+      6. 기타 / 한계 초과 → result_finalizer (실패 처리)
+    """
+    ft = state.reason.failure_type
+
+    # fast-path로 생성한 SQL이 실패하면 정상 탐색 루프로 전환
+    # stale failure 컨텍스트 초기화는 context_explorer 진입부에서 수행
+    if state.reason.fast_path_triggered and ft is not None:
         return "explore_after_fast_path"
 
-    match result.overall:
-        case "SUCCESS":
+    match ft:
+        case None:
             return "conclude_success"
 
-        case "FAIL_SYNTAX":
-            if state.reason.loop_guard.generate_attempts < 4:
+        case FailureType.SQL_SYNTAX:
+            if state.reason.loop_guard.generate_attempts < MAX_GENERATES:
                 return "fix_syntax"
             return "conclude_failure"
 
-        case "FAIL_SEMANTIC_LOCAL":
+        case FailureType.SQL_SEMANTIC_LOCAL:
             lg = state.reason.loop_guard
             if lg.should_escalate_to_structural():
                 return "replan"
-            if lg.generate_attempts < 4:
+            if lg.generate_attempts < MAX_GENERATES:
                 return "fix_local"
             return "conclude_failure"
 
         case (
-            "FAIL_STRUCTURAL"
-            | "FAIL_EMPTY"
-            | "FAIL_DB_ERROR"
+            FailureType.SQL_STRUCTURAL
+            | FailureType.EMPTY_RESULT
+            | FailureType.DB_ERROR
+            | FailureType.NO_USE_CASE
+            | FailureType.NO_TABLE
+            | FailureType.TERM_UNRESOLVABLE
         ):
             return "replan"
 
@@ -213,11 +236,11 @@ def _route_after_reason_validate_sql(
             return "conclude_failure"
 
 
-def _route_after_reason_recover(
+def _route_after_recovery_planner(
     state: PipelineState,
 ) -> str:
     """recovery_planner 후 라우팅."""
-    if state.reason.phase == "DONE":
+    if state.reason.phase == Phase.DONE:
         return "conclude"
     return "explore"
 
@@ -226,7 +249,7 @@ def _route_after_reason_recover(
 # Reason → Present 전환 라우팅
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _route_after_reason_finalize(
+def _route_after_result_finalizer(
     state: PipelineState,
 ) -> str:
     """reason 계층 완료 후 라우팅.
@@ -283,87 +306,34 @@ def _handle_error(state: PipelineState) -> dict:
 # 파이프라인 빌더
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def build_pipeline(
-    tracker: EvaluationTracker | None = None,
-) -> StateGraph:
-    """3계층 단일 LangGraph 파이프라인을 구성한다."""
+def build_pipeline() -> StateGraph:
+    """3계층 단일 LangGraph 파이프라인을 구성한다.
+
+    노드 함수를 직접 등록하며, 추적은 ``DataCopilotCallbackHandler`` 가
+    ``config={"callbacks": [handler]}`` 로 주입되어 자동 처리한다.
+    """
     workflow = StateGraph(PipelineState)
 
-    def node(name: str, fn: Any) -> Any:
-        return tracker.track(name)(fn) if tracker else fn
-
-    if tracker:
-        tracker.inject()
-
     # ── Interpret 계층 ──
-    workflow.add_node(
-        "preprocess",
-        node("preprocess", preprocess_node),
-    )
-    workflow.add_node(
-        "resolve_history",
-        node("resolve_history", resolve_history_node),
-    )
-    workflow.add_node(
-        "classify_intent",
-        node("classify_intent", classify_intent_node),
-    )
-    workflow.add_node(
-        "normalize_query",
-        node("normalize_query", normalize_query_node),
-    )
-    workflow.add_node(
-        "clarify",
-        node("clarify", clarify_node),
-    )
+    workflow.add_node("preprocess", preprocess_node)
+    workflow.add_node("resolve_history", resolve_history_node)
+    workflow.add_node("classify_intent", classify_intent_node)
+    workflow.add_node("normalize_query", normalize_query_node)
+    workflow.add_node("clarify", clarify_node)
 
     # ── Reason 계층 ──
-    workflow.add_node(
-        "reason_plan",
-        node("reason_plan", planner_node),
-    )
-    workflow.add_node(
-        "reason_explore",
-        node("reason_explore", context_explorer_node),
-    )
-    workflow.add_node(
-        "reason_verify_tables",
-        node("reason_verify_tables", table_verifier_node),
-    )
-    workflow.add_node(
-        "reason_evaluate",
-        node("reason_evaluate", confidence_evaluator_node),
-    )
-    workflow.add_node(
-        "reason_generate_sql",
-        node("reason_generate_sql", sql_generator_node),
-    )
-    workflow.add_node(
-        "reason_validate_sql",
-        node("reason_validate_sql", sql_validator_node),
-    )
-    workflow.add_node(
-        "reason_recover",
-        node("reason_recover", recovery_planner_node),
-    )
-    workflow.add_node(
-        "reason_finalize",
-        node("reason_finalize", result_finalizer_node),
-    )
+    workflow.add_node("planner", planner_node)
+    workflow.add_node("context_explorer", context_explorer_node)
+    workflow.add_node("confidence_evaluator", confidence_evaluator_node)
+    workflow.add_node("sql_generator", sql_generator_node)
+    workflow.add_node("sql_validator", sql_validator_node)
+    workflow.add_node("recovery_planner", recovery_planner_node)
+    workflow.add_node("result_finalizer", result_finalizer_node)
 
     # ── Present 계층 ──
-    workflow.add_node(
-        "execute_sql",
-        node("execute_sql", execute_sql_node),
-    )
-    workflow.add_node(
-        "analyze_data",
-        node("analyze_data", analyze_data_node),
-    )
-    workflow.add_node(
-        "format_response",
-        node("format_response", format_response_node),
-    )
+    workflow.add_node("execute_sql", execute_sql_node)
+    workflow.add_node("analyze_data", analyze_data_node)
+    workflow.add_node("format_response", format_response_node)
     workflow.add_node("error_end", _handle_error)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -397,7 +367,7 @@ def build_pipeline(
         {
             "clarify": "clarify",
             "normalize_query": "normalize_query",
-            "reason_plan": "reason_plan",
+            "planner": "planner",
             "error_end": "error_end",
         },
     )
@@ -408,69 +378,66 @@ def build_pipeline(
         _route_after_normalize,
         {
             "clarify": "clarify",
-            "reason_plan": "reason_plan",
+            "planner": "planner",
         },
     )
 
     # ── Reason 엣지 ──
     workflow.add_conditional_edges(
-        "reason_plan",
-        _route_after_reason_plan,
+        "planner",
+        _route_after_planner,
         {
-            "reason_generate_sql": "reason_generate_sql",
-            "reason_explore": "reason_explore",
+            "sql_generator": "sql_generator",
+            "context_explorer": "context_explorer",
         },
     )
 
     workflow.add_edge(
-        "reason_explore", "reason_verify_tables",
-    )
-    workflow.add_edge(
-        "reason_verify_tables", "reason_evaluate",
+        "context_explorer", "confidence_evaluator",
     )
 
     workflow.add_conditional_edges(
-        "reason_evaluate",
-        _route_after_reason_evaluate,
+        "confidence_evaluator",
+        _route_after_confidence_evaluator,
         {
-            "explore": "reason_explore",
-            "generate_sql": "reason_generate_sql",
-            "replan": "reason_recover",
-            "conclude_failure": "reason_finalize",
-            "ask_user": "reason_finalize",
+            "explore": "context_explorer",
+            "generate_sql": "sql_generator",
+            "replan": "recovery_planner",
+            "conclude_failure": "result_finalizer",
+            "ask_user": "result_finalizer",
         },
     )
 
     workflow.add_edge(
-        "reason_generate_sql", "reason_validate_sql",
+        "sql_generator", "sql_validator",
     )
 
     workflow.add_conditional_edges(
-        "reason_validate_sql",
-        _route_after_reason_validate_sql,
+        "sql_validator",
+        _route_after_sql_validator,
         {
-            "conclude_success": "reason_finalize",
-            "fix_syntax": "reason_generate_sql",
-            "fix_local": "reason_generate_sql",
-            "replan": "reason_recover",
-            "conclude_failure": "reason_finalize",
-            "explore_after_fast_path": "reason_explore",
+            "conclude_success": "result_finalizer",
+            "fix_syntax": "sql_generator",
+            "fix_local": "sql_generator",
+            "replan": "recovery_planner",
+            "conclude_failure": "result_finalizer",
+            "explore_after_fast_path": "context_explorer",
         },
     )
 
     workflow.add_conditional_edges(
-        "reason_recover",
-        _route_after_reason_recover,
+        "recovery_planner",
+        _route_after_recovery_planner,
         {
-            "explore": "reason_explore",
-            "conclude": "reason_finalize",
+            "explore": "context_explorer",
+            "conclude": "result_finalizer",
         },
     )
 
     # ── Reason → Present 전환 ──
     workflow.add_conditional_edges(
-        "reason_finalize",
-        _route_after_reason_finalize,
+        "result_finalizer",
+        _route_after_result_finalizer,
         {
             "execute_sql": "execute_sql",
             "clarify_end": END,
@@ -496,9 +463,31 @@ def build_pipeline(
     return workflow
 
 
-def create_app(
-    tracker: EvaluationTracker | None = None,
-):
+def create_app() -> Any:
     """컴파일된 LangGraph 앱을 생성한다."""
-    workflow = build_pipeline(tracker=tracker)
+    workflow = build_pipeline()
     return workflow.compile()
+
+
+# ── 싱글턴 캐시 ──
+
+_compiled_app: Any = None
+
+
+def get_compiled_app() -> Any:
+    """컴파일된 LangGraph 앱 싱글턴을 반환한다.
+
+    그래프 구조는 불변이므로 한 번만 빌드하고 재사용한다.
+    요청별 추적은 ``config={"callbacks": [handler]}`` 로 주입한다.
+    """
+    global _compiled_app  # noqa: PLW0603
+    if _compiled_app is None:
+        _compiled_app = create_app()
+        logger.info("LangGraph 파이프라인 컴파일 완료 (싱글턴)")
+    return _compiled_app
+
+
+def reset_compiled_app() -> None:
+    """테스트 등에서 싱글턴을 초기화할 때 사용한다."""
+    global _compiled_app  # noqa: PLW0603
+    _compiled_app = None

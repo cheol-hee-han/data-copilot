@@ -47,6 +47,14 @@ class SybaseIQConnector(DatabaseConnector):
       - "odbc":   pyodbc   (unixODBC + ODBC 드라이버 필요)
     """
 
+    @property
+    def dialect(self) -> str:
+        return "tsql"
+
+    @property
+    def default_schema(self) -> str:
+        return "ADWOWN"
+
     def __init__(self, use_dummy: bool = True) -> None:
         self._use_dummy = use_dummy
         self._conn: Any = None

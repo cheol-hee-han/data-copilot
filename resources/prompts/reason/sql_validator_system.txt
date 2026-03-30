@@ -128,7 +128,7 @@ LIMIT 10000
 
 사용자 질의: "작년 해외 송금 건수"
 질의 분해: measures=[{term: "건수", agg: "COUNT"}], filters=[{term: "기간", value: "작년"}, {term: "해외송금"}]
-dead_ends: [{failure_type: "empty_result", reason: "TB_FX_TRANSFER에서 조건 FX_TYPE='OVERSEAS' 결과 0건", tried_tables: ["TB_FX_TRANSFER"]}]
+dead_ends: [{failure_type: "EMPTY_RESULT", reason: "TB_FX_TRANSFER에서 조건 FX_TYPE='OVERSEAS' 결과 0건"}]
 생성된 SQL:
 ```sql
 SELECT COUNT(*) AS 송금건수

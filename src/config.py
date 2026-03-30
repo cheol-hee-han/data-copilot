@@ -1,9 +1,9 @@
 """애플리케이션 설정 모듈.
 
 pydantic-settings 기반으로 .env 파일 및 환경 변수에서
-전체 설정을 로드한다. LLM·DB·ES·Qdrant·Redis 접속 정보,
-임베딩/Reranker 모델 경로, 파이프라인 제어 파라미터,
-시각화 레이아웃, 금액 단위 기준값 등을 포함한다.
+설정을 로드한다. 환경별로 달라지는 값(접속 정보, API 키 등)은
+.env에서, 파이프라인 상수·레이아웃·단위 기준값 등 고정값은
+코드 기본값으로만 관리한다.
 
 폐쇄망 배포 시 .env 파일 교체만으로 LLM 프로바이더·
 모델 캐시 경로·DB 접속 정보를 전환할 수 있도록 설계되었다.
@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     session_ttl: int = 1800  # 대화 이력 TTL (초, 기본 30분, 슬라이딩)
     session_clarify_ttl: int = 300  # 명확화 상태 TTL (초, 기본 5분)
     session_max_history: int = 20  # 대화 이력 최대 턴 수
+    prompt_history_window: int = 4  # LLM 프롬프트에 포함할 최근 대화 턴 수
 
     # ── 임베딩 모델 (BGE-M3, Dense + Sparse 하이브리드) ──
     embedding_model: str = "BAAI/bge-m3"
@@ -177,25 +178,26 @@ class Settings(BaseSettings):
 
     # 배포 모드: "external" (외부망, PostgreSQL) | "internal" (내부망, ADW+BDP)
     deployment_mode: str = "external"
-    default_db_source: str = "adw"      # 시스템코드 파싱 실패 시 기본 DB
 
     # ── 파이프라인 제어 ──
     sql_max_retry: int = 2              # SQL 재생성 최대 재시도 횟수
-    clarification_max_turns: int = 2    # 명확화 최대 왕복 횟수
+    clarification_max_turns: int = 3    # 명확화 최대 왕복 횟수
     max_input_length: int = 500         # 사용자 입력 최대 길이 (문자 수)
     max_sessions: int = 1000            # 동시 세션 최대 수
 
     # ── 에이전틱 코어 ──
-    agentic_core_enabled: bool = True   # True: 에이전틱 코어, False: 기존 선형
-    # LLM Heavy 노드 설정 (대형 모델: True, 소형 모델: False)
-    plan_use_llm: bool = True           # planner에서 LLM 사용
     validate_layer2b_enabled: bool = True  # Layer 2b LLM 의미 검증 활성화
-    replan_use_llm: bool = True         # recovery_planner에서 LLM 사용
     # 에이전틱 코어 타임아웃 (초)
     agentic_tool_timeout: float = 10.0  # 개별 도구 호출 타임아웃 (C-12)
     agentic_total_timeout: float = 120.0  # 서브그래프 전체 타임아웃
+    # 에이전틱 루프 제어 상수
+    max_tool_calls: int = 20            # 도구 호출 총량 한도
+    max_replans: int = 3                # 재계획 최대 횟수
+    max_generates: int = 4              # SQL 생성 시도 최대 횟수
+    max_local_fixes: int = 2            # 로컬 문법 교정 최대 횟수
 
     # ── LLM 호출 ──
+    llm_transport_max_retry: int = 3    # SDK 레벨 전송 재시도 (429/500/503/네트워크)
     llm_parse_max_retry: int = 2        # 포맷 불일치 시 최대 재시도 횟수
     llm_default_max_tokens: int = 1000  # LLM 기본 max_tokens
     llm_default_timeout: float = 15.0   # LLM 기본 타임아웃 (초)
@@ -214,7 +216,6 @@ class Settings(BaseSettings):
 
     # ── LLM 보조 파라미터 ──
     llm_concurrency_limit: int = 3      # 동시 LLM 호출 제한 (테이블 보강 등)
-    min_description_length: int = 20    # 테이블 설명 보강 판단 최소 길이
     min_rows_for_visualization: int = 3  # 시각화 판단 최소 행 수
     format_max_rows: int = 50           # 포맷팅 프롬프트에 포함할 최대 행 수
     analysis_max_rows: int = 100        # 분석/시각화 프롬프트에 포함할 최대 행 수
@@ -241,6 +242,10 @@ class Settings(BaseSettings):
     chart_margin_right: int = 40
     chart_margin_top: int = 60
     chart_margin_bottom: int = 70
+
+    # ── 로그/트래커 출력 절삭 (0 = 무제한, 전부 출력) ──
+    trace_truncate_limit: int = 0   # trace JSON (callback_handler)
+    log_truncate_limit: int = 0     # structlog 필드값 (노드/커넥터 로그)
 
     # ── 3순위: 로그 미리보기 길이 (내부 디버깅용, 자주 안 바뀜) ──
     log_long_value_threshold: int = 80

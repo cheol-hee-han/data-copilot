@@ -29,6 +29,7 @@ from src.utils.tracker import (
     get_current_node,
     set_current_node,
 )
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -115,7 +116,7 @@ async def llm_call_with_parse_retry(
             model=model,
             attempt=attempt + 1,
             latency_ms=round(_llm_elapsed, 1),
-            response_preview=last_text[:150] if last_text else "(빈 응답)",
+            response_preview=truncate_log(last_text) if last_text else "(빈 응답)",
         )
 
         if not last_text:
@@ -127,7 +128,7 @@ async def llm_call_with_parse_retry(
             # 빈 응답도 재시도 대상
             if attempt < max_retries:
                 current_messages = _append_correction(
-                    current_messages, last_text,
+                    current_messages, last_text, "응답이 비어있음",
                 )
             continue
 
@@ -151,11 +152,11 @@ async def llm_call_with_parse_retry(
                 attempt=attempt + 1,
                 max_retries=max_retries,
                 error=str(e),
-                response_preview=last_text[:100],
+                response_preview=truncate_log(last_text),
             )
             if attempt < max_retries:
                 current_messages = _append_correction(
-                    current_messages, last_text,
+                    current_messages, last_text, str(e),
                 )
 
     # 세부 노드명 복원
@@ -168,29 +169,38 @@ async def llm_call_with_parse_retry(
     )
 
 
-_CORRECTION_MSG = (
-    "위 응답이 시스템 프롬프트에 지정된 출력 형식과 다릅니다. "
-    "시스템 프롬프트의 [출력 형식] 섹션을 다시 확인하고, "
-    "해당 형식만 정확히 출력하세요. "
-    "형식 외의 텍스트는 절대 추가하지 마세요."
-)
+def _build_correction_msg(
+    failed_response: str,
+    parse_error: str,
+) -> str:
+    """출력 형식 오류 교정 메시지를 생성한다."""
+    parts = ["[출력 형식 오류]"]
+    if failed_response:
+        preview = truncate_log(failed_response)
+        parts.append(f"당신의 응답: {preview}")
+    if parse_error:
+        parts.append(f"파싱 실패 원인: {parse_error}")
+    parts.append(
+        "시스템 프롬프트의 [출력 형식]에 맞는 JSON만 출력하세요."
+    )
+    return "\n".join(parts)
 
 
 def _append_correction(
     messages: list[dict[str, str]],
     failed_response: str,
+    parse_error: str = "",
 ) -> list[dict[str, str]]:
     """실패한 응답과 교정 요청을 대화에 추가한다.
 
     LLM 이 자신의 이전 응답을 보고 올바른 형식으로 교정하도록 유도한다.
-    출력 형식은 system 프롬프트에 이미 명시되어 있으므로
-    별도 힌트 없이 교정 요청만 추가한다.
+    실패 원인을 명시하여 소형 모델도 교정할 수 있도록 한다.
     """
     corrected = list(messages)
 
-    if failed_response:
-        corrected.append({"role": "assistant", "content": failed_response})
-
-    corrected.append({"role": "user", "content": _CORRECTION_MSG})
+    correction = _build_correction_msg(
+        failed_response, parse_error,
+    )
+    corrected.append({"role": "user", "content": correction})
 
     return corrected

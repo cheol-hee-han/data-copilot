@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from src.config import settings
 from src.utils.logger import get_logger
+from src.utils.truncate import truncate_log
 from src.utils.security import (
     detect_prompt_injection,
     mask_pii,
@@ -164,8 +165,8 @@ def synthesize_clarification(
 
     logger.info(
         "명확화 응답 합성 완료",
-        original=original_query[:80],
-        clarification=answer[:80],
+        original=truncate_log(original_query),
+        clarification=truncate_log(answer),
         turns=clarification_turns + 1,
     )
 

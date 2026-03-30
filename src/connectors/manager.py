@@ -138,37 +138,62 @@ class ConnectorManager:
             )
         return result
 
+    # ── 테이블명 → DB 소스 파싱 ──────────────────────────
+    _DB_SOURCE_MAP: dict[str, str] = {
+        "ADW": "adw",       # Sybase IQ (정보계 DW)
+        "BDP": "bigdata",   # Impala (빅데이터 플랫폼)
+    }
+
+    @staticmethod
+    def parse_db_source(table_name: str) -> str:
+        """테이블명에서 시스템코드를 추출하여 DB 소스를 반환한다.
+
+        TB_ADW_CSC101M → "adw"
+        TB_BDP_LCT001L → "bigdata"
+        매핑 없으면 빈 문자열 반환.
+        """
+        parts = table_name.upper().split("_")
+        if len(parts) >= 3:
+            source = ConnectorManager._DB_SOURCE_MAP.get(parts[1])
+            if source:
+                return source
+        return ""
+
+    # ── 업무 DB 라우팅 ────────────────────────────────────
     def get_query_db(
         self,
         reason: ReasoningState | None = None,
+        db_source: str = "",
     ) -> DatabaseConnector:
-        """ReasoningState의 candidate_tables에서 DB 소스를 판별하여
-        올바른 업무 DB 커넥터를 반환한다.
+        """올바른 업무 DB 커넥터를 반환한다.
 
         외부망(external): 항상 info_db (PostgreSQL)
-        내부망(internal): 테이블명 시스템코드 → adw_db / bigdata_db
+        내부망(internal): db_source 또는 reason의 candidate_tables로 라우팅
 
-        reason이 없거나 DB 소스를 판별할 수 없으면 기본 DB를 반환한다.
+        db_source를 직접 지정하면 reason보다 우선한다.
         """
-        if self._deployment != "internal":
+        # 외부 테스트 환경에서는 postgres 사용
+        if self._deployment == "external":
             return self.info_db
 
-        if reason is None:
+        # db_source 직접 지정
+        if db_source == "bigdata":
+            return self._bigdata_db or self.info_db
+        if db_source:
             return self._adw_db or self.info_db
 
-        from src.utils.db_routing import parse_db_source
+        # reason에서 추출
+        if reason is not None:
+            sources: set[str] = set()
+            for ct in reason.candidate_tables:
+                src = ct.db_source or self.parse_db_source(
+                    ct.table_name,
+                )
+                if src:
+                    sources.add(src)
+            if "bigdata" in sources:
+                return self._bigdata_db or self.info_db
 
-        # candidate_tables에서 db_source 수집
-        sources: set[str] = set()
-        for ct in reason.candidate_tables:
-            src = ct.db_source or parse_db_source(
-                ct.table_name,
-            )
-            if src:
-                sources.add(src)
-
-        if "bigdata" in sources:
-            return self._bigdata_db or self.info_db
         return self._adw_db or self.info_db
 
 

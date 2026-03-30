@@ -126,14 +126,19 @@ class TestNormalizationEdgeCases:
         log_test_case(logger, "test_invalid_modifier", "NONEXISTENT_TYPE", "제거됨",
                       len(validated["modifiers"]), True)
 
-    def test_parse_json_with_trailing_text(self):
-        """JSON 뒤에 불필요한 텍스트가 붙은 LLM 응답."""
-        from src.services.query_normalizer import _parse_llm_json
+    def test_postprocess_preserves_valid_intent(self):
+        """유효한 intent는 후처리에서 보존된다."""
+        from src.services.query_normalizer import _postprocess
 
-        raw = '```json\n{"intent": {"primary": "EXTRACT"}}\n```\n\n추가 설명 텍스트입니다.'
-        result = _parse_llm_json(raw)
+        data = {
+            "intent": {"primary": "EXTRACT", "secondary": []},
+            "entities": [], "measures": [], "dimensions": [],
+            "filters": [], "time": {"type": "NONE"},
+            "modifiers": [], "output_hint": {"format": "NONE"},
+        }
+        result = _postprocess(data)
         assert result["intent"]["primary"] == "EXTRACT"
-        log_test_case(logger, "test_json_trailing_text", "JSON + 텍스트", "파싱 성공",
+        log_test_case(logger, "test_postprocess_valid_intent", "EXTRACT", "보존",
                       result["intent"]["primary"], True)
 
     def test_postprocess_no_search_keywords(self):

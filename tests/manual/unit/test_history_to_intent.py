@@ -69,11 +69,11 @@ async def run_resolve_and_classify(
     Returns:
         {"resolved_query": str, "intent": str, ...} 결과 dict
     """
-    from src.agents.nodes.prompts.system_prompts import (
-        HISTORY_RESOLVE,
-        HISTORY_RESOLVE_USER,
-        INTENT_GATE,
-        INTENT_GATE_USER,
+    from src.agents.nodes.system_prompts import (
+        HISTORY_RESOLVER_SYSTEM,
+        HISTORY_RESOLVER_USER,
+        INTENT_CLASSIFIER_SYSTEM,
+        INTENT_CLASSIFIER_USER,
     )
     from src.config import settings
     from src.services.history_resolver import resolve_history
@@ -95,8 +95,8 @@ async def run_resolve_and_classify(
     resolve_result = await resolve_history(
         query,
         conversation_history,
-        system_prompt=HISTORY_RESOLVE,
-        user_template=HISTORY_RESOLVE_USER,
+        system_prompt=HISTORY_RESOLVER_SYSTEM,
+        user_template=HISTORY_RESOLVER_USER,
     )
 
     resolved_query = resolve_result.resolved_query
@@ -115,12 +115,12 @@ async def run_resolve_and_classify(
         return result_info
 
     # ── Step 2: 의도 분류 (Intent Gate) ──
-    user_prompt = INTENT_GATE_USER.format(query=resolved_query)
+    user_prompt = INTENT_CLASSIFIER_USER.format(query=resolved_query)
 
     if verbose:
         print(f"\n{'─'*40}")
         print("[Gate 시스템 프롬프트] (앞 300자)")
-        print(INTENT_GATE[:300])
+        print(INTENT_CLASSIFIER_SYSTEM[:300])
         print(f"\n[Gate 유저 프롬프트]")
         print(user_prompt)
 
@@ -132,7 +132,7 @@ async def run_resolve_and_classify(
             model=settings.llm_model,
             max_tokens=settings.llm_default_max_tokens,
             timeout=settings.llm_default_timeout,
-            system=INTENT_GATE,
+            system=INTENT_CLASSIFIER_SYSTEM,
             messages=[{"role": "user", "content": user_prompt}],
         )
         if not response.content:

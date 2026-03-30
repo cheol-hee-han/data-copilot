@@ -43,7 +43,7 @@ MONGO_USER = os.getenv("MONGO_USER", "mongoadmin")
 MONGO_PASSWORD = os.getenv("MONGO_PASSWORD", "mongo_pass")
 MONGO_DATABASE = os.getenv("MONGO_DATABASE", "meta_db")
 
-SCHEMA = "biz_schema"
+SCHEMA = "ADWOWN"
 
 
 # ══════════════════════════════════════════════════════════════

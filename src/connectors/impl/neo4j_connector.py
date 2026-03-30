@@ -18,6 +18,7 @@ from typing import Any
 
 from src.config import settings
 from src.connectors.interfaces import SearchConnector
+from src.models.enums import ConfidenceStatus
 from src.utils.logger import get_logger
 from src.utils.resource_loader import load_cypher
 
@@ -275,7 +276,7 @@ def _dummy_join_paths(
             "from_col": "CUST_NO",
             "to_col": "CUST_NO",
             "join_type": "INNER",
-            "confidence": "CONFIRMED",
+            "confidence": ConfidenceStatus.CONFIRMED.value,
         }],
     }]
 
@@ -358,7 +359,7 @@ def _dummy_table_relations(table_name: str) -> list[dict[str, Any]]:
             "neighbor_name": "TB_CUST_INFO",
             "from_column": "CUST_NO",
             "to_column": "CUST_NO",
-            "confidence": "CONFIRMED",
+            "confidence": ConfidenceStatus.CONFIRMED.value,
         },
         {
             "rel_type": "IN_AREA",

@@ -39,24 +39,19 @@ RATE_LIMIT_WAIT_SEC = 30
 async def _run_with_rate_limit_retry(
     query: str,
     conversation_history: list[dict[str, str]] | None = None,
-) -> tuple[Any, Any]:
+) -> Any:
     """Rate Limit 발생 시 대기 후 재시도하여 파이프라인을 실행한다."""
     from src.agents.graph.runner import run_pipeline
-    from src.utils.tracker import EvaluationTracker
 
     TRACE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     for attempt in range(1, MAX_RATE_LIMIT_RETRIES + 1):
-        tracker = EvaluationTracker(
-            run_id=f"e2e_{int(time.time())}_{attempt}",
-        )
         try:
             result = await run_pipeline(
                 user_input=query,
-                tracker=tracker,
                 conversation_history=conversation_history,
             )
-            return result, tracker
+            return result
         except Exception as e:
             err_str = str(e).lower()
             is_rate_limit = any(
@@ -86,39 +81,37 @@ def _record(
     category: str,
     query: str,
     result: Any,
-    tracker: Any,
     checks: dict[str, bool],
     elapsed_ms: float,
 ):
     """테스트 결과를 수집한다."""
-    trace = tracker.trace if tracker else None
-    sql_rec = trace.sql if trace else None
+    insight = (result.insight or {}) if result else {}
+    sql_result = result.sql_result if result else None
+    sql_code = insight.get("sql_code", "")
 
     entry = {
         "test_id": test_id,
         "category": category,
         "query": query,
         "elapsed_ms": round(elapsed_ms, 1),
-        "intent": (
-            trace.final_intent if trace else ""
-        ),
+        "intent": insight.get(
+            "query_interpretation", {},
+        ).get("intent", ""),
         "status": (
-            trace.final_status if trace else ""
+            "clarification" if result and result.awaiting_clarification
+            else "success" if result and result.response
+            else "failure"
         ),
-        "sql_generated": bool(
-            sql_rec and sql_rec.generated_sql
-        ),
+        "sql_generated": bool(sql_code),
         "sql_validated": bool(
-            sql_rec and sql_rec.validated
+            sql_result and sql_result.row_count > 0
         ),
-        "sql_executed": bool(
-            sql_rec and sql_rec.execution_success
-        ),
+        "sql_executed": bool(sql_result),
         "row_count": (
-            sql_rec.row_count if sql_rec else 0
+            sql_result.row_count if sql_result else 0
         ),
-        "llm_calls": (
-            trace.total_llm_calls if trace else 0
+        "trace_steps": (
+            len(result.trace_log) if result and result.trace_log else 0
         ),
         "checks": checks,
         "all_passed": all(checks.values()),
@@ -148,42 +141,45 @@ class TestNonDataQueries:
     async def test_A01_casual_talk(self):
         """일상 대화 → CASUAL_TALK 분류."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "안녕하세요",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
+        insight = result.insight or {}
+        intent = insight.get("query_interpretation", {}).get("intent", "")
+        sql_code = insight.get("sql_code", "")
         checks = {
-            "intent_not_data": trace.final_intent not in (
+            "intent_not_data": intent not in (
                 "data_extraction", "data_analysis",
             ),
-            "no_sql_generated": not trace.sql.generated_sql,
-            "has_response": bool(trace.final_response_summary),
+            "no_sql_generated": not sql_code,
+            "has_response": bool(result.response),
         }
         _record("A-01", "non_data", "안녕하세요",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
         assert checks["intent_not_data"], (
-            f"일상 대화가 데이터 질의로 분류됨: {trace.final_intent}"
+            f"일상 대화가 데이터 질의로 분류됨: {intent}"
         )
 
     @pytest.mark.asyncio
     async def test_A02_meta_question(self):
         """메타 질문 → META_QUESTION 분류."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "TB_LOAN_INFO 테이블에 어떤 컬럼이 있어?",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
         checks = {
-            "no_sql_generated": not trace.sql.generated_sql,
-            "has_response": bool(trace.final_response_summary),
+            "no_sql_generated": not sql_code,
+            "has_response": bool(result.response),
         }
         _record("A-02", "non_data", "메타 질문",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -198,23 +194,29 @@ class TestSimpleExtraction:
     async def test_B01_simple_count(self):
         """단일 테이블 COUNT 집계."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "전체 고객 수 알려줘",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
-        sql = trace.sql.generated_sql.upper()
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
+        intent = insight.get(
+            "query_interpretation", {},
+        ).get("intent", "")
         checks = {
-            "intent_extraction": trace.final_intent in (
+            "intent_extraction": intent in (
                 "data_extraction", "data_analysis",
             ),
-            "sql_generated": bool(trace.sql.generated_sql),
-            "has_count": "COUNT" in sql,
-            "sql_validated": trace.sql.validated,
+            "sql_generated": bool(sql_code),
+            "has_count": "COUNT" in sql_code.upper(),
+            "sql_validated": bool(
+                result.sql_result
+                and result.sql_result.row_count > 0
+            ),
         }
         _record("B-01", "simple_extract", "전체 고객 수",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
         assert checks["sql_generated"], "SQL 미생성"
 
@@ -222,60 +224,64 @@ class TestSimpleExtraction:
     async def test_B02_date_filter(self):
         """날짜 조건이 포함된 집계."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "이번 달 신규 여신 건수",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
-        sql = trace.sql.generated_sql.upper()
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
+        sql_upper = sql_code.upper()
         checks = {
-            "sql_generated": bool(trace.sql.generated_sql),
+            "sql_generated": bool(sql_code),
             "has_date_condition": any(
-                kw in sql for kw in ("WHERE", "DATE", "YMD", "CURRENT")
+                kw in sql_upper
+                for kw in ("WHERE", "DATE", "YMD", "CURRENT")
             ),
-            "has_count": "COUNT" in sql,
+            "has_count": "COUNT" in sql_upper,
         }
         _record("B-02", "simple_extract", "이번 달 신규 여신",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
     @pytest.mark.asyncio
     async def test_B03_group_by(self):
         """GROUP BY 집계."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "고객별 대출 잔액 합계",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
-        sql = trace.sql.generated_sql.upper()
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
+        sql_upper = sql_code.upper()
         checks = {
-            "sql_generated": bool(trace.sql.generated_sql),
-            "has_group_by": "GROUP BY" in sql,
-            "has_sum": "SUM" in sql,
+            "sql_generated": bool(sql_code),
+            "has_group_by": "GROUP BY" in sql_upper,
+            "has_sum": "SUM" in sql_upper,
         }
         _record("B-03", "simple_extract", "고객별 잔액 합계",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
     @pytest.mark.asyncio
     async def test_B04_join(self):
         """다중 테이블 JOIN."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "지점별 수신 잔액 현황",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
-        sql = trace.sql.generated_sql.upper()
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
+        sql_upper = sql_code.upper()
         checks = {
-            "sql_generated": bool(trace.sql.generated_sql),
-            "has_join": "JOIN" in sql,
-            "has_group_by": "GROUP BY" in sql,
+            "sql_generated": bool(sql_code),
+            "has_join": "JOIN" in sql_upper,
+            "has_group_by": "GROUP BY" in sql_upper,
         }
         _record("B-04", "simple_extract", "지점별 수신 잔액",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -288,22 +294,26 @@ class TestComplexReasoning:
 
     @pytest.mark.asyncio
     async def test_D02_amount_unit(self):
-        """금액 단위 변환 (1억 → 100000000)."""
+        """금액 단위 변환 (1억 -> 100000000)."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "1억 이상 대출 보유 고객 수",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
-        sql = trace.sql.generated_sql
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
         checks = {
-            "sql_generated": bool(sql),
-            "correct_amount": "100000000" in sql if sql else False,
-            "wrong_amount_absent": "10000000000" not in (sql or ""),
+            "sql_generated": bool(sql_code),
+            "correct_amount": (
+                "100000000" in sql_code if sql_code else False
+            ),
+            "wrong_amount_absent": (
+                "10000000000" not in (sql_code or "")
+            ),
         }
         _record("D-02", "complex", "1억 이상 대출",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -318,65 +328,68 @@ class TestEdgeCases:
     async def test_E01_pii_masking(self):
         """PII 마스킹 — 전화번호 마스킹."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "고객 이름과 전화번호 목록",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
-        sql = trace.sql.generated_sql.upper() if trace.sql.generated_sql else ""
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
+        sql_upper = sql_code.upper()
         checks = {
-            "sql_generated": bool(trace.sql.generated_sql),
+            "sql_generated": bool(sql_code),
             "has_masking": any(
-                kw in sql for kw in ("LEFT(", "SUBSTR(", "****", "MASK")
-            ) if sql else False,
+                kw in sql_upper
+                for kw in ("LEFT(", "SUBSTR(", "****", "MASK")
+            ) if sql_upper else False,
         }
         _record("E-01", "edge", "PII 마스킹",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
     @pytest.mark.asyncio
     async def test_E02_bulk_defense(self):
         """대용량 방어 — LIMIT 강제."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "전체 거래 내역 다 뽑아줘",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
-        sql = trace.sql.generated_sql.upper() if trace.sql.generated_sql else ""
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
+        sql_upper = sql_code.upper()
         checks = {
             "has_limit": (
-                "LIMIT" in sql or "TOP" in sql
-            ) if sql else False,
+                "LIMIT" in sql_upper or "TOP" in sql_upper
+            ) if sql_upper else False,
             "has_date_condition": any(
-                kw in sql for kw in ("WHERE", "DATE", "YMD")
-            ) if sql else False,
+                kw in sql_upper
+                for kw in ("WHERE", "DATE", "YMD")
+            ) if sql_upper else False,
         }
         _record("E-02", "edge", "대용량 방어",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
     @pytest.mark.asyncio
     async def test_E03_no_table_found(self):
         """존재하지 않는 도메인 — 실패 또는 재계획."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "외환 파생상품 거래 현황",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
+        insight = result.insight or {}
+        sql_code = insight.get("sql_code", "")
         checks = {
             "graceful_handling": (
-                trace.final_status in (
-                    "failure", "error", "clarification",
-                    "casual_response",
-                )
-                or not trace.sql.generated_sql
+                result.awaiting_clarification
+                or not sql_code
+                or not result.sql_result
             ),
         }
         _record("E-03", "edge", "테이블 미발견",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -391,18 +404,22 @@ class TestDataAnalysis:
     async def test_F01_analysis_intent(self):
         """분석 질의 → analyze_data 노드 진입."""
         t0 = time.perf_counter()
-        result, tracker = await _run_with_rate_limit_retry(
+        result = await _run_with_rate_limit_retry(
             "지점별 여신 잔액 비교 분석해줘",
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        trace = tracker.trace
+        insight = result.insight or {}
+        intent = insight.get(
+            "query_interpretation", {},
+        ).get("intent", "")
+        sql_code = insight.get("sql_code", "")
         checks = {
-            "intent_analysis": trace.final_intent == "data_analysis",
-            "sql_generated": bool(trace.sql.generated_sql),
+            "intent_analysis": intent == "data_analysis",
+            "sql_generated": bool(sql_code),
         }
         _record("F-01", "analysis", "지점별 분석",
-                result, tracker, checks, elapsed)
+                result, checks, elapsed)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -447,7 +464,7 @@ class TestFullReport:
                     f"valid={'Y' if item['sql_validated'] else 'N'}, "
                     f"exec={'Y' if item['sql_executed'] else 'N'}, "
                     f"rows={item['row_count']}, "
-                    f"llm={item['llm_calls']}calls, "
+                    f"steps={item['trace_steps']}, "
                     f"{item['elapsed_ms']}ms"
                 )
                 failed_checks = [
@@ -463,7 +480,7 @@ class TestFullReport:
         total = len(RESULTS)
         passed = sum(1 for r in RESULTS if r["all_passed"])
         avg_ms = sum(r["elapsed_ms"] for r in RESULTS) / total
-        total_llm = sum(r["llm_calls"] for r in RESULTS)
+        total_steps = sum(r["trace_steps"] for r in RESULTS)
 
         lines.append("=" * 76)
         lines.append(
@@ -472,7 +489,7 @@ class TestFullReport:
             f"FAIL: {total - passed}"
         )
         lines.append(f"  AVG LATENCY: {avg_ms:.0f}ms")
-        lines.append(f"  TOTAL LLM CALLS: {total_llm}")
+        lines.append(f"  TOTAL TRACE STEPS: {total_steps}")
         lines.append("=" * 76)
 
         # trace_analyzer 자동 분석
@@ -481,7 +498,7 @@ class TestFullReport:
         lines.append("-" * 60)
 
         try:
-            from src.utils.tracker import analyze_batch
+            from src.utils.tracker.trace_analyzer import analyze_batch
             if TRACE_OUTPUT_DIR.exists():
                 batch = analyze_batch(str(TRACE_OUTPUT_DIR))
                 lines.append(batch.summary)

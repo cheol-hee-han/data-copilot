@@ -229,8 +229,8 @@ flowchart TD
         EVAL_LOGIC -->|"5. 확신 부족"| REPLAN_V
     end
 
-    TERMINATE["TERMINATE<br/>→ reason_finalize"] --> FIN
-    ASK_USER["ASK_USER<br/>→ reason_finalize<br/><small>(명확화 요청)</small>"] --> FIN
+    TERMINATE["TERMINATE<br/>→ result_finalizer"] --> FIN
+    ASK_USER["ASK_USER<br/>→ result_finalizer<br/><small>(명확화 요청)</small>"] --> FIN
     GENERATE["GENERATE<br/>→ sql_generator"] --> GEN
     EXPLORE_MORE["EXPLORE<br/>→ context_explorer"] --> EXP
     REPLAN_V["REPLAN<br/>→ recovery_planner"] --> REC
@@ -329,19 +329,19 @@ planner 단계에서 탐색 없이 바로 SQL 생성으로 진입하는 최적�
 
 ### 4.6 SQL 검증 실패 유형별 라우팅
 
-`_route_after_reason_validate_sql()` (pipeline.py:159-198)이 실패 유형에 따라 5가지 경로로 분기한다.
+`_route_after_sql_validator()` (pipeline.py)이 실패 유형��� 따라 6가지 경로로 분기한다.
 
 | 검증 결과 | 조건 | 라우팅 | 설명 |
 |----------|------|--------|------|
-| `SUCCESS` | — | → reason_finalize | SQL 확정 |
-| `FAIL_SYNTAX` | generate_attempts < 4 | → sql_generator (fix_syntax) | 구문 오류 수정 재시도 |
-| `FAIL_SEMANTIC_LOCAL` | local_fix < 2 | → sql_generator (fix_local) | GROUP BY 누락 등 로컬 수정 |
-| `FAIL_SEMANTIC_LOCAL` | local_fix ≥ 2 | → recovery_planner (replan) | 에스컬레이션: 가설 자체 교체 |
+| `SUCCESS` | — | → result_finalizer | SQL 확정 |
+| `FAIL_SYNTAX` | generate_attempts < MAX_GENERATES | → sql_generator (fix_syntax) | 구문 오류 수정 재시도 |
+| `FAIL_SEMANTIC_LOCAL` | local_fix < MAX_LOCAL_FIXES | → sql_generator (fix_local) | GROUP BY 누락 등 ���컬 수정 |
+| `FAIL_SEMANTIC_LOCAL` | local_fix ≥ MAX_LOCAL_FIXES | → recovery_planner (replan) | 에스컬���이션: 가설 자체 교체 |
 | `FAIL_STRUCTURAL` | — | → recovery_planner (replan) | 테이블/컬럼 불일치 |
 | `FAIL_EMPTY` | — | → recovery_planner (replan) | 결과 0건 |
 | `FAIL_DB_ERROR` | — | → recovery_planner (replan) | DB 실행 오류 |
-| fast-path 실패 | fast_path_triggered | → context_explorer | 정상 탐색으로 전환 |
-| 기타 / 한계 초과 | — | → reason_finalize (실패) | 최종 실패 처리 |
+| fast-path 실패 | fast_path_triggered | → context_explorer | ���상 탐색으로 전환 |
+| 기타 / 한계 초과 | — | → result_finalizer (실패) | 최종 실패 처리 |
 
 ---
 
@@ -426,7 +426,7 @@ DATA_QUERY → 분석 키워드 검사 ("추이", "비교", "분석", "변화")
 
 reason 계층에서 명확화가 필요한 경우(CONFLICTED 지식 항목, 교차 DB 감지 등)
 result_finalizer 또는 sql_generator가 직접 `clarification_question`을 생성하여
-`_route_after_reason_finalize()`에서 바로 END로 나간다 (clarify 노드를 거치지 않음).
+`_route_after_result_finalizer()`에서 바로 END로 나간다 (clarify 노드를 거치지 않음).
 
 ---
 
@@ -466,18 +466,19 @@ SQL 결과를 사용자 친화적 한국어 보고서로 변환한다.
 
 `pipeline.py`에 정의된 모든 라우팅 함수의 분기 조건을 정리한다.
 
-| 함수 | 위치 | 입력 조건 | 분기 |
-|------|------|----------|------|
-| `_route_after_preprocess` | L92 | `status == ERROR` | → error_end / resolve_history |
-| `_route_after_history_resolve` | L101 | `status == AWAITING_CLARIFICATION` | → END / classify_intent |
-| `_route_after_intent` | L110 | `intent 유형 + clarification_turns` | → clarify / normalize_query / reason_plan / error_end |
-| `_next_after_intent` | L132 | `normalization_enabled` | → normalize_query / reason_plan |
-| `_route_after_reason_plan` | L143 | `fast_path_triggered` | → reason_generate_sql / reason_explore |
-| `_route_after_reason_evaluate` | L152 | `evaluate_readiness()` 반환값 | → explore / generate_sql / replan / conclude_failure / ask_user |
-| `_route_after_reason_validate_sql` | L159 | `sql_validation_result.overall` | → 6가지 분기 (4.6절 참조) |
-| `_route_after_reason_recover` | L201 | `phase == "DONE"` | → conclude / explore |
-| `_route_after_reason_finalize` | L229 | `awaiting_clarification / error_message / validated_sql` | → END (자체 명확화 질문) / error_end / execute_sql |
-| `_route_after_execution` | L231 | `status == ERROR / intent 유형` | → error_end / analyze_data / format_response |
+| 함수 | 입력 조건 | 분기 |
+|------|----------|------|
+| `_route_after_preprocess` | `status == ERROR` | → error_end / resolve_history |
+| `_route_after_history_resolve` | `status == AWAITING_CLARIFICATION` | → END / classify_intent |
+| `_route_after_intent` | `intent 유형 + clarification_turns` | → clarify / normalize_query / planner / error_end |
+| `_next_after_intent` | `normalization_enabled` | → normalize_query / planner |
+| `_route_after_normalize` | `intent == CLARIFICATION_NEEDED` | → clarify / planner |
+| `_route_after_planner` | `fast_path_triggered` | → sql_generator / context_explorer |
+| `_route_after_confidence_evaluator` | `evaluate_readiness()` 반환값 | → explore / generate_sql / replan / conclude_failure / ask_user |
+| `_route_after_sql_validator` | `sql_validation_result.overall` | → 6가지 분기 (4.6절 참조) |
+| `_route_after_recovery_planner` | `phase == "DONE"` | → conclude / explore |
+| `_route_after_result_finalizer` | `awaiting_clarification / error_message / validated_sql` | → END (자체 명확화 질문) / error_end / execute_sql |
+| `_route_after_execution` | `status == ERROR / intent 유형` | → error_end / analyze_data / format_response |
 
 ---
 
@@ -498,17 +499,15 @@ PipelineState (최상위)
 ├── Reason ───────── reason: ReasoningState (중첩)
 │   ├── 진행 상태 ── phase
 │   ├── 플래너 ───── query_decomposition, hypotheses, current_hypothesis,
-│   │                execution_plan, current_step_index
+│   │                execution_plan
 │   ├── 누적 지식 ── knowledge_items, explored_use_cases, candidate_tables,
-│   │                confirmed_join_path, table_resolution,
 │   │                searched_queries, sampled_tables, rejected_tables,
 │   │                structural_hints
 │   ├── 실패 기록 ── dead_ends
 │   ├── SQL ──────── generated_sql, validated_sql, sql_fix_instruction,
 │   │                sql_validation_result
 │   ├── 루프 제어 ── loop_guard, fast_path_triggered
-│   ├── 최종 출력 ── final_status, exploration_summary
-│   └── 기타 ────── cache_refs
+│   └── 최종 출력 ── final_status, exploration_summary
 ├── Present ──────── context, sql_result, analysis_result, visualization,
 │                    formatted_response
 └── 관리 ─────────── status, error_message, trace_log
@@ -549,12 +548,9 @@ PipelineState (최상위)
 | `hypotheses` | `list[Hypothesis]` | 탐색 가설 목록 | 5 | 핵심 |
 | `current_hypothesis` | `Optional[Hypothesis]` | 현재 활성 가설 | 5 | 핵심 |
 | `execution_plan` | `list[ExecutionStep]` | 탐색 도구 실행 계획 | 4 | 핵심 |
-| `current_step_index` | `int` | 실행 계획 내 현재 위치 | 3 | 중간 |
 | `knowledge_items` | `list[KnowledgeItem]` | 탐색으로 축적된 지식 | 8 | 핵심 |
 | `explored_use_cases` | `list[dict]` | 탐색된 활용사례 | 5 | 중간 |
 | `candidate_tables` | `list[CandidateTable]` | 후보 테이블 목록 | 6 | 핵심 |
-| `confirmed_join_path` | `list[dict]` | 확인된 조인 경로 | 3 | 중간 |
-| `table_resolution` | `Optional[TableResolution]` | 테이블 충족성 검증 결과 | 2 | **낮음** |
 | `searched_queries` | `list[str]` | 실행한 검색 쿼리 목록 (중복 방지) | 5 | 중간 |
 | `sampled_tables` | `list[str]` | 샘플링 완료 테이블 (중복 방지) | 5 | 중간 |
 | `rejected_tables` | `list[str]` | 부적합 판정된 테이블 목록 | 4 | 중간 |
@@ -568,7 +564,6 @@ PipelineState (최상위)
 | `fast_path_triggered` | `bool` | Fast-Path 바이패스 여부 | 4 | 중간 |
 | `final_status` | `Literal["success","failure","pending"]` | 추론 최종 결과 | 3 | 핵심 |
 | `exploration_summary` | `str` | 탐색 과정 요약 텍스트 | 3 | 중간 |
-| `cache_refs` | `dict[str,str]` | 외부 캐시 참조 | **1** | **낮음** |
 
 #### Present 계층
 

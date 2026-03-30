@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from src.agents.models.normalization import VALID_QUERY_CATEGORIES
 from src.config import settings
 from src.models.enums import IntentType
-from src.utils.llm import ParseError, get_llm_client, llm_call_with_parse_retry
+from src.utils.llm import ParseError, llm_call_with_parse_retry
 from src.utils.tracker import record_prompt_variables
 from src.utils.logger import get_logger
 
@@ -67,23 +67,17 @@ async def classify_with_gate(
         user_template: 유저 프롬프트 템플릿 ({query} 플레이스홀더).
     """
     try:
-        client = get_llm_client()
         user_prompt = user_template.format(query=query)
-        response = await client.messages.create(
-            model=settings.llm_model,
-            max_tokens=settings.llm_default_max_tokens,
-            timeout=settings.llm_default_timeout,
+        _, gate_result = await llm_call_with_parse_retry(
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
+            parse_fn=_parse_gate_response,
+            max_tokens=settings.llm_default_max_tokens,
+            timeout=settings.llm_default_timeout,
+            node_name="intent_gate",
         )
+        await record_prompt_variables({"query": query})
 
-        record_prompt_variables({"query": query})
-
-        if not response.content:
-            raise ValueError("Intent Gate 응답이 비어있습니다")
-
-        raw = response.content[0].text
-        gate_result = _parse_gate_response(raw)
         category = gate_result.get("category", "AMBIGUOUS")
         confidence_str = gate_result.get("confidence", "MEDIUM")
         reason = gate_result.get("reason", "")
@@ -154,18 +148,14 @@ async def classify_legacy(
 
 
 def _parse_gate_response(raw: str) -> dict:
-    """Intent Gate LLM 응답을 JSON으로 파싱한다."""
+    """Intent Gate LLM 응답을 JSON으로 파싱한다.
+
+    파싱 실패 시 ValueError를 raise하여 llm_call_with_parse_retry가
+    교정 메시지와 함께 재시도할 수 있도록 한다.
+    """
     cleaned = re.sub(r"```(?:json)?\s*", "", raw)
     cleaned = cleaned.replace("```", "").strip()
-    try:
-        result = json.loads(cleaned)
-    except json.JSONDecodeError:
-        logger.error("Intent Gate JSON 파싱 실패")
-        return {
-            "category": "AMBIGUOUS",
-            "confidence": "LOW",
-            "reason": "Intent Gate 응답 파싱 실패",
-        }
+    result = json.loads(cleaned)  # JSONDecodeError → ValueError 계열
 
     cat = result.get("category", "").upper()
     if cat not in VALID_QUERY_CATEGORIES:

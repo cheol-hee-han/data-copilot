@@ -77,12 +77,12 @@ async def test_info_db_reject_non_select():
 
 
 @pytest.mark.asyncio
-async def test_history_db_search():
-    """이력 DB 유사 SQL 검색."""
+async def test_history_db_health():
+    """이력 DB 연결 확인."""
     db = HistoryDBConnector(use_dummy=True)
     await db.connect()
-    results = await db.search_similar_sql("신규 고객")
-    assert len(results) > 0
+    ok = await db.health_check()
+    assert ok is True
 
 
 @pytest.mark.asyncio

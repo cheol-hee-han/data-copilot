@@ -27,12 +27,21 @@ from src.connectors.dummy_data import (
     generate_dummy_data,
 )
 from src.utils.logger import get_logger
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
 
 class InfoDBConnector(DatabaseConnector):
     """정보계 DB 커넥터 (읽기 전용)."""
+
+    @property
+    def dialect(self) -> str:
+        return "postgres"
+
+    @property
+    def default_schema(self) -> str:
+        return ""
 
     def __init__(self, use_dummy: bool = True) -> None:
         self._use_dummy = use_dummy
@@ -121,7 +130,7 @@ class InfoDBConnector(DatabaseConnector):
         _elapsed = (_time.perf_counter() - _start) * 1000
         logger.info(
             "정보계 DB 쿼리 실행",
-            sql=query[:80],
+            sql=truncate_log(query),
             row_count=len(rows),
             latency_ms=round(_elapsed, 1),
         )
@@ -130,6 +139,14 @@ class InfoDBConnector(DatabaseConnector):
 
 class HistoryDBConnector(DatabaseConnector):
     """SQL 이력 DB 커넥터."""
+
+    @property
+    def dialect(self) -> str:
+        return "postgres"
+
+    @property
+    def default_schema(self) -> str:
+        return ""
 
     def __init__(self, use_dummy: bool = True) -> None:
         self._use_dummy = use_dummy

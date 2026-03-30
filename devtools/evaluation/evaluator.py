@@ -12,7 +12,6 @@ from pathlib import Path
 
 import sqlglot
 
-from src.services.similar_table_resolver import check_rejected_tables
 
 
 @dataclass
@@ -113,11 +112,20 @@ def _check_rejected(
     rejected_tables = golden.get("rejected_tables", [])
     if not rejected_tables:
         return True
-    passed, rej_errors = check_rejected_tables(
-        generated_sql, rejected_tables,
+
+    # SQL에서 FROM/JOIN 절의 테이블명 추출
+    matches = re.findall(
+        r"(?:FROM|JOIN)\s+(\w+)", generated_sql, re.IGNORECASE,
     )
+    used = {m.upper() for m in matches if m.upper().startswith("TB_")}
+
+    rej_errors = [
+        f"부적합한 유사 테이블 '{t}' 사용됨"
+        for t in rejected_tables
+        if t.upper() in used
+    ]
     errors.extend(rej_errors)
-    return passed
+    return len(rej_errors) == 0
 
 
 def evaluate_single(

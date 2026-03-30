@@ -12,7 +12,8 @@ Prompt Version: 2.0 (2026-03-26)
   v1.7 (2026-03-25): agentic 프롬프트 외부화
   v1.8 (2026-03-25): 3계층 디렉토리 구조 (interpret/reason/present)
   v1.9 (2026-03-25): 파일 명명규칙 통일 — 노드명 기반 + _system/_user 접미
-  v2.0 (2026-03-26): REASON_TABLE_COMPARISON 추가 (유사 테이블 비교 판정)
+  v2.0 (2026-03-26): TABLE_COMPARISON_SYSTEM 추가 (유사 테이블 비교 판정)
+  v2.1 (2026-03-29): 변수명을 파일명과 일치시키는 네이밍 통일
 
 모든 노드가 이 파일에서 프롬프트 변수를 import하여 사용한다.
 프롬프트 본문은 resources/prompts/ 하위 3계층 디렉토리에서 읽어온다.
@@ -26,38 +27,41 @@ Prompt Version: 2.0 (2026-03-26)
   {노드파일명}[_{하위기능}][_{phase}]_{역할}.txt
   역할: system | user | section
 
+명명 규칙 — 변수명 = 파일명(확장자 제외).upper():
+  예) analyzer_system.txt → ANALYZER_SYSTEM
+
 파일 매핑 (interpret/):
-  INTENT_CLASSIFICATION    ← intent_classifier_legacy_system.txt
-  INTENT_GATE              ← intent_classifier_system.txt
-  INTENT_GATE_USER         ← intent_classifier_user.txt
-  CLARIFICATION            ← clarifier_system.txt
-  CLARIFICATION_USER       ← clarifier_user.txt
-  NORMALIZATION_PHASE1     ← query_normalizer_phase1_system.txt
-  NORMALIZATION_PHASE1_USER← query_normalizer_phase1_user.txt
-  NORMALIZATION_PHASE2     ← query_normalizer_phase2_system.txt
-  NORMALIZATION_PHASE2_USER← query_normalizer_phase2_user.txt
-  HISTORY_RESOLVE          ← history_resolver_system.txt
-  HISTORY_RESOLVE_USER     ← history_resolver_user.txt
+  INTENT_CLASSIFIER_LEGACY_SYSTEM ← intent_classifier_legacy_system.txt
+  INTENT_CLASSIFIER_SYSTEM        ← intent_classifier_system.txt
+  INTENT_CLASSIFIER_USER          ← intent_classifier_user.txt
+  CLARIFIER_SYSTEM                ← clarifier_system.txt
+  CLARIFIER_USER                  ← clarifier_user.txt
+  QUERY_NORMALIZER_PHASE1_SYSTEM  ← query_normalizer_phase1_system.txt
+  QUERY_NORMALIZER_PHASE1_USER    ← query_normalizer_phase1_user.txt
+  QUERY_NORMALIZER_PHASE2_SYSTEM  ← query_normalizer_phase2_system.txt
+  QUERY_NORMALIZER_PHASE2_USER    ← query_normalizer_phase2_user.txt
+  HISTORY_RESOLVER_SYSTEM         ← history_resolver_system.txt
+  HISTORY_RESOLVER_USER           ← history_resolver_user.txt
 
 파일 매핑 (reason/):
-  REASON_PLAN_SYSTEM       ← planner_system.txt
-  REASON_EXPLORE_OBSERVE   ← context_explorer_system.txt
-  REASON_BATCH_INTERPRET   ← batch_interpret_system.txt
-  REASON_TABLE_COMPARISON  ← table_comparison_system.txt
-  REASON_GENERATE_SQL      ← sql_generator_system.txt
-  REASON_GENERATE_SQL_FIX  ← sql_generator_fix_section.txt
-  REASON_VALIDATE_LAYER2B  ← sql_validator_system.txt
-  REASON_REPLAN            ← recovery_planner_system.txt
+  PLANNER_SYSTEM              ← planner_system.txt
+  CONTEXT_EXPLORER_SYSTEM     ← context_explorer_system.txt
+  BATCH_INTERPRET_SYSTEM      ← batch_interpret_system.txt
+  TABLE_COMPARISON_SYSTEM     ← table_comparison_system.txt
+  SQL_GENERATOR_SYSTEM        ← sql_generator_system.txt
+  SQL_GENERATOR_FIX_SECTION   ← sql_generator_fix_section.txt
+  SQL_VALIDATOR_SYSTEM        ← sql_validator_system.txt
+  RECOVERY_PLANNER_SYSTEM     ← recovery_planner_system.txt
 
 파일 매핑 (present/):
-  DATA_ANALYSIS            ← analyzer_system.txt
-  ANALYSIS_USER            ← analyzer_user.txt
-  VIZ_JUDGMENT_SYSTEM      ← analyzer_viz_judgment_system.txt
-  VIZ_JUDGMENT_USER        ← analyzer_viz_judgment_user.txt
-  VIZ_SVG_SYSTEM           ← analyzer_viz_svg_system.txt
-  VIZ_SVG_USER             ← analyzer_viz_svg_user.txt
-  RESULT_FORMATTING        ← formatter_system.txt
-  FORMATTING_USER          ← formatter_user.txt
+  ANALYZER_SYSTEM                 ← analyzer_system.txt
+  ANALYZER_USER                   ← analyzer_user.txt
+  ANALYZER_VIZ_JUDGMENT_SYSTEM    ← analyzer_viz_judgment_system.txt
+  ANALYZER_VIZ_JUDGMENT_USER      ← analyzer_viz_judgment_user.txt
+  ANALYZER_VIZ_SVG_SYSTEM         ← analyzer_viz_svg_system.txt
+  ANALYZER_VIZ_SVG_USER           ← analyzer_viz_svg_user.txt
+  FORMATTER_SYSTEM                ← formatter_system.txt
+  FORMATTER_USER                  ← formatter_user.txt
 """
 
 from src.utils.resource_loader import load_text_required
@@ -82,25 +86,27 @@ def _present(filename: str) -> str:
 # interpret/ — 질의 해석 계층
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-INTENT_CLASSIFICATION = _interpret("intent_classifier_legacy_system.txt")
-CLARIFICATION = _interpret("clarifier_system.txt")
-CLARIFICATION_USER = _interpret("clarifier_user.txt")
-INTENT_GATE = _interpret("intent_classifier_system.txt")
-INTENT_GATE_USER = _interpret("intent_classifier_user.txt")
-NORMALIZATION_PHASE1 = _interpret(
+INTENT_CLASSIFIER_LEGACY_SYSTEM = _interpret(
+    "intent_classifier_legacy_system.txt",
+)
+INTENT_CLASSIFIER_SYSTEM = _interpret("intent_classifier_system.txt")
+INTENT_CLASSIFIER_USER = _interpret("intent_classifier_user.txt")
+CLARIFIER_SYSTEM = _interpret("clarifier_system.txt")
+CLARIFIER_USER = _interpret("clarifier_user.txt")
+QUERY_NORMALIZER_PHASE1_SYSTEM = _interpret(
     "query_normalizer_phase1_system.txt",
 )
-NORMALIZATION_PHASE1_USER = _interpret(
+QUERY_NORMALIZER_PHASE1_USER = _interpret(
     "query_normalizer_phase1_user.txt",
 )
-NORMALIZATION_PHASE2 = _interpret(
+QUERY_NORMALIZER_PHASE2_SYSTEM = _interpret(
     "query_normalizer_phase2_system.txt",
 )
-NORMALIZATION_PHASE2_USER = _interpret(
+QUERY_NORMALIZER_PHASE2_USER = _interpret(
     "query_normalizer_phase2_user.txt",
 )
-HISTORY_RESOLVE = _interpret("history_resolver_system.txt")
-HISTORY_RESOLVE_USER = _interpret("history_resolver_user.txt")
+HISTORY_RESOLVER_SYSTEM = _interpret("history_resolver_system.txt")
+HISTORY_RESOLVER_USER = _interpret("history_resolver_user.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -110,34 +116,29 @@ HISTORY_RESOLVE_USER = _interpret("history_resolver_user.txt")
 # 노드에서 .replace() 로 플레이스홀더를 치환해야 한다.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-REASON_PLAN_SYSTEM = _reason("planner_system.txt")
-REASON_EXPLORE_OBSERVE = _reason("context_explorer_system.txt")
-REASON_BATCH_INTERPRET = _reason("batch_interpret_system.txt")
-REASON_TABLE_COMPARISON = _reason("table_comparison_system.txt")
-REASON_TABLE_VERIFIER = _reason("table_verifier_system.txt")
-REASON_TABLE_VERIFIER_USER = _reason(
-    "table_verifier_user.txt",
-)
-REASON_GENERATE_SQL = _reason("sql_generator_system.txt")
-REASON_GENERATE_SQL_FIX = _reason(
+PLANNER_SYSTEM = _reason("planner_system.txt")
+BATCH_INTERPRET_SYSTEM = _reason("context_explorer_batch_interpret.txt")
+TABLE_COMPARISON_SYSTEM = _reason("table_comparison_system.txt")
+SQL_GENERATOR_SYSTEM = _reason("sql_generator_system.txt")
+SQL_GENERATOR_FIX_SECTION = _reason(
     "sql_generator_fix_section.txt",
 )
-REASON_VALIDATE_LAYER2B = _reason("sql_validator_system.txt")
-REASON_REPLAN = _reason("recovery_planner_system.txt")
+SQL_VALIDATOR_SYSTEM = _reason("sql_validator_system.txt")
+RECOVERY_PLANNER_SYSTEM = _reason("recovery_planner_system.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # present/ — 표현 계층
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-DATA_ANALYSIS = _present("analyzer_system.txt")
-ANALYSIS_USER = _present("analyzer_user.txt")
-VIZ_JUDGMENT_SYSTEM = _present("analyzer_viz_judgment_system.txt")
-VIZ_JUDGMENT_USER = _present("analyzer_viz_judgment_user.txt")
-VIZ_SVG_SYSTEM = _present("analyzer_viz_svg_system.txt")
-VIZ_SVG_USER = _present("analyzer_viz_svg_user.txt")
-RESULT_FORMATTING = _present("formatter_system.txt")
-FORMATTING_USER = _present("formatter_user.txt")
+ANALYZER_SYSTEM = _present("analyzer_system.txt")
+ANALYZER_USER = _present("analyzer_user.txt")
+ANALYZER_VIZ_JUDGMENT_SYSTEM = _present("analyzer_viz_judgment_system.txt")
+ANALYZER_VIZ_JUDGMENT_USER = _present("analyzer_viz_judgment_user.txt")
+ANALYZER_VIZ_SVG_SYSTEM = _present("analyzer_viz_svg_system.txt")
+ANALYZER_VIZ_SVG_USER = _present("analyzer_viz_svg_user.txt")
+FORMATTER_SYSTEM = _present("formatter_system.txt")
+FORMATTER_USER = _present("formatter_user.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

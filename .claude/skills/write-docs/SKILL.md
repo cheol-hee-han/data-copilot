@@ -12,11 +12,12 @@ user_invocable: true
 # 사용법
 
 ```
-/write-docs                                        # 프로젝트 전체의 문서 정비
-/write-docs docs/architecture/                     # 디렉토리 전체 점검·정비
-/write-docs docs/architecture/loan_architecture.md # 특정 파일 점검·정비
-/write-docs --check-only                           # 정비 없이 부족한 곳만 리스트업
-/write-docs --this                                 # 현재 작업 중인 파일에 대해서만 점검·정비
+/write-docs                                                           # 프로젝트 전체의 문서 정비
+/write-docs docs/architecture/                                        # 디렉토리 전체 점검·정비
+/write-docs docs/architecture/loan_architecture.md                    # 특정 파일 점검·정비
+/write-docs docs/architecture/ docs/architecture/loan_architecture.md # 디렉토리 하위 전체와 특정 파일 점검·정비
+/write-docs --check-only                                              # 정비 없이 부족한 곳만 리스트업
+/write-docs --this                                                    # 현재 작업 중인 파일에 대해서만 점검·정비
 ```
 
 # 핵심 원칙

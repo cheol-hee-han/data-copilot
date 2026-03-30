@@ -26,6 +26,7 @@ from src.models.result import SQLResult
 from src.utils.llm import get_llm_client
 from src.utils.logger import get_logger
 from src.utils.tracker import record_prompt_variables
+from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
 
@@ -125,9 +126,9 @@ async def format_response(
     )
 
     result_text = format_result_for_prompt(sql_result)
-    record_prompt_variables({
+    await record_prompt_variables({
         "user_input": user_input,
-        "query_result": result_text[:300] + "..." if len(result_text) > 300 else result_text,
+        "query_result": truncate_log(result_text),
     })
 
     llm_elapsed = (

@@ -51,6 +51,6 @@ async def preprocess_node(state: PipelineState) -> dict:
         "trace_log": add_trace(
             state, "전처리",
             "입력 정규화 완료",
-            f"'{result.text[:40]}...'",
+            result.text,
         ),
     }

@@ -1,0 +1,495 @@
+{
+  "version": "1.0",
+  "created": "2026-03-29",
+  "description": "시딩된 실제 데이터 기반 NL-to-SQL 테스트 질의 — 난이도별 10개 × 3등급 = 30건",
+  "target": "Docker 데이터소스(PG/ES/Qdrant/MongoDB) + LLM API",
+  "total_cases": 30,
+  "seeded_tables": {
+    "고객": {
+      "TB_ADW_CSC101M": {
+        "alt_name": "고객기본정보",
+        "rows": 500,
+        "pk": "EDPS_CSN + STD_DT"
+      },
+      "TB_ADW_CSC102H": {
+        "alt_name": "고객이력",
+        "rows": 500,
+        "pk": "EDPS_CSN + STD_DT"
+      },
+      "TB_ADW_CSP103M": {
+        "alt_name": "고객프로필-마케팅",
+        "rows": 500,
+        "pk": "EDPS_CSN"
+      }
+    },
+    "수신": {
+      "TB_ADW_DEP201P": {
+        "alt_name": "수신계좌(T+0)",
+        "rows": 600,
+        "pk": "ACN + STD_DT"
+      },
+      "TB_ADW_DEP202S": {
+        "alt_name": "수신요약(T+1)",
+        "rows": 600,
+        "pk": "ACN + BASE_DT"
+      }
+    },
+    "여신": {
+      "TB_ADW_LNB301M": {
+        "alt_name": "여신정보-기본",
+        "rows": 800,
+        "pk": "LN_NO + STD_DT"
+      },
+      "TB_ADW_LNB302M": {
+        "alt_name": "여신마스터-승인",
+        "rows": 800,
+        "pk": "LN_NO"
+      }
+    },
+    "카드": {
+      "TB_ADW_CRD401M": {
+        "alt_name": "카드정보",
+        "rows": 300,
+        "pk": "CRD_NO + STD_DT"
+      }
+    },
+    "외환": {
+      "TB_ADW_FXD501L": { "alt_name": "외환딜", "rows": 200, "pk": "DL_NO" },
+      "TB_ADW_FXB502M": {
+        "alt_name": "환율정보",
+        "rows": 100,
+        "pk": "CCY_CD + BASE_DT"
+      }
+    },
+    "펀드": {
+      "TB_ADW_FND601P": {
+        "alt_name": "펀드잔고",
+        "rows": 300,
+        "pk": "FND_ACN + STD_DT"
+      },
+      "TB_ADW_FND602P": {
+        "alt_name": "펀드평가",
+        "rows": 300,
+        "pk": "FND_ACN + STD_DT"
+      }
+    },
+    "거래": {
+      "TB_ADW_TRX701L": {
+        "alt_name": "거래이력",
+        "rows": 3000,
+        "pk": "TR_ID + TR_DT"
+      }
+    },
+    "보험": {
+      "TB_ADW_INS803M": { "alt_name": "보험계약", "rows": 200, "pk": "INS_NO" }
+    },
+    "퇴직연금": {
+      "TB_ADW_PNB904P": {
+        "alt_name": "퇴직연금",
+        "rows": 200,
+        "pk": "PLAN_NO + EDPS_CSN + STD_DT"
+      }
+    },
+    "리스크": {
+      "TB_ADW_RSK1101M": {
+        "alt_name": "리스크지표",
+        "rows": 100,
+        "pk": "IND_CD + STD_DT"
+      }
+    },
+    "마케팅": {
+      "TB_ADW_MKT1201M": {
+        "alt_name": "캠페인마스터",
+        "rows": 50,
+        "pk": "CAMP_CD"
+      },
+      "TB_ADW_MKT1202M": {
+        "alt_name": "캠페인대상고객",
+        "rows": 500,
+        "pk": "CAMP_CD + EDPS_CSN"
+      }
+    },
+    "손익": {
+      "TB_ADW_FIN1306S": {
+        "alt_name": "손익요약",
+        "rows": 1200,
+        "pk": "BLNG_BRCD + BASE_YM + PL_ITEM_CD"
+      }
+    },
+    "WM": {
+      "TB_ADW_WMB1401M": {
+        "alt_name": "WM고객정보",
+        "rows": 100,
+        "pk": "EDPS_CSN"
+      }
+    },
+    "조직": {
+      "TB_ADW_COM001M": {
+        "alt_name": "부점정보기본",
+        "rows": 20,
+        "pk": "BLNG_BRCD"
+      },
+      "TB_ADW_COM002M": {
+        "alt_name": "고객등급코드",
+        "rows": 5,
+        "pk": "GRD_CD"
+      }
+    }
+  },
+  "categories": [
+    {
+      "id": "EASY",
+      "name": "Easy — 단일 테이블 단순 집계/조회",
+      "description": "1개 테이블, 명확한 조건, 단일 집계 함수. 코드값 매핑이 쉽거나 불필요.",
+      "expected_path": "planner → explore(1~2 step) → evaluator → sql_generator → validator → success",
+      "cases": [
+        {
+          "id": "EASY-01",
+          "query": "전체 고객 수 알려줘",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_sql_pattern": "SELECT COUNT(*) FROM biz_schema.TB_ADW_CSC101M",
+          "focus": "단순 COUNT, 조건 없음",
+          "challenge": "없음 — 가장 기본적인 질의"
+        },
+        {
+          "id": "EASY-02",
+          "query": "현재 연체 중인 대출 건수",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_sql_pattern": "SELECT COUNT(*) ... WHERE OVDU_GRD_CD >= '03' OR OVDU_DY_CN > 0",
+          "focus": "연체 판정 기준 코드값 매핑",
+          "challenge": "OVDU_GRD_CD 코드 체계 파악 필요"
+        },
+        {
+          "id": "EASY-03",
+          "query": "신용카드 총 월사용액 합계 알려줘",
+          "expected_tables": ["TB_ADW_CRD401M"],
+          "expected_sql_pattern": "SELECT SUM(MON_USE_AMT) ... WHERE CRD_DCD = '01'",
+          "focus": "SUM 집계 + 코드 필터",
+          "challenge": "CRD_DCD 신용카드 코드값 확인"
+        },
+        {
+          "id": "EASY-04",
+          "query": "지점이 몇 개야?",
+          "expected_tables": ["TB_ADW_COM001M"],
+          "expected_sql_pattern": "SELECT COUNT(*) FROM biz_schema.TB_ADW_COM001M",
+          "focus": "마스터 테이블 단순 카운트",
+          "challenge": "없음"
+        },
+        {
+          "id": "EASY-05",
+          "query": "담보대출 평균 금리 얼마야?",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_sql_pattern": "SELECT AVG(APLY_RT) ... WHERE LN_DCD = '02'",
+          "focus": "AVG 집계 + 대출유형 코드 매핑",
+          "challenge": "LN_DCD 담보대출 코드 확인"
+        },
+        {
+          "id": "EASY-06",
+          "query": "고객등급별 고객 수 분포 보여줘",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_sql_pattern": "SELECT CUS_GRD_CD, COUNT(*) ... GROUP BY CUS_GRD_CD",
+          "focus": "GROUP BY 단순 집계",
+          "challenge": "등급 코드 → 명칭 변환 여부"
+        },
+        {
+          "id": "EASY-07",
+          "query": "USD 최신 기준환율 알려줘",
+          "expected_tables": ["TB_ADW_FXB502M"],
+          "expected_sql_pattern": "SELECT BASE_RT ... WHERE CCY_CD = 'USD' ORDER BY BASE_DT DESC LIMIT 1",
+          "focus": "단일 행 조회 + 정렬",
+          "challenge": "최신 일자 선택 로직"
+        },
+        {
+          "id": "EASY-08",
+          "query": "보험유형별 계약 건수",
+          "expected_tables": ["TB_ADW_INS803M"],
+          "expected_sql_pattern": "SELECT INS_DCD, COUNT(*) ... GROUP BY INS_DCD",
+          "focus": "GROUP BY 코드 집계",
+          "challenge": "INS_DCD 코드 매핑 (L/N/H)"
+        },
+        {
+          "id": "EASY-09",
+          "query": "퇴직연금 총 적립금 합계",
+          "expected_tables": ["TB_ADW_PNB904P"],
+          "expected_sql_pattern": "SELECT SUM(TOT_BAL_AMT) FROM biz_schema.TB_ADW_PNB904P",
+          "focus": "SUM 단순 집계",
+          "challenge": "없음"
+        },
+        {
+          "id": "EASY-10",
+          "query": "이번 달 거래 건수 알려줘",
+          "expected_tables": ["TB_ADW_TRX701L"],
+          "expected_sql_pattern": "SELECT COUNT(*) ... WHERE TR_DT >= '2026-03-01'",
+          "focus": "날짜 필터 + 파티션 테이블",
+          "challenge": "이번 달 → 날짜 범위 변환"
+        }
+      ]
+    },
+    {
+      "id": "NORMAL",
+      "name": "Normal — 2~3 테이블 조인, 복합 조건, 코드값 추론",
+      "description": "JOIN 필요, GROUP BY + ORDER BY 조합, 코드값/용어 추론, HAVING 절 등",
+      "expected_path": "planner → explore(3~5 step) → evaluator → sql_generator → validator → [재시도 가능] → success",
+      "cases": [
+        {
+          "id": "NORM-01",
+          "query": "지점별 여신 잔액 합계를 지점명과 함께 상위 10개 보여줘",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_join": "BLNG_BRCD",
+          "expected_sql_pattern": "JOIN + GROUP BY + ORDER BY DESC + LIMIT 10",
+          "focus": "2테이블 JOIN + 정렬 + LIMIT",
+          "challenge": "지점명 조인, TOP N 처리"
+        },
+        {
+          "id": "NORM-02",
+          "query": "VIP 고객이 보유한 예금 총 잔액과 대출 총 잔액 비교해줘",
+          "expected_tables": [
+            "TB_ADW_CSC101M",
+            "TB_ADW_DEP201P",
+            "TB_ADW_LNB301M"
+          ],
+          "expected_join": "EDPS_CSN",
+          "expected_sql_pattern": "LEFT JOIN × 2 + SUM + WHERE CUS_GRD_CD = '01'",
+          "focus": "3테이블 조인 + 등급 필터",
+          "challenge": "예금/대출 동시 집계 시 중복 방지 (서브쿼리 또는 별도 집계)"
+        },
+        {
+          "id": "NORM-03",
+          "query": "채널별 월간 거래 추이 보여줘",
+          "expected_tables": ["TB_ADW_TRX701L"],
+          "expected_sql_pattern": "SELECT CHN_CD, DATE_TRUNC('month', TR_DT), COUNT(*), SUM(TR_AMT) GROUP BY 1,2 ORDER BY 2",
+          "focus": "날짜 집계 + 채널 크로스탭",
+          "challenge": "월별 그룹핑 함수, 파티션 테이블"
+        },
+        {
+          "id": "NORM-04",
+          "query": "연체 고객의 고객등급 분포 알려줘",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_CSC101M"],
+          "expected_join": "EDPS_CSN",
+          "expected_sql_pattern": "JOIN + WHERE 연체조건 + GROUP BY CUS_GRD_CD",
+          "focus": "연체 판정 + 등급 분포",
+          "challenge": "연체 판정 기준 (OVDU_GRD_CD or OVDU_DY_CN), DISTINCT 고객"
+        },
+        {
+          "id": "NORM-05",
+          "query": "펀드 수익률이 마이너스인 고객 수와 평균 손실률",
+          "expected_tables": ["TB_ADW_FND602P"],
+          "expected_sql_pattern": "SELECT COUNT(DISTINCT EDPS_CSN), AVG(ERNS_RT) WHERE ERNS_RT < 0",
+          "focus": "마이너스 필터 + DISTINCT 집계",
+          "challenge": "수익률 음수 조건, 고객 단위 vs 계좌 단위 구분"
+        },
+        {
+          "id": "NORM-06",
+          "query": "서울 지역 지점의 고객 수랑 수신 잔액 합계",
+          "expected_tables": [
+            "TB_ADW_COM001M",
+            "TB_ADW_CSC101M",
+            "TB_ADW_DEP201P"
+          ],
+          "expected_join": "BLNG_BRCD, EDPS_CSN",
+          "expected_sql_pattern": "3테이블 JOIN + WHERE RGN_NM LIKE '서울%' + COUNT + SUM",
+          "focus": "지역 필터 → 지점 → 고객 → 수신 체이닝",
+          "challenge": "3단계 조인 경로, 지역 검색 조건"
+        },
+        {
+          "id": "NORM-07",
+          "query": "캠페인 응답률이 30% 이상인 캠페인 목록이랑 응답 건수",
+          "expected_tables": ["TB_ADW_MKT1201M", "TB_ADW_MKT1202M"],
+          "expected_join": "CAMP_CD",
+          "expected_sql_pattern": "JOIN + GROUP BY + HAVING (SUM(RESP_YN='Y') / COUNT(*)) >= 0.3",
+          "focus": "비율 계산 + HAVING 필터",
+          "challenge": "응답률 산출식 (RESP_YN 집계), HAVING 활용"
+        },
+        {
+          "id": "NORM-08",
+          "query": "고객별 보유 상품 수를 상품종류(예금, 대출, 카드, 펀드)별로 보여줘",
+          "expected_tables": [
+            "TB_ADW_CSC101M",
+            "TB_ADW_DEP201P",
+            "TB_ADW_LNB301M",
+            "TB_ADW_CRD401M",
+            "TB_ADW_FND601P"
+          ],
+          "expected_join": "EDPS_CSN",
+          "expected_sql_pattern": "다중 LEFT JOIN + COUNT(DISTINCT) 또는 UNION ALL + PIVOT",
+          "focus": "4개 상품 테이블 크로스 집계",
+          "challenge": "다중 조인 전략 선택, NULL 처리"
+        },
+        {
+          "id": "NORM-09",
+          "query": "지난달 지점별 손익 현황 보여줘",
+          "expected_tables": ["TB_ADW_FIN1306S", "TB_ADW_COM001M"],
+          "expected_join": "BLNG_BRCD",
+          "expected_sql_pattern": "JOIN + WHERE BASE_YM = '202602' + PIVOT or GROUP BY",
+          "focus": "손익항목 피벗 + 지점명 조인",
+          "challenge": "PL_ITEM_CD 피벗 (NII, NFI, OPEX 등), 지난달 날짜 계산"
+        },
+        {
+          "id": "NORM-10",
+          "query": "대출 잔액 1억 이상이면서 연체 30일 초과한 건의 지점별 건수",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_join": "BLNG_BRCD",
+          "expected_sql_pattern": "JOIN + WHERE LN_BAL_AMT >= 1e8 AND OVDU_DY_CN > 30 + GROUP BY",
+          "focus": "복합 WHERE + 지점 GROUP BY",
+          "challenge": "금액 단위 변환 (1억), 연체일수 컬럼 파악"
+        }
+      ]
+    },
+    {
+      "id": "HARD",
+      "name": "Hard — 복합 분석, 계수산출식, 모호한 표현, 다중 추론",
+      "description": "3+ 테이블 조인, 서브쿼리/CTE, 계수산출식 분해, TYPE-1~4 불완전 메타 대응, 모호한 자연어",
+      "expected_path": "planner → explore(5+ step) → evaluator → [replan 가능] → sql_generator → validator → [재시도 2회+] → success",
+      "cases": [
+        {
+          "id": "HARD-01",
+          "query": "연체율 추이를 월별로 보여줘",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_sql_pattern": "CTE: 월별 SUM(OVDU_AMT) / SUM(LN_BAL_AMT) × 100",
+          "focus": "계수산출식 분해 (연체율 = 연체원금/여신잔액×100)",
+          "challenge": "Neo4j 온톨로지에서 연체율 산출식 조회 → 분자/분모 매핑 → 월별 집계",
+          "type_challenges": ["TYPE-2: OVDU_GRD_CD 미정의 코드(0A) 처리"]
+        },
+        {
+          "id": "HARD-02",
+          "query": "고객 자산 포트폴리오 현황 보여줘",
+          "expected_tables": [
+            "TB_ADW_CSC101M",
+            "TB_ADW_DEP201P",
+            "TB_ADW_LNB301M",
+            "TB_ADW_FND601P",
+            "TB_ADW_INS803M"
+          ],
+          "expected_sql_pattern": "다중 LEFT JOIN 또는 UNION ALL + SUM per product type",
+          "focus": "5개 상품 테이블 통합 — 예금+펀드+보험 = 자산, 대출 = 부채",
+          "challenge": "포트폴리오 개념 해석, 자산/부채 구분, 순자산 계산",
+          "type_challenges": [
+            "TYPE-4: DEP201P(T+0) vs DEP202S(T+1) 선택",
+            "TYPE-1: BAL_AMT vs TOT_BAL_AMT"
+          ]
+        },
+        {
+          "id": "HARD-03",
+          "query": "WM 고객 중 투자성향 대비 고위험 펀드 비중이 높은 고객 알려줘",
+          "expected_tables": ["TB_ADW_WMB1401M", "TB_ADW_FND601P"],
+          "expected_join": "EDPS_CSN",
+          "expected_sql_pattern": "JOIN + CASE WHEN 투자성향 vs RSK_GRD_CD 비교 + 비중 계산",
+          "focus": "투자성향-리스크 등급 교차 분석",
+          "challenge": "INVEST_PRFL_CD ↔ RSK_GRD_CD 매핑 규칙 추론, 비중 산출",
+          "type_challenges": [
+            "TYPE-2: INVEST_PRFL_CD=0 미평가 고객 처리",
+            "TYPE-3: 컬럼 설명 부족"
+          ]
+        },
+        {
+          "id": "HARD-04",
+          "query": "예금만 있고 다른 상품은 하나도 없는 고객 수랑 평균 잔액",
+          "expected_tables": [
+            "TB_ADW_DEP201P",
+            "TB_ADW_LNB301M",
+            "TB_ADW_CRD401M",
+            "TB_ADW_FND601P",
+            "TB_ADW_INS803M",
+            "TB_ADW_PNB904P"
+          ],
+          "expected_sql_pattern": "EXISTS(DEP) AND NOT EXISTS(LN) AND NOT EXISTS(CRD) AND NOT EXISTS(FND) AND NOT EXISTS(INS) AND NOT EXISTS(PNB)",
+          "focus": "6개 테이블 존재/미존재 판정",
+          "challenge": "NOT EXISTS 5개 서브쿼리 조합, 성능 최적화",
+          "type_challenges": []
+        },
+        {
+          "id": "HARD-05",
+          "query": "지점 실적 순위 매겨줘",
+          "expected_tables": ["TB_ADW_FIN1306S", "TB_ADW_COM001M"],
+          "expected_sql_pattern": "RANK() OVER(ORDER BY NET_PROFIT DESC) 또는 다중 지표 합산",
+          "focus": "모호한 질의 — '실적'의 정의가 불명확",
+          "challenge": "clarification 분기 예상: 실적 = 순이익? 수신잔액? 고객수? → 사용자 확인 필요",
+          "type_challenges": [
+            "CONFLICTED 상태로 clarification_question 생성 예상"
+          ]
+        },
+        {
+          "id": "HARD-06",
+          "query": "리스크 지표 중 기준치를 초과한 항목과 추이 보여줘",
+          "expected_tables": ["TB_ADW_RSK1101M"],
+          "expected_sql_pattern": "WHERE IND_VAL > LIMIT_VAL + 월별 추이 (STD_DT GROUP BY)",
+          "focus": "기준치 초과 필터 + 시계열 추이",
+          "challenge": "IND_VAL vs LIMIT_VAL 비교, 지표별 단위(%, 배수) 상이",
+          "type_challenges": ["TYPE-3: IND_NM 설명 품질 혼재"]
+        },
+        {
+          "id": "HARD-07",
+          "query": "고객 이탈 위험군 뽑아줘",
+          "expected_tables": [
+            "TB_ADW_CSC101M",
+            "TB_ADW_TRX701L",
+            "TB_ADW_DEP201P"
+          ],
+          "expected_sql_pattern": "거래빈도 감소 + 잔액 감소 + 등급 하락 복합 조건",
+          "focus": "이탈 위험의 업무적 정의 추론 — 명확한 정의 없음",
+          "challenge": "clarification 또는 다중 조건 조합 (최근 3개월 거래 0건, 잔액 50% 이하 감소 등)",
+          "type_challenges": [
+            "TYPE-4: CSC101M vs CSC102H 이력 비교 필요할 수 있음"
+          ]
+        },
+        {
+          "id": "HARD-08",
+          "query": "외환 딜 수익률 상위 통화 분석해줘",
+          "expected_tables": ["TB_ADW_FXD501L", "TB_ADW_FXB502M"],
+          "expected_join": "CCY_CD",
+          "expected_sql_pattern": "JOIN + (DL_RT - BASE_RT) / BASE_RT 수익률 계산 + GROUP BY CCY_CD",
+          "focus": "환율 차이 기반 수익률 산출",
+          "challenge": "딜환율 vs 기준환율 매칭 (날짜 기준), 매입/매도 방향별 손익 부호",
+          "type_challenges": ["TYPE-2: FX_DL_DCD=06, CCY_CD=CNH 미정의 코드"]
+        },
+        {
+          "id": "HARD-09",
+          "query": "등급이 떨어진 고객 목록이랑 원인 분석해줘",
+          "expected_tables": [
+            "TB_ADW_CSC101M",
+            "TB_ADW_CSC102H",
+            "TB_ADW_DEP201P",
+            "TB_ADW_LNB301M"
+          ],
+          "expected_sql_pattern": "이력 비교(CSC102H self-join 또는 LAG) + 원인 추정(잔액 감소, 연체 발생 등)",
+          "focus": "이력 테이블 활용 + 원인 추론",
+          "challenge": "등급 변동 감지(이전 vs 현재), 원인은 분석 영역이라 SQL만으로 한계",
+          "type_challenges": [
+            "TYPE-1: JOIN_DT vs RGST_DT 컬럼명 불일치",
+            "TYPE-4: CUS_GRD_CD vs MKT_GRD_CD 기준 상이"
+          ]
+        },
+        {
+          "id": "HARD-10",
+          "query": "지점별 예대율 계산해서 보여줘",
+          "expected_tables": [
+            "TB_ADW_DEP201P",
+            "TB_ADW_LNB301M",
+            "TB_ADW_COM001M"
+          ],
+          "expected_join": "BLNG_BRCD",
+          "expected_sql_pattern": "CTE: 지점별 SUM(LN_BAL_AMT) / SUM(BAL_AMT) × 100",
+          "focus": "계수산출식 (예대율 = 여신잔액/수신잔액×100)",
+          "challenge": "Neo4j 예대율 산출식 조회 → 분자(여신)/분모(수신) 매핑 → 지점별 집계",
+          "type_challenges": [
+            "TYPE-4: DEP201P(T+0) vs DEP202S(T+1) 어느 잔액 기준?"
+          ]
+        }
+      ]
+    }
+  ],
+  "evaluation_criteria": {
+    "테이블_선택": "expected_tables 와 실제 사용 테이블 일치 여부",
+    "조인_정확성": "expected_join 키 컬럼 일치 여부",
+    "집계_정확성": "집계 함수 + GROUP BY + 조건이 의미적으로 올바른지",
+    "코드값_매핑": "코드값 필터 조건이 정확한지 (예: CUS_GRD_CD = '01' for VIP)",
+    "실행_가능성": "생성된 SQL이 실제 시딩 데이터에서 오류 없이 실행되는지",
+    "결과_합리성": "반환 결과가 시딩 데이터 볼륨과 일관성 있는지"
+  },
+  "notes": [
+    "HARD 케이스 중 HARD-05, HARD-07은 clarification 분기가 예상되는 의도적 모호 질의",
+    "TYPE-2 불완전 메타: 시딩 데이터에 ~3% 미정의 코드가 포함되어 있으나 ES/MongoDB 코드 메타에는 미등록",
+    "TYPE-4 값 불일치: T+0/T+1 테이블, 승인/실행 금액, 원금/평가액 차이가 테스트 포인트",
+    "모든 금액 컬럼은 원(KRW) 단위, 환율은 원/외화 단위"
+  ]
+}

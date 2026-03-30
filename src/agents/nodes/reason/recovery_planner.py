@@ -1,26 +1,70 @@
 """recovery_planner 노드 — dead-ends 기반 가설 교체 + 새 실행계획 수립.
 
-planner 노드와 완전히 분리된 별도 노드.
-이미 탐색한 것은 재탐색하지 않으며, confirmed knowledge는 재사용한다.
+SQL 검증 실패 또는 confidence 부족으로 replan이 필요할 때 호출된다.
+planner 노드(초기 계획)와 완전히 분리되어 재계획만 담당한다.
+
+핵심 전략:
+    1. 현재 활성 가설을 FAILED로 전환하고 DeadEnd에 기록
+    2. PENDING 가설이 남아있으면 LLM 호출 없이 즉시 다음 가설로 전환
+    3. PENDING 가설이 없으면 LLM을 호출하여 새로운 가설을 생성
+    4. 새 가설도 생성 불가(give_up=true)면 phase="DONE"으로 종료
+
+실패 맥락 소비:
+    이전 노드(sql_validator 또는 confidence_evaluator)가 설정한
+    failure_type과 failure_reason을 읽어 DeadEnd를 생성한다.
+    recovery_planner 자체에서 실패 원인을 추론하지 않는다.
+
+LLM 입력 (replan 프롬프트):
+    - failure_history: dead_ends에서 추출한 이전 실패 이력
+    - discovered_facts: 완료된 실행 스텝의 insight 모음
+    - confirmed_knowledge: CONFIRMED/PROBABLE 지식 항목
+    - unresolved_items: UNRESOLVED/CONFLICTED 용어 목록
+    - tried_tables: 세션 레벨 후보 테이블 목록
+    - rejected_tables: 부적합 판정 테이블 목록
+
+LLM 출력:
+    - lessons_learned: 실패 교훈 → DeadEnd에 저장
+    - give_up: 재시도 포기 여부
+    - new_hypothesis: 새 가설 (description, strategy, missing_terms)
+    - execution_plan: LLM 제안 실행계획 (유효 tool만 필터링하여 우선 사용)
+
+핵심 함수:
+    - recovery_planner_node: 메인 노드 함수
+    - _build_replan_context: LLM 프롬프트용 컨텍스트 조립 (세션 레벨 state 직접 참조)
+    - _generate_new_hypotheses: LLM 호출로 새 가설 + 실행계획 + lessons_learned 생성
+    - _parse_replan_execution: LLM 제안 plan 파싱 + TOOL_MAP 검증
+    - _build_replan_execution: LLM plan 없을 때 rule-based 실행계획 생성
+
+위임 구조:
+    - 프롬프트: system_prompts.py의 RECOVERY_PLANNER_SYSTEM
 
 v2.0 (2026-03-25): LLM 기반 재계획으로 전환 — 외부 프롬프트 사용.
+v2.1 (2026-03-29): failure_type/failure_reason 통합, DeadEnd 경량화,
+                    _infer 함수 제거, lessons_learned 저장.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from src.agents.state.state import (
+    ConfidenceStatus,
+    FailureType,
+    FinalStatus,
+    HypothesisStatus,
+    Phase,
     PipelineState,
     ReasoningState,
     DeadEnd,
     ExecutionStep,
-    FailureType,
     Hypothesis,
+    TableSelectionStatus,
 )
-from src.agents.nodes.system_prompts import REASON_REPLAN
+from src.agents.nodes.system_prompts import RECOVERY_PLANNER_SYSTEM
+from src.utils.llm import llm_call_with_parse_retry, ParseError
+from src.utils.llm.response import extract_json
+from src.utils.llm.prompt import render_prompt
 from src.utils.logger import get_logger
 from src.utils.tracker import record_prompt_variables
 
@@ -30,7 +74,7 @@ logger = get_logger(__name__)
 async def recovery_planner_node(state: PipelineState) -> dict:
     """dead_ends를 기반으로 다음 가설을 선택하고 새 실행계획을 수립한다."""
     reason = state.reason.model_copy(deep=True)
-    reason.phase = "REPLANNING"
+    reason.phase = Phase.REPLANNING
 
     reason.loop_guard = reason.loop_guard.model_copy()
     reason.loop_guard.increment_replan()
@@ -41,42 +85,55 @@ async def recovery_planner_node(state: PipelineState) -> dict:
 
     if (
         reason.current_hypothesis
-        and reason.current_hypothesis.status == "ACTIVE"
+        and reason.current_hypothesis.status == HypothesisStatus.ACTIVE
     ):
         failed_hyp = reason.current_hypothesis.model_copy()
-        failed_hyp.status = "FAILED"
+        failed_hyp.status = HypothesisStatus.FAILED
         for i, h in enumerate(hypotheses):
             if h.hypothesis_id == failed_hyp.hypothesis_id:
                 hypotheses[i] = failed_hyp
                 break
+
+        # DeadEnd 생성: 이전 노드가 설정한 failure_type/failure_reason을 직접 사용
         dead_ends.append(DeadEnd(
             hypothesis_id=failed_hyp.hypothesis_id,
-            reason=_infer_failure_reason(reason),
-            tried_tables=[
-                ct.table_name for ct in reason.candidate_tables
-            ],
-            rejected_tables=list(reason.rejected_tables),
-            tried_terms=failed_hyp.missing_terms,
-            failure_type=_infer_failure_type(reason),
+            failure_type=reason.failure_type or FailureType.TERM_UNRESOLVABLE,
+            reason=reason.failure_reason or "실패 사유 미제공",
         ))
         reason.hypotheses = hypotheses
         reason.dead_ends = dead_ends
 
-    pending = [h for h in hypotheses if h.status == "PENDING"]
+    # 실패 맥락 소비 완료 → 초기화
+    reason.failure_type = None
+    reason.failure_reason = None
+
+    pending = [h for h in hypotheses if h.status == HypothesisStatus.PENDING]
+    llm_plan: list[ExecutionStep] = []
+    lessons: str = ""
 
     if not pending:
         replan_context = _build_replan_context(
             reason, state.preprocessed_input, dead_ends,
         )
-        new_hypotheses = await _generate_new_hypotheses(
-            replan_context,
+        new_hypotheses, llm_plan, lessons, give_up_reason = (
+            await _generate_new_hypotheses(replan_context)
         )
+
+        # lessons_learned를 방금 생성한 DeadEnd에 저장
+        if lessons and dead_ends:
+            last_de = dead_ends[-1]
+            dead_ends[-1] = last_de.model_copy(
+                update={"lessons_learned": lessons},
+            )
+            reason.dead_ends = dead_ends
+
         if not new_hypotheses:
             # C-09: 가설 소진 시 바로 DONE으로 전환
-            reason.phase = "DONE"
-            reason.final_status = "failure"
+            reason.phase = Phase.DONE
+            reason.final_status = FinalStatus.FAILURE
             reason.exploration_summary = (
-                _build_failure_summary(reason, dead_ends)
+                give_up_reason
+                or _build_failure_summary(reason, dead_ends)
             )
             reason.current_hypothesis = None
             return {"reason": reason}
@@ -84,19 +141,22 @@ async def recovery_planner_node(state: PipelineState) -> dict:
         reason.hypotheses = hypotheses + new_hypotheses
 
     next_hyp = pending[0].model_copy()
-    next_hyp.status = "ACTIVE"
+    next_hyp.status = HypothesisStatus.ACTIVE
     reason.current_hypothesis = next_hyp
 
-    replan_context = _build_replan_context(
-        reason, state.preprocessed_input, dead_ends,
-    )
-    execution_plan = _build_replan_execution(
-        next_hyp, replan_context,
-        candidate_tables=reason.candidate_tables,
-    )
+    # LLM 제안 plan 우선, 없으면 rule-based fallback
+    if llm_plan:
+        execution_plan = llm_plan
+    else:
+        replan_context = _build_replan_context(
+            reason, state.preprocessed_input, dead_ends,
+        )
+        execution_plan = _build_replan_execution(
+            next_hyp, replan_context,
+            candidate_tables=reason.candidate_tables,
+        )
     reason.execution_plan = execution_plan
-    reason.current_step_index = 0
-    reason.phase = "EXPLORING"
+    reason.phase = Phase.EXPLORING
 
     return {"reason": reason}
 
@@ -106,31 +166,31 @@ def _build_replan_context(
     original_query: str,
     dead_ends: list[DeadEnd],
 ) -> dict[str, Any]:
-    """replan 프롬프트에 주입할 컨텍스트를 조립한다."""
+    """replan 프롬프트에 주입할 컨텍스트를 조립한다.
+
+    DeadEnd에서 빠진 필드(tried_tables 등)는
+    세션 레벨 state에서 직접 참조한다.
+    """
     context: dict[str, Any] = {
         "original_query": original_query,
     }
 
+    # 실패 이력 (DeadEnd 경량 구조)
     failure_history = [
         {
             "hypothesis": de.hypothesis_id,
-            "reason": de.reason,
             "failure_type": de.failure_type,
-            "tried_tables": de.tried_tables,
-            "rejected_tables": de.rejected_tables,
-            "tried_terms": de.tried_terms,
+            "reason": de.reason,
+            "lessons_learned": de.lessons_learned,
         }
         for de in dead_ends
     ]
     context["failure_history"] = failure_history
 
-    discovered_facts = [
-        f"[{step.tool}] {step.insight}"
-        for step in reason.execution_plan
-        if step.status == "DONE" and step.insight
-    ]
-    context["discovered_facts"] = discovered_facts
+    # 탐색에서 발견한 사실 (세션 레벨 누적)
+    context["discovered_facts"] = list(reason.discovered_facts)
 
+    # 확인된 지식 항목
     confirmed_knowledge = [
         {
             "key": ki.key,
@@ -139,85 +199,53 @@ def _build_replan_context(
             "source": ki.source,
         }
         for ki in reason.knowledge_items
-        if ki.status in ("CONFIRMED", "PROBABLE")
+        if ki.status in (ConfidenceStatus.CONFIRMED, ConfidenceStatus.PROBABLE)
     ]
     context["confirmed_knowledge"] = confirmed_knowledge
 
+    # 미해소 항목
     unresolved = [
         f"{ki.key}" + (
             f" (충돌: {'; '.join(ki.evidence[-2:])})"
-            if ki.status == "CONFLICTED" and ki.evidence
+            if ki.status == ConfidenceStatus.CONFLICTED and ki.evidence
             else ""
         )
         for ki in reason.knowledge_items
-        if ki.status in ("UNRESOLVED", "CONFLICTED")
+        if ki.status in (ConfidenceStatus.UNRESOLVED, ConfidenceStatus.CONFLICTED)
     ]
     context["unresolved_items"] = unresolved
+
+    # 세션 레벨 참조: 중복 방지용 누적 목록
     context["searched_queries"] = reason.searched_queries
-    context["sampled_tables"] = reason.sampled_tables
+    context["sampled_tables"] = [
+        ct.table_name for ct in reason.candidate_tables if ct.sample_rows
+    ]
+
+    # 세션 레벨 참조: 시도/제외 테이블
+    context["tried_tables"] = [
+        ct.table_name for ct in reason.candidate_tables
+    ]
+    context["rejected_tables"] = [
+        ct.table_name for ct in reason.candidate_tables
+        if ct.selection_status == TableSelectionStatus.REJECTED
+    ]
 
     return context
 
 
-def _infer_failure_reason(
-    reason: ReasoningState,
-) -> str:
-    """현재 상태에서 실패 사유를 추론한다."""
-    if reason.sql_validation_result:
-        match reason.sql_validation_result.overall:
-            case "FAIL_STRUCTURAL":
-                return (
-                    "SQL 구조적 오류 — "
-                    "테이블/컬럼 재탐색 필요"
-                )
-            case "FAIL_EMPTY":
-                return (
-                    "실행 결과 0건 — "
-                    "조건 또는 테이블 부적절"
-                )
-            case "FAIL_DB_ERROR":
-                return "DB 실행 오류"
-            case _:
-                return "SQL 검증 실패"
-
-    unresolved = reason.get_unresolved_knowledge()
-    if unresolved:
-        return (
-            "미해소 용어: "
-            f"{', '.join(ki.key for ki in unresolved)}"
-        )
-
-    return "탐색 스텝 소진 — 충분한 정보 미확보"
-
-
-def _infer_failure_type(
-    reason: ReasoningState,
-) -> FailureType:
-    """실패 유형을 추론한다."""
-    if reason.sql_validation_result:
-        match reason.sql_validation_result.overall:
-            case "FAIL_STRUCTURAL":
-                return "sql_structural"
-            case "FAIL_EMPTY":
-                return "empty_result"
-            case "FAIL_DB_ERROR":
-                return "db_error"
-            case "FAIL_SYNTAX":
-                return "sql_syntax"
-            case "FAIL_SEMANTIC_LOCAL":
-                return "sql_semantic_local"
-    return "term_unresolvable"
-
-
 async def _generate_new_hypotheses(
     replan_context: dict[str, Any],
-) -> list[Hypothesis]:
-    """LLM을 사용하여 dead-ends를 회피하는 새 가설을 생성한다."""
+) -> tuple[list[Hypothesis], list[ExecutionStep], str, str]:
+    """LLM을 사용하여 dead-ends를 회피하는 새 가설과 실행계획을 생성한다.
+
+    Returns:
+        (가설 리스트, LLM 제안 실행계획, lessons_learned, give_up_reason).
+        retry 후에도 실패하면 빈 결과를 반환하여 호출측에서 DONE 처리한다.
+    """
     from src.config import settings
-    from src.utils.llm import get_llm_client
 
     # 프롬프트 조립
-    prompt = REASON_REPLAN
+    prompt = RECOVERY_PLANNER_SYSTEM
     replacements = {
         "{original_query}": replan_context.get(
             "original_query", "",
@@ -242,16 +270,23 @@ async def _generate_new_hypotheses(
         "{sampled_tables}": ", ".join(
             replan_context.get("sampled_tables", []),
         ) or "(없음)",
+        "{tried_tables}": ", ".join(
+            replan_context.get("tried_tables", []),
+        ) or "(없음)",
+        "{rejected_tables}": ", ".join(
+            replan_context.get("rejected_tables", []),
+        ) or "(없음)",
     }
-    for key, value in replacements.items():
-        prompt = prompt.replace(key, value)
+    prompt, tracking_vars = render_prompt(prompt, replacements)
+
+    def _parse_fn(raw_text: str) -> dict[str, Any]:
+        data = extract_json(raw_text)
+        if not data:
+            raise ValueError("recovery LLM 응답에서 JSON 추출 실패")
+        return data
 
     try:
-        client = get_llm_client()
-        response = await client.messages.create(
-            model=settings.llm_model,
-            max_tokens=1024,
-            timeout=settings.llm_long_timeout,
+        _, data = await llm_call_with_parse_retry(
             system=prompt,
             messages=[
                 {
@@ -259,30 +294,31 @@ async def _generate_new_hypotheses(
                     "content": "재계획하세요.",
                 },
             ],
+            parse_fn=_parse_fn,
+            max_tokens=1024,
+            timeout=settings.llm_long_timeout,
+            node_name="recovery_planner",
         )
 
-        record_prompt_variables({
-            k.strip("{}"): v for k, v in replacements.items()
-        })
-        raw = response.content[0].text
-        return _parse_replan_response(raw)
-    except Exception as e:
+        await record_prompt_variables(tracking_vars)
+        hypotheses = _parse_replan_response(data)
+        llm_plan = _parse_replan_execution(data)
+        lessons = data.get("lessons_learned", "")
+        give_up_reason = data.get("reason", "") if data.get("give_up") else ""
+        return hypotheses, llm_plan, lessons, give_up_reason
+    except (ParseError, Exception) as e:
         logger.warning(
-            "replan LLM 실패, rule-based fallback",
+            "replan LLM 최종 실패, 재계획 불가",
             error=str(e),
         )
-        return _generate_hypotheses_fallback(replan_context)
+        return [], [], "", ""
 
 
-def _parse_replan_response(raw: str) -> list[Hypothesis]:
-    """LLM 응답에서 새 가설을 파싱한다."""
-    json_match = re.search(r"\{[\s\S]*\}", raw)
-    if not json_match:
-        return []
-
-    try:
-        data = json.loads(json_match.group())
-    except json.JSONDecodeError:
+def _parse_replan_response(
+    data: dict[str, Any] | None,
+) -> list[Hypothesis]:
+    """파싱된 JSON dict에서 새 가설을 추출한다."""
+    if data is None:
         return []
 
     if data.get("give_up"):
@@ -306,51 +342,86 @@ def _parse_replan_response(raw: str) -> list[Hypothesis]:
     )]
 
 
-def _generate_hypotheses_fallback(
-    replan_context: dict[str, Any],
-) -> list[Hypothesis]:
-    """LLM 실패 시 rule-based fallback 가설."""
-    failed_tables: set[str] = set()
-    for fh in replan_context.get("failure_history", []):
-        failed_tables.update(fh.get("tried_tables", []))
+def _parse_replan_execution(
+    data: dict[str, Any] | None,
+) -> list[ExecutionStep]:
+    """파싱된 JSON dict에서 execution_plan을 추출하고 유효한 tool만 필터링한다."""
+    from src.agents.nodes.reason.tools import TOOL_MAP
 
-    query = replan_context.get("original_query", "")
-    unresolved = replan_context.get("unresolved_items", [])
-    ft_count = len(failed_tables)
+    if data is None or data.get("give_up"):
+        return []
 
-    new_hyps: list[Hypothesis] = []
+    plan = data.get("execution_plan", [])
+    if not isinstance(plan, list) or not plan:
+        return []
 
-    new_hyps.append(Hypothesis(
-        hypothesis_id=f"H_RPT_{ft_count}",
-        description="보고서 SQL에서 유사 패턴 참조",
-        strategy="보고서 SQL 검색으로 테이블/조인 구조 참고",
-        priority=0.6,
-    ))
-
-    if unresolved:
-        new_hyps.append(Hypothesis(
-            hypothesis_id=f"H_MAN_{ft_count}",
-            description="업무 매뉴얼에서 용어 정의 확인",
-            missing_terms=[
-                u.split(":")[0] if ":" in u else u
-                for u in unresolved[:3]
-            ],
-            strategy=(
-                "매뉴얼에서 업무 규정/산출식 확인 후 재탐색"
-            ),
-            priority=0.4,
+    steps: list[ExecutionStep] = []
+    for s in plan:
+        tool = s.get("tool", "")
+        if tool not in TOOL_MAP:
+            logger.info(
+                "recovery LLM이 제안한 도구 스킵 (미등록)",
+                tool=tool,
+            )
+            continue
+        steps.append(ExecutionStep(
+            step=len(steps) + 1,
+            tool=tool,
+            input=s.get("input", ""),
+            purpose=s.get("purpose", ""),
         ))
 
-    keywords = query.split()[:3] if query else []
-    if keywords:
-        new_hyps.append(Hypothesis(
-            hypothesis_id=f"H_KW_{ft_count}",
-            description="키워드 변형 직접 탐색",
-            strategy="질의 키워드 조합으로 새 테이블 탐색",
-            priority=0.3,
-        ))
+    return steps
 
-    return new_hyps
+
+
+def _steps_from_candidates(
+    candidate_tables: list[Any] | None,
+    failed_tables: set[str],
+    searched: set[str],
+) -> list[ExecutionStep]:
+    """candidate_tables 중 미탐색 테이블에 대한 검색 스텝을 생성한다."""
+    steps: list[ExecutionStep] = []
+    for ct in (candidate_tables or []):
+        table = ct.table_name if hasattr(ct, "table_name") else str(ct)
+        if table not in failed_tables and table not in searched:
+            steps.append(ExecutionStep(
+                step=len(steps) + 1,
+                tool="search_table_meta",
+                input=table,
+                purpose=f"새 가설: {table} 테이블 구조 확인",
+            ))
+    return steps
+
+
+def _steps_from_missing_terms(
+    hypothesis: Hypothesis,
+    searched: set[str],
+    start_step: int = 1,
+) -> list[ExecutionStep]:
+    """missing_terms 각각에 대해 개별 검색 스텝을 생성한다."""
+    steps: list[ExecutionStep] = []
+    step_num = start_step
+    for term in hypothesis.missing_terms:
+        if term in searched:
+            continue
+        steps.append(ExecutionStep(
+            step=step_num,
+            tool="search_table_meta",
+            input=term,
+            purpose=f"미해소 용어 '{term}' 테이블 검색",
+        ))
+        step_num += 1
+
+    if not steps:
+        # missing_terms가 없거나 모두 이미 검색된 경우
+        steps.append(ExecutionStep(
+            step=start_step,
+            tool="search_table_meta",
+            input=hypothesis.strategy,
+            purpose="새 가설 기반 테이블 직접 검색",
+        ))
+    return steps
 
 
 def _build_replan_execution(
@@ -362,49 +433,20 @@ def _build_replan_execution(
 
     검증된 테이블(candidate_tables)로 메타 조회 스텝을 생성한다.
     """
-    steps: list[ExecutionStep] = []
-    step_num = 1
+    searched = set(replan_context.get("searched_queries", []))
+    failed_tables: set[str] = set(replan_context.get("tried_tables", []))
 
-    searched = set(
-        replan_context.get("searched_queries", []),
-    )
-    failed_tables: set[str] = set()
-    for fh in replan_context.get("failure_history", []):
-        failed_tables.update(fh.get("tried_tables", []))
-
-    # candidate_tables에서 아직 검색하지 않은 테이블 조회
-    for ct in (candidate_tables or []):
-        table = ct.table_name if hasattr(ct, "table_name") else str(ct)
-        if table not in failed_tables and table not in searched:
-            steps.append(ExecutionStep(
-                step=step_num,
-                tool="search_table_meta",
-                input=table,
-                purpose=(
-                    f"새 가설: {table} 테이블 구조 확인"
-                ),
-            ))
-            step_num += 1
-
+    steps = _steps_from_candidates(candidate_tables, failed_tables, searched)
     if not steps:
-        # 가설의 missing_terms에서 검색 키워드 추출
-        search_kw = (
-            " ".join(hypothesis.missing_terms[:3])
-            if hypothesis.missing_terms
-            else hypothesis.strategy
-        )
-        steps.append(ExecutionStep(
-            step=1,
-            tool="search_table_meta",
-            input=search_kw,
-            purpose="새 가설 기반 테이블 직접 검색",
-        ))
-        steps.append(ExecutionStep(
-            step=2,
-            tool="search_use_cases",
-            input=hypothesis.strategy,
-            purpose="새 가설 기반 활용사례 재검색",
-        ))
+        steps = _steps_from_missing_terms(hypothesis, searched)
+
+    step_num = steps[-1].step + 1
+    steps.append(ExecutionStep(
+        step=step_num,
+        tool="search_use_cases",
+        input=hypothesis.strategy,
+        purpose="새 가설 기반 활용사례 재검색",
+    ))
 
     return steps
 
@@ -423,9 +465,10 @@ def _build_failure_summary(
     if dead_ends:
         parts.append("실패 경로:")
         for de in dead_ends:
-            parts.append(
-                f"  - [{de.failure_type}] {de.reason}",
-            )
+            line = f"  - [{de.failure_type}] {de.reason}"
+            if de.lessons_learned:
+                line += f" (교훈: {de.lessons_learned})"
+            parts.append(line)
 
     unresolved = reason.get_unresolved_knowledge()
     if unresolved:

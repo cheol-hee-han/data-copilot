@@ -348,7 +348,6 @@ class TestRealAgenticNodeFlow:
                 reason.explored_use_cases,
             ),
             "searched_queries": reason.searched_queries,
-            "hints_empty": reason.structural_hints.is_empty(),
             "elapsed_ms": round(elapsed, 1),
         }
 

@@ -109,9 +109,9 @@ async def run_gate_test(
     classify_with_gate 내부 흐름을 단계별로 호출하여,
     verbose 모드에서 LLM 프롬프트와 원본 응답을 함께 출력한다.
     """
-    from src.agents.nodes.prompts.system_prompts import (
-        INTENT_GATE,
-        INTENT_GATE_USER,
+    from src.agents.nodes.system_prompts import (
+        INTENT_CLASSIFIER_SYSTEM,
+        INTENT_CLASSIFIER_USER,
     )
     from src.config import settings
     from src.services.intent_resolver import (
@@ -126,12 +126,12 @@ async def run_gate_test(
         print(f"[LLM 모델]  {settings.llm_model}")
 
     # ── Step 1: 프롬프트 조립 ──
-    user_prompt = INTENT_GATE_USER.format(query=query)
+    user_prompt = INTENT_CLASSIFIER_USER.format(query=query)
 
     if verbose:
         print(f"\n{'─'*60}")
         print("[시스템 프롬프트] (앞 500자)")
-        print(INTENT_GATE[:500])
+        print(INTENT_CLASSIFIER_SYSTEM[:500])
         print(f"\n[유저 프롬프트]")
         print(user_prompt)
 
@@ -143,7 +143,7 @@ async def run_gate_test(
             model=settings.llm_model,
             max_tokens=settings.llm_default_max_tokens,
             timeout=settings.llm_default_timeout,
-            system=INTENT_GATE,
+            system=INTENT_CLASSIFIER_SYSTEM,
             messages=[{"role": "user", "content": user_prompt}],
         )
         if not response.content:
@@ -216,9 +216,8 @@ async def run_legacy_test(
     llm_call_with_parse_retry를 통해 "INTENT:/CONFIDENCE:" 형식
     텍스트 응답을 파싱하는 기존 분류 방식을 테스트한다.
     """
-    from src.agents.nodes.prompts.system_prompts import (
-        INTENT_CLASSIFICATION,
-        INTENT_FORMAT_HINT,
+    from src.agents.nodes.system_prompts import (
+        INTENT_CLASSIFIER_LEGACY_SYSTEM,
     )
     from src.config import settings
     from src.services.intent_resolver import classify_legacy
@@ -229,13 +228,13 @@ async def run_legacy_test(
         print(f"[LLM 모델]  {settings.llm_model}")
         print(f"\n{'─'*60}")
         print("[시스템 프롬프트] (앞 500자)")
-        print(INTENT_CLASSIFICATION[:500])
+        print(INTENT_CLASSIFIER_LEGACY_SYSTEM[:500])
 
     # ── LLM 호출 ──
     print("\nLegacy 분류 LLM 호출 중...")
     result = await classify_legacy(
         query,
-        system_prompt=INTENT_CLASSIFICATION,
+        system_prompt=INTENT_CLASSIFIER_LEGACY_SYSTEM,
         format_hint=INTENT_FORMAT_HINT,
     )
 
