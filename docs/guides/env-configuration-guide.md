@@ -276,7 +276,7 @@
 | `LANGSMITH_PROJECT` | LangSmith 프로젝트명 | `data-copilot` | `data-copilot` |
 | `LANGSMITH_ENDPOINT` | LangSmith 엔드포인트 | `https://api.smith.langchain.com` | |
 | `EVAL_TRACKER_ENABLED` | 자체 평가 트래커 활성화 (폐쇄망 호환) | `true` \| `false` | `true` — LangSmith 대안, JSON 파일로 저장 |
-| `EVAL_TRACKER_OUTPUT_DIR` | 트래커 출력 디렉토리 | `evaluation/traces` | `evaluation/traces` |
+| `EVAL_TRACKER_OUTPUT_DIR` | 트래커 출력 디렉토리 | `logs/traces` | `logs/traces` |
 
 ---
 

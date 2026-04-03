@@ -14,4 +14,4 @@
 | [e2e-test-design.md](todo/e2e-test-design.md) | Real E2E 테스트 25건 설계 (6카테고리, 파이프라인 경로 커버리지) | 25 | 높음 |
 | [e2e-test-results-20260326.md](todo/e2e-test-results-20260326.md) | E2E 테스트 결과 분석 (6개 이슈, MongoDB 검색 실패가 핵심 병목) | 6 | P1~P3 |
 | [table-three-aspect-enrichment.md](todo/table-three-aspect-enrichment.md) | 테이블 3측면 설명 보강 (§7 1-8 완료, §8 체크리스트 완료) | 완료 | 완료 |
-| — | Neo4j 온톨로지 그래프 통합 (설계서: `design-reviews/20260325-neo4j-ontology-design.md`) | 4 Phase | P1 |
+| — | Neo4j 온톨로지 그래프 통합 (설계서: `reviews/design/20260325-neo4j-ontology-design.md`) | 4 Phase | P1 |

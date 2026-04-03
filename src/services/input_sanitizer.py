@@ -5,14 +5,12 @@
 순차 적용하며, 어느 단계에서든 실패하면 즉시 에러를 반환하여 후속 처리를 차단한다.
 유니코드 NFKC 정규화를 선행하여 전각 문자 우회 공격을 사전 차단하고,
 SQL 인젝션(DDL/DML/시스템 카탈로그 등 12개 패턴)과 프롬프트 인젝션을 이중으로 감지한다.
-명확화 대화 시에는 원래 질의와 사용자 응답을 합성하여 단일 질의로 재구성한다.
 
 핵심 함수:
     - sanitize: 정규화 → 길이 검사 → 인젝션 검사를 순차 실행하는 메인 파이프라인
     - normalize_input: 유니코드 NFKC 정규화 + 연속 공백 단일화
     - check_length: 설정 기반 최대 입력 길이 검증
     - check_injection: SQL/프롬프트 인젝션 의심 패턴 감지 (컴파일된 정규식 사용)
-    - synthesize_clarification: 명확화 응답을 원래 질의와 합성하여 대화 이력 갱신
     - mask_for_logging: 로깅 시 PII 마스킹 처리
 
 설계 결정: 인젝션 패턴은 모듈 로드 시 사전 컴파일하여 반복 호출 성능을 확보한다.
@@ -25,7 +23,6 @@ from dataclasses import dataclass
 
 from src.config import settings
 from src.utils.logger import get_logger
-from src.utils.truncate import truncate_log
 from src.utils.security import (
     detect_prompt_injection,
     mask_pii,
@@ -65,15 +62,6 @@ class SanitizeResult:
     text: str = ""
     is_error: bool = False
     error_message: str = ""
-
-
-@dataclass
-class ClarificationSynthesisResult:
-    """명확화 응답 합성 결과."""
-
-    synthesized_input: str = ""
-    updated_history: list[dict[str, str]] | None = None
-    new_turn_count: int = 0
 
 
 def normalize_input(text: str) -> str:
@@ -135,46 +123,6 @@ def sanitize(text: str) -> SanitizeResult:
         )
 
     return SanitizeResult(text=normalized)
-
-
-def synthesize_clarification(
-    original_query: str,
-    clarification_answer: str,
-    clarification_question: str,
-    conversation_history: list[dict[str, str]],
-    clarification_turns: int,
-) -> ClarificationSynthesisResult:
-    """명확화 응답을 원래 질의와 합성한다.
-
-    합성 형식: "[원래 질의]\\n[추가 조건: 명확화 응답]"
-    """
-    answer = normalize_input(clarification_answer)
-    synthesized = f"{original_query}\n추가 조건: {answer}"
-
-    if len(synthesized) > MAX_INPUT_LENGTH * 2:
-        synthesized = synthesized[: MAX_INPUT_LENGTH * 2]
-
-    updated_history = list(conversation_history)
-    if clarification_question:
-        updated_history.append(
-            {"role": "assistant", "content": clarification_question}
-        )
-    updated_history.append(
-        {"role": "user", "content": clarification_answer}
-    )
-
-    logger.info(
-        "명확화 응답 합성 완료",
-        original=truncate_log(original_query),
-        clarification=truncate_log(answer),
-        turns=clarification_turns + 1,
-    )
-
-    return ClarificationSynthesisResult(
-        synthesized_input=synthesized,
-        updated_history=updated_history,
-        new_turn_count=clarification_turns + 1,
-    )
 
 
 def mask_for_logging(text: str, max_len: int = 100) -> str:

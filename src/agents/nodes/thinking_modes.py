@@ -16,18 +16,18 @@ from __future__ import annotations
 
 NODE_THINKING_MODES: dict[str, str] = {
     # ── Interpret 계층 (단순 분류 → thinking 불필요) ──
-    "history_resolver":  "off",
-    "intent_classifier": "off",
-    "clarifier":         "off",
+    "context_classifier": "off",
+    "clarification_handler": "off",
 
     # ── Reason 계층 (추론 필요) ──
     "query_normalizer":  "auto",
-    "planner":           "auto",
-    "context_explorer":  "auto",
+    "reasoning_preparer": "off",
+    "knowledge_fetcher":   "off",
+    "knowledge_interpreter": "auto",
+    "readiness_gate":    "off",
     "sql_generator":     "high",
     "sql_validator":     "auto",
-    "recovery_planner":  "auto",
-    "table_comparison":  "auto",
+    "recovery_agent":    "off",
 
     # ── Present 계층 (정리/포맷 → thinking 불필요) ──
     "analyzer":          "off",

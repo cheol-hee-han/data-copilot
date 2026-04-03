@@ -14,13 +14,19 @@ ContextInfo 구성:
     - _build_context_info: CONFIRMED 테이블 → ContextInfo 변환
     - _build_success_summary: 성공 시 탐색 과정 요약 문자열
     - _build_failure_output: 실패 시 dead_ends 기반 상세 정보
-    - _build_clarification_question: CONFLICTED 항목 → 사용자 확인 질문
+    - _build_conflicted_signals: CONFLICTED 항목 → 명확화 AmbiguitySignal 생성
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from src.agents.models.clarification import (
+    AmbiguitySignal,
+    AmbiguityType,
+    ConfidenceLevel,
+    QuestionType,
+)
 from src.agents.state.state import (
     PipelineState,
     ReasoningState,
@@ -40,22 +46,21 @@ async def result_finalizer_node(state: PipelineState) -> dict:
     reason.phase = Phase.DONE
     updates: dict[str, Any] = {"reason": reason}
 
-    # 사용자 확인 필요 (CONFLICTED 해소)
+    # ── T5: CONFLICTED → AmbiguitySignal 생성 ──
+    # 전략 §2.3 T5: CONFLICTED 항목을 AmbiguitySignal로 변환하여
+    # clarification_handler 통합 경로로 처리
     if state.reason.phase == Phase.VERIFYING:
         conflicted = [
             ki for ki in reason.knowledge_items
             if ki.status == ConfidenceStatus.CONFLICTED
         ]
         if conflicted:
-            question = _build_clarification_question(
+            signals = _build_conflicted_signals(
                 conflicted,
             )
             reason.final_status = FinalStatus.PENDING
             updates["reason"] = reason
-            updates["awaiting_clarification"] = True
-            updates["clarification_turns"] = state.clarification_turns + 1
-            updates["clarification_question"] = question
-            updates["formatted_response"] = question
+            updates["pending_signals"] = signals
             return updates
 
     # SQL 검증 성공
@@ -178,56 +183,58 @@ def _build_failure_output(
     return "\n".join(parts)
 
 
-def _build_clarification_question(
+def _build_conflicted_signals(
     conflicted_items: list,
-) -> str:
-    """CONFLICTED 항목에 대한 사용자 확인 질문을 생성한다.
+) -> list[AmbiguitySignal]:
+    """CONFLICTED 항목을 AmbiguitySignal 리스트로 변환한다.
 
-    output_scope CONFLICTED는 별도 처리:
-      "무엇을 뽑을지" 모호한 경우 구체적인 선택지를 제시한다.
+    output_scope CONFLICTED는 SINGLE_SELECT (선택지 제시),
+    나머지는 FREE_TEXT로 사용자 확인을 요청한다.
     """
-    # output_scope 모호 → 별도 선택지 질문
-    output_items = [
-        ki for ki in conflicted_items
-        if ki.key == "output_scope"
-    ]
-    other_items = [
-        ki for ki in conflicted_items
-        if ki.key != "output_scope"
-    ]
+    signals: list[AmbiguitySignal] = []
 
-    parts: list[str] = []
+    for ki in conflicted_items:
+        if ki.key == "output_scope":
+            signals.append(AmbiguitySignal(
+                source_node="result_finalizer",
+                ambiguity_type=AmbiguityType.INTENT,
+                decision="ASK",
+                confidence=ConfidenceLevel.LOW,
+                question=(
+                    "어떤 데이터를 뽑아야 할지 "
+                    "좀 더 구체적으로 알려주시겠어요?"
+                ),
+                question_type=QuestionType.SINGLE_SELECT,
+                options=[
+                    "기본 정보 목록 (번호, 이름 등)",
+                    "집계/요약 (건수, 합계, 평균 등)",
+                    "상세 내역 (거래일자, 금액 등)",
+                ],
+                reasoning="출력 범위가 불명확합니다",
+            ))
+        else:
+            evidence_text = ", ".join(ki.evidence)
+            signals.append(AmbiguitySignal(
+                source_node="result_finalizer",
+                ambiguity_type=AmbiguityType.CONFLICT,
+                decision="ASK",
+                confidence=ConfidenceLevel.LOW,
+                question=(
+                    f"'{ki.key}' 항목에 상충되는 "
+                    f"정보가 있습니다: {evidence_text}"
+                    "\n어떤 정보가 맞는지 "
+                    "확인해 주시겠어요?"
+                ),
+                options=ki.evidence if ki.evidence else [],
+                question_type=(
+                    QuestionType.SINGLE_SELECT
+                    if ki.evidence
+                    else QuestionType.FREE_TEXT
+                ),
+                reasoning=(
+                    f"{ki.key} 항목의 정보가 "
+                    "상충됩니다"
+                ),
+            ))
 
-    if output_items:
-        parts.append(
-            "요청하신 내용에서 어떤 데이터를 뽑아야 할지 "
-            "조금 더 구체적으로 알려주시겠어요?\n\n"
-            "예를 들어:\n"
-            "  1) 기본 정보 목록 "
-            "(번호, 이름, 등급, 상태 등)\n"
-            "  2) 집계/요약 "
-            "(건수, 합계, 평균 등)\n"
-            "  3) 상세 내역 "
-            "(거래일자, 금액, 유형 등)\n\n"
-            "어떤 형태가 필요하신가요?"
-        )
-
-    if other_items:
-        if parts:
-            parts.append("\n---\n")
-        parts.append(
-            "추가로 다음 항목도 확인이 필요합니다:\n",
-        )
-        for i, ki in enumerate(other_items, 1):
-            evidence_str = "\n".join(
-                f"    - {e}" for e in ki.evidence
-            )
-            parts.append(
-                f"{i}. **{ki.key}**\n"
-                f"   상충 정보:\n{evidence_str}\n",
-            )
-        parts.append(
-            "어떤 정보가 맞는지 확인해 주시겠어요?",
-        )
-
-    return "\n".join(parts)
+    return signals

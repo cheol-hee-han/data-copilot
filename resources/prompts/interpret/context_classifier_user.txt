@@ -1,0 +1,11 @@
+[대화 이력]
+
+{history}
+
+[명확화 대화 이력]
+
+{clarification_history}
+
+[현재 입력]
+
+{query}

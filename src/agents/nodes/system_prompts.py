@@ -31,27 +31,19 @@ Prompt Version: 2.0 (2026-03-26)
   예) analyzer_system.txt → ANALYZER_SYSTEM
 
 파일 매핑 (interpret/):
-  INTENT_CLASSIFIER_LEGACY_SYSTEM ← intent_classifier_legacy_system.txt
-  INTENT_CLASSIFIER_SYSTEM        ← intent_classifier_system.txt
-  INTENT_CLASSIFIER_USER          ← intent_classifier_user.txt
-  CLARIFIER_SYSTEM                ← clarifier_system.txt
-  CLARIFIER_USER                  ← clarifier_user.txt
+  CONTEXT_CLASSIFIER_SYSTEM       ← context_classifier_system.txt
+  CONTEXT_CLASSIFIER_USER         ← context_classifier_user.txt
   QUERY_NORMALIZER_PHASE1_SYSTEM  ← query_normalizer_phase1_system.txt
   QUERY_NORMALIZER_PHASE1_USER    ← query_normalizer_phase1_user.txt
   QUERY_NORMALIZER_PHASE2_SYSTEM  ← query_normalizer_phase2_system.txt
   QUERY_NORMALIZER_PHASE2_USER    ← query_normalizer_phase2_user.txt
-  HISTORY_RESOLVER_SYSTEM         ← history_resolver_system.txt
-  HISTORY_RESOLVER_USER           ← history_resolver_user.txt
 
 파일 매핑 (reason/):
-  PLANNER_SYSTEM              ← planner_system.txt
-  CONTEXT_EXPLORER_SYSTEM     ← context_explorer_system.txt
-  BATCH_INTERPRET_SYSTEM      ← batch_interpret_system.txt
-  TABLE_COMPARISON_SYSTEM     ← table_comparison_system.txt
+  KNOWLEDGE_INTERPRETER_SYSTEM  ← knowledge_interpreter_system.txt
   SQL_GENERATOR_SYSTEM        ← sql_generator_system.txt
   SQL_GENERATOR_FIX_SECTION   ← sql_generator_fix_section.txt
   SQL_VALIDATOR_SYSTEM        ← sql_validator_system.txt
-  RECOVERY_PLANNER_SYSTEM     ← recovery_planner_system.txt
+  RECOVERY_AGENT_SYSTEM       ← recovery_agent_system.txt
 
 파일 매핑 (present/):
   ANALYZER_SYSTEM                 ← analyzer_system.txt
@@ -86,13 +78,10 @@ def _present(filename: str) -> str:
 # interpret/ — 질의 해석 계층
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-INTENT_CLASSIFIER_LEGACY_SYSTEM = _interpret(
-    "intent_classifier_legacy_system.txt",
-)
-INTENT_CLASSIFIER_SYSTEM = _interpret("intent_classifier_system.txt")
-INTENT_CLASSIFIER_USER = _interpret("intent_classifier_user.txt")
-CLARIFIER_SYSTEM = _interpret("clarifier_system.txt")
-CLARIFIER_USER = _interpret("clarifier_user.txt")
+# 통합 노드 프롬프트 (resolve_history + classify_intent → context_classifier)
+CONTEXT_CLASSIFIER_SYSTEM = _interpret("context_classifier_system.txt")
+CONTEXT_CLASSIFIER_USER = _interpret("context_classifier_user.txt")
+
 QUERY_NORMALIZER_PHASE1_SYSTEM = _interpret(
     "query_normalizer_phase1_system.txt",
 )
@@ -105,8 +94,6 @@ QUERY_NORMALIZER_PHASE2_SYSTEM = _interpret(
 QUERY_NORMALIZER_PHASE2_USER = _interpret(
     "query_normalizer_phase2_user.txt",
 )
-HISTORY_RESOLVER_SYSTEM = _interpret("history_resolver_system.txt")
-HISTORY_RESOLVER_USER = _interpret("history_resolver_user.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -116,15 +103,13 @@ HISTORY_RESOLVER_USER = _interpret("history_resolver_user.txt")
 # 노드에서 .replace() 로 플레이스홀더를 치환해야 한다.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-PLANNER_SYSTEM = _reason("planner_system.txt")
-BATCH_INTERPRET_SYSTEM = _reason("context_explorer_batch_interpret.txt")
-TABLE_COMPARISON_SYSTEM = _reason("table_comparison_system.txt")
+KNOWLEDGE_INTERPRETER_SYSTEM = _reason("knowledge_interpreter_system.txt")
 SQL_GENERATOR_SYSTEM = _reason("sql_generator_system.txt")
 SQL_GENERATOR_FIX_SECTION = _reason(
     "sql_generator_fix_section.txt",
 )
 SQL_VALIDATOR_SYSTEM = _reason("sql_validator_system.txt")
-RECOVERY_PLANNER_SYSTEM = _reason("recovery_planner_system.txt")
+RECOVERY_AGENT_SYSTEM = _reason("recovery_agent_system.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

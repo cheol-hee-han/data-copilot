@@ -460,7 +460,7 @@ trace 분석 시 아래 항목을 순서대로 점검합니다.
 ```python
 import json
 
-with open("evaluation/traces/trace_XXXX.json", encoding="utf-8") as f:
+with open("logs/traces/trace_XXXX.json", encoding="utf-8") as f:
     data = json.load(f)
 
 for llm in data["llm_calls"]:

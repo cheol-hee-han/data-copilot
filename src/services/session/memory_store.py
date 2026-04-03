@@ -19,7 +19,6 @@ class MemorySessionStore(SessionStore):
 
     def __init__(self) -> None:
         self._history: dict[str, list[dict[str, str]]] = {}
-        self._clarify: dict[str, dict] = {}
         self._max_sessions = settings.max_sessions
         self._max_history = settings.session_max_history
 
@@ -37,16 +36,6 @@ class MemorySessionStore(SessionStore):
         if len(history) > self._max_history:
             del history[: len(history) - self._max_history]
 
-    async def get_clarification(
-        self, session_id: str,
-    ) -> dict | None:
-        return self._clarify.pop(session_id, None)
-
-    async def set_clarification(
-        self, session_id: str, state: dict,
-    ) -> None:
-        self._clarify[session_id] = state
-
     async def ensure_session(self, session_id: str) -> None:
         if session_id in self._history:
             return
@@ -54,19 +43,16 @@ class MemorySessionStore(SessionStore):
         if len(self._history) >= self._max_sessions:
             oldest = next(iter(self._history))
             del self._history[oldest]
-            self._clarify.pop(oldest, None)
         self._history[session_id] = []
 
     async def clear_session(self, session_id: str) -> None:
         self._history.pop(session_id, None)
-        self._clarify.pop(session_id, None)
 
     async def connect(self) -> None:
         pass
 
     async def disconnect(self) -> None:
         self._history.clear()
-        self._clarify.clear()
 
     async def health_check(self) -> bool:
         return True

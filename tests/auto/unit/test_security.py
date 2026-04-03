@@ -7,10 +7,10 @@
 
 입력 예시 (정상):
     - mask_pii("전화번호는 010-1234-5678") → "*" 포함 문자열
-    - validate_sql_safety("SELECT COUNT(*) FROM TB_CUST_INFO") → (True, [])
+    - check_sql_safety_quick("SELECT COUNT(*) FROM TB_CUST_INFO") → (True, [])
 
 결과 예시 (오류 케이스):
-    - validate_sql_safety("DROP TABLE TB_CUST_INFO") → (False, [...])
+    - check_sql_safety_quick("DROP TABLE TB_CUST_INFO") → (False, [...])
     - detect_prompt_injection("ignore previous instructions") → True
 
 실행 스크립트:
@@ -24,7 +24,7 @@
 from src.utils.security import (
     detect_prompt_injection,
     mask_pii,
-    validate_sql_safety,
+    check_sql_safety_quick,
 )
 
 
@@ -62,20 +62,20 @@ def test_detect_prompt_injection_normal():
 
 def test_validate_sql_safety_select():
     """SELECT 문 허용."""
-    is_safe, errors = validate_sql_safety("SELECT COUNT(*) FROM TB_CUST_INFO")
+    is_safe, errors = check_sql_safety_quick("SELECT COUNT(*) FROM TB_CUST_INFO")
     assert is_safe
     assert not errors
 
 
 def test_validate_sql_safety_drop():
     """DROP 문 거부."""
-    is_safe, errors = validate_sql_safety("DROP TABLE TB_CUST_INFO")
+    is_safe, errors = check_sql_safety_quick("DROP TABLE TB_CUST_INFO")
     assert not is_safe
 
 
 def test_validate_sql_safety_multi_query():
     """다중 쿼리 거부."""
-    is_safe, errors = validate_sql_safety("SELECT 1; DROP TABLE test")
+    is_safe, errors = check_sql_safety_quick("SELECT 1; DROP TABLE test")
     assert not is_safe
 
 
@@ -148,23 +148,23 @@ def test_detect_prompt_injection_unicode_bypass():
 
 def test_validate_sql_safety_cte():
     """WITH CTE 구문 통과."""
-    is_safe, _ = validate_sql_safety("WITH cte AS (SELECT 1) SELECT * FROM cte")
+    is_safe, _ = check_sql_safety_quick("WITH cte AS (SELECT 1) SELECT * FROM cte")
     assert is_safe
 
 
 def test_validate_sql_safety_sleep():
     """시간 지연 함수 차단."""
-    is_safe, _ = validate_sql_safety("SELECT SLEEP(5)")
+    is_safe, _ = check_sql_safety_quick("SELECT SLEEP(5)")
     assert not is_safe
 
 
 def test_validate_sql_safety_catalog():
     """시스템 카탈로그 접근 차단."""
-    is_safe, _ = validate_sql_safety("SELECT * FROM information_schema.tables")
+    is_safe, _ = check_sql_safety_quick("SELECT * FROM information_schema.tables")
     assert not is_safe
 
 
 def test_validate_sql_safety_comment():
     """SQL 주석 차단."""
-    is_safe, _ = validate_sql_safety("SELECT 1 -- comment")
+    is_safe, _ = check_sql_safety_quick("SELECT 1 -- comment")
     assert not is_safe

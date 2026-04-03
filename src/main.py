@@ -42,11 +42,14 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from src.agents.graph.checkpointer import create_checkpointer
+from src.agents.graph.pipeline import get_compiled_app
 from src.agents.models.user_messages import ERR_GENERIC, format_error
 from src.config import settings
 from src.connectors.manager import get_connector_manager
 from src.agents.graph.runner import run_pipeline
 from src.services.session import get_session_store
+from src.services.session.store import HistoryEntryType
 from src.tools.langsmith import setup_langsmith
 from src.utils.logger import get_logger, setup_logging
 from src.utils.security import detect_prompt_injection, mask_pii
@@ -87,8 +90,16 @@ async def lifespan(app: FastAPI):
     await manager.connect_all()
     store = get_session_store()
     await store.connect()
-    logger.info("서버 시작 완료")
-    yield
+
+    # Checkpointer 초기화 + 그래프 컴파일 (DI, async context manager)
+    async with create_checkpointer(
+        settings.checkpointer, settings.history_db,
+    ) as checkpointer:
+        get_compiled_app(checkpointer=checkpointer)
+        logger.info("서버 시작 완료")
+        yield
+
+    # create_checkpointer의 __aexit__에서 pool.close() 자동 정리
     await store.disconnect()
     await manager.disconnect_all()
     logger.info("서버 종료")
@@ -185,47 +196,43 @@ async def _run_ws_pipeline(
     """
     store = get_session_store()
 
-    await store.append_history(
-        session_id,
-        {"role": "user", "content": mask_pii(data)},
-    )
-
     async def on_event(msg: dict[str, Any]) -> None:
         """파이프라인 진행 이벤트를 WebSocket으로 전송한다."""
         await websocket.send_json(msg)
 
-    pipeline_result = await run_pipeline(
-        data,
-        session_id,
-        conversation_history=await store.get_history(
+    try:
+        pipeline_result = await run_pipeline(
+            data,
             session_id,
-        ),
-        clarification_state=await store.get_clarification(
-            session_id,
-        ),
-        on_event=on_event,
-    )
-
-    if pipeline_result.awaiting_clarification:
-        await store.set_clarification(
+            conversation_history=await store.get_history(
+                session_id,
+            ),
+            on_event=on_event,
+        )
+    finally:
+        await store.append_history(
             session_id,
             {
-                "awaiting": True,
-                "question": (
-                    pipeline_result.clarification_question
-                ),
-                "preprocessed_input": (
-                    pipeline_result.preprocessed_input
-                ),
-                "turns": pipeline_result.clarification_turns,
+                "role": "user",
+                "content": mask_pii(data),
+                "type": HistoryEntryType.QUERY,
             },
         )
 
     masked_response = mask_pii(pipeline_result.response)
 
+    # 대화 이력에 응답 기록 (명확화 질문 또는 최종 응답)
     await store.append_history(
         session_id,
-        {"role": "assistant", "content": masked_response},
+        {
+            "role": "assistant",
+            "content": masked_response,
+            "type": (
+                HistoryEntryType.CLARIFICATION
+                if pipeline_result.awaiting_clarification
+                else HistoryEntryType.RESPONSE
+            ),
+        },
     )
 
     # 시각화 분리 전송 (텍스트 응답보다 먼저)
@@ -388,36 +395,39 @@ async def query_endpoint(request: QueryRequest):
         await store.clear_session(session_id)
         return {"session_id": session_id, "response": "대화가 초기화되었습니다."}
 
-    # 대화 이력 추가 + 파이프라인 실행
-    await store.append_history(
-        session_id,
-        {"role": "user", "content": mask_pii(user_input)},
-    )
-
     try:
-        pipeline_result = await run_pipeline(
-            user_input,
-            session_id,
-            conversation_history=await store.get_history(session_id),
-            clarification_state=await store.get_clarification(session_id),
-        )
-
-        if pipeline_result.awaiting_clarification:
-            await store.set_clarification(
+        try:
+            pipeline_result = await run_pipeline(
+                user_input,
+                session_id,
+                conversation_history=await store.get_history(
+                    session_id,
+                ),
+            )
+        finally:
+            await store.append_history(
                 session_id,
                 {
-                    "awaiting": True,
-                    "question": pipeline_result.clarification_question,
-                    "preprocessed_input": pipeline_result.preprocessed_input,
-                    "turns": pipeline_result.clarification_turns,
+                    "role": "user",
+                    "content": mask_pii(user_input),
+                    "type": HistoryEntryType.QUERY,
                 },
             )
 
         masked_response = mask_pii(pipeline_result.response)
 
+        # 대화 이력에 응답 기록
         await store.append_history(
             session_id,
-            {"role": "assistant", "content": masked_response},
+            {
+                "role": "assistant",
+                "content": masked_response,
+                "type": (
+                    HistoryEntryType.CLARIFICATION
+                    if pipeline_result.awaiting_clarification
+                    else HistoryEntryType.RESPONSE
+                ),
+            },
         )
 
         result_body: dict[str, Any] = {

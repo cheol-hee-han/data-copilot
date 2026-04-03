@@ -540,6 +540,82 @@ def _gen_cte(domain: str) -> tuple[str, str, list[str], str]:
     return tpl[0], tpl[1], tpl[2], tpl[3]
 
 
+def _gen_case_decode(domain: str) -> tuple[str, str, list[str], str]:
+    """CASE WHEN 코드→한글 변환 쿼리."""
+    templates = [
+        ("SELECT EDPS_CSN, CSM, CASE WHEN CUS_DCD = '01' THEN '개인' WHEN CUS_DCD = '02' THEN '법인' WHEN CUS_DCD = '03' THEN '개인사업자' ELSE '기타' END AS 고객유형, CASE WHEN CUS_GRD_CD = '01' THEN '최우수' WHEN CUS_GRD_CD = '02' THEN '우수' WHEN CUS_GRD_CD = '03' THEN '보통' WHEN CUS_GRD_CD = '04' THEN '관리' ELSE '미분류' END AS 고객등급 FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE",
+         "전체 고객의 유형코드와 등급코드를 한글 레이블로 변환한 목록", ["TB_ADW_CSC101M"], "CUS"),
+        ("SELECT LN_NO, EDPS_CSN, LN_BAL_AMT, CASE WHEN LN_DCD = '01' THEN '신용대출' WHEN LN_DCD = '02' THEN '담보대출' WHEN LN_DCD = '03' THEN '보증대출' ELSE '기타' END AS 대출유형, CASE WHEN OVDU_GRD_CD = 'A' THEN '정상' WHEN OVDU_GRD_CD = 'B' THEN '요주의' WHEN OVDU_GRD_CD = 'C' THEN '고정' WHEN OVDU_GRD_CD = 'D' THEN '회수의문' WHEN OVDU_GRD_CD = 'E' THEN '추정손실' ELSE COALESCE(OVDU_GRD_CD, '미분류') END AS 연체등급 FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE",
+         "전체 대출의 유형과 연체등급을 한글로 변환한 현황", ["TB_ADW_LNB301M"], "LON"),
+        ("SELECT ACN, BAL_AMT, CASE WHEN ACT_DCD = '01' THEN '보통예금' WHEN ACT_DCD = '02' THEN '정기예금' WHEN ACT_DCD = '03' THEN '적금' WHEN ACT_DCD = '04' THEN 'MMF' ELSE '기타' END AS 계좌유형, CASE WHEN ACT_STCD = '01' THEN '정상' WHEN ACT_STCD = '02' THEN '해지' WHEN ACT_STCD = '03' THEN '휴면' ELSE '기타' END AS 계좌상태 FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE",
+         "전체 예금계좌의 유형과 상태를 한글로 변환한 현황", ["TB_ADW_DEP201P"], "DEP"),
+        ("SELECT CRD_NO, EDPS_CSN, MON_USE_AMT, CASE WHEN CRD_DCD = '01' THEN '신용카드' WHEN CRD_DCD = '02' THEN '체크카드' WHEN CRD_DCD = '03' THEN '선불카드' ELSE '기타' END AS 카드유형, CASE WHEN FLG_YN = 'Y' THEN '해외사용가능' ELSE '해외사용불가' END AS 해외사용여부 FROM biz_schema.TB_ADW_CRD401M WHERE STD_DT = CURRENT_DATE",
+         "전체 카드의 유형과 해외사용 여부를 한글로 변환한 현황", ["TB_ADW_CRD401M"], "CRD"),
+        ("SELECT EDPS_CSN, CASE WHEN CUS_GRD_CD IN ('01','02') THEN 'VIP' WHEN CUS_GRD_CD = '03' THEN '일반' ELSE '관리대상' END AS 고객구분, CASE WHEN AGE_GRP_CD IN ('20','30') THEN '청년' WHEN AGE_GRP_CD IN ('40','50') THEN '중장년' ELSE '시니어' END AS 연령구분 FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND CUS_DCD = '01'",
+         "개인고객의 등급 구간별·연령 구간별 분류 데이터", ["TB_ADW_CSC101M"], "CUS"),
+        ("SELECT LN_NO, LN_BAL_AMT, CASE WHEN LN_BAL_AMT < 10000000 THEN '1천만미만' WHEN LN_BAL_AMT < 50000000 THEN '1천만~5천만' WHEN LN_BAL_AMT < 100000000 THEN '5천만~1억' ELSE '1억이상' END AS 잔액구간 FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE",
+         "대출 잔액 구간별 분류 데이터", ["TB_ADW_LNB301M"], "LON"),
+    ]
+    tpl = random.choice(templates)
+    return tpl[0], tpl[1], tpl[2], tpl[3]
+
+
+def _gen_union(domain: str) -> tuple[str, str, list[str], str]:
+    """UNION ALL 합산 쿼리."""
+    templates = [
+        ("SELECT '수신' AS 구분, COUNT(*) AS cnt, SUM(BAL_AMT) AS total FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE UNION ALL SELECT '여신', COUNT(*), SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE UNION ALL SELECT '카드', COUNT(*), SUM(MON_USE_AMT) FROM biz_schema.TB_ADW_CRD401M WHERE STD_DT = CURRENT_DATE",
+         "수신·여신·카드 도메인별 건수 및 잔액(이용액) 종합 합산", ["TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_CRD401M"], "CUS"),
+        ("SELECT EDPS_CSN, '수신' AS 구분, SUM(BAL_AMT) AS amt FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE GROUP BY EDPS_CSN UNION ALL SELECT EDPS_CSN, '여신', SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE GROUP BY EDPS_CSN",
+         "고객별 수신잔액과 여신잔액을 행으로 합산한 데이터", ["TB_ADW_DEP201P", "TB_ADW_LNB301M"], "CUS"),
+        ("SELECT '보통예금' AS 상품구분, COUNT(*) AS cnt, SUM(BAL_AMT) AS total FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_DCD = '01' UNION ALL SELECT '정기예금', COUNT(*), SUM(BAL_AMT) FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_DCD = '02' UNION ALL SELECT '적금', COUNT(*), SUM(BAL_AMT) FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_DCD = '03'",
+         "수신 상품유형별(보통예금/정기예금/적금) 건수 및 잔액", ["TB_ADW_DEP201P"], "DEP"),
+        ("SELECT '신용대출' AS 구분, COUNT(*) AS cnt, SUM(LN_BAL_AMT) AS total FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '01' UNION ALL SELECT '담보대출', COUNT(*), SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '02' UNION ALL SELECT '보증대출', COUNT(*), SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '03'",
+         "여신 유형별(신용/담보/보증) 대출건수 및 잔액 현황", ["TB_ADW_LNB301M"], "LON"),
+        ("SELECT '영업점' AS 채널, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' AND CHN_CD = '01' UNION ALL SELECT '인터넷뱅킹', COUNT(*), SUM(TR_AMT) FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' AND CHN_CD = '02' UNION ALL SELECT '모바일뱅킹', COUNT(*), SUM(TR_AMT) FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' AND CHN_CD = '03'",
+         "최근 30일 채널별(영업점/인뱅/모뱅) 거래건수 및 거래금액", ["TB_ADW_TRX701L"], "TRX"),
+    ]
+    tpl = random.choice(templates)
+    return tpl[0], tpl[1], tpl[2], tpl[3]
+
+
+def _gen_pivot(domain: str) -> tuple[str, str, list[str], str]:
+    """피벗(크로스탭) 쿼리."""
+    templates = [
+        ("SELECT BLNG_BRCD, SUM(CASE WHEN LN_DCD = '01' THEN LN_BAL_AMT ELSE 0 END) AS 신용대출, SUM(CASE WHEN LN_DCD = '02' THEN LN_BAL_AMT ELSE 0 END) AS 담보대출, SUM(CASE WHEN LN_DCD = '03' THEN LN_BAL_AMT ELSE 0 END) AS 보증대출, SUM(LN_BAL_AMT) AS 합계 FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE GROUP BY BLNG_BRCD ORDER BY 합계 DESC",
+         "지점별 대출유형별 잔액 크로스탭 (신용/담보/보증 피벗)", ["TB_ADW_LNB301M"], "LON"),
+        ("SELECT BLNG_BRCD, SUM(CASE WHEN ACT_DCD = '01' THEN BAL_AMT ELSE 0 END) AS 보통예금, SUM(CASE WHEN ACT_DCD = '02' THEN BAL_AMT ELSE 0 END) AS 정기예금, SUM(CASE WHEN ACT_DCD = '03' THEN BAL_AMT ELSE 0 END) AS 적금, SUM(BAL_AMT) AS 합계 FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE GROUP BY BLNG_BRCD ORDER BY 합계 DESC",
+         "지점별 예금유형별 잔액 크로스탭 (보통/정기/적금 피벗)", ["TB_ADW_DEP201P"], "DEP"),
+        ("SELECT CUS_GRD_CD, SUM(CASE WHEN CUS_DCD = '01' THEN 1 ELSE 0 END) AS 개인, SUM(CASE WHEN CUS_DCD = '02' THEN 1 ELSE 0 END) AS 법인, SUM(CASE WHEN CUS_DCD = '03' THEN 1 ELSE 0 END) AS 개인사업자, COUNT(*) AS 합계 FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE GROUP BY CUS_GRD_CD ORDER BY CUS_GRD_CD",
+         "고객등급별 고객유형 분포 크로스탭", ["TB_ADW_CSC101M"], "CUS"),
+        ("SELECT TO_CHAR(TR_DT, 'YYYY-MM') AS 기준월, SUM(CASE WHEN TR_DCD = '01' THEN TR_AMT ELSE 0 END) AS 입금, SUM(CASE WHEN TR_DCD = '02' THEN TR_AMT ELSE 0 END) AS 출금, SUM(CASE WHEN TR_DCD = '03' THEN TR_AMT ELSE 0 END) AS 이체 FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '6 months' GROUP BY TO_CHAR(TR_DT, 'YYYY-MM') ORDER BY 기준월",
+         "최근 6개월 월별 거래유형(입금/출금/이체) 금액 추이 피벗", ["TB_ADW_TRX701L"], "TRX"),
+    ]
+    tpl = random.choice(templates)
+    return tpl[0], tpl[1], tpl[2], tpl[3]
+
+
+def _gen_date_func(domain: str) -> tuple[str, str, list[str], str]:
+    """DATE_TRUNC/EXTRACT 날짜 변환 쿼리."""
+    templates = [
+        ("SELECT DATE_TRUNC('month', STD_DT) AS 기준월, COUNT(*) AS cnt, SUM(BAL_AMT) AS total FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT BETWEEN '{sd}' AND '{ed}' GROUP BY DATE_TRUNC('month', STD_DT) ORDER BY 기준월",
+         "{sd}~{ed} 기간 월별 예금 계좌수 및 잔액 추이", ["TB_ADW_DEP201P"], "DEP"),
+        ("SELECT EXTRACT(YEAR FROM LN_DT) AS 대출연도, EXTRACT(MONTH FROM LN_DT) AS 대출월, COUNT(*) AS cnt, SUM(LN_EXC_AMT) AS total FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DT >= '{sd}' GROUP BY EXTRACT(YEAR FROM LN_DT), EXTRACT(MONTH FROM LN_DT) ORDER BY 대출연도, 대출월",
+         "{sd} 이후 월별 신규 대출 건수 및 실행금액 추이", ["TB_ADW_LNB301M"], "LON"),
+        ("SELECT TO_CHAR(TR_DT, 'YYYY-MM') AS 기준월, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT BETWEEN '{sd}' AND '{ed}' GROUP BY TO_CHAR(TR_DT, 'YYYY-MM') ORDER BY 기준월",
+         "{sd}~{ed} 기간 월별 거래건수 및 거래금액 추이", ["TB_ADW_TRX701L"], "TRX"),
+        ("SELECT DATE_TRUNC('week', TR_DT) AS 기준주, COUNT(*) AS cnt FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '3 months' GROUP BY DATE_TRUNC('week', TR_DT) ORDER BY 기준주",
+         "최근 3개월 주별 거래건수 추이", ["TB_ADW_TRX701L"], "TRX"),
+        ("SELECT TO_CHAR(OPEN_DT, 'YYYY-MM') AS 개설월, COUNT(*) AS cnt FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND OPEN_DT >= '{sd}' GROUP BY TO_CHAR(OPEN_DT, 'YYYY-MM') ORDER BY 개설월",
+         "{sd} 이후 월별 신규 계좌 개설 건수 추이", ["TB_ADW_DEP201P"], "DEP"),
+    ]
+    sd = (date(2025, 4, 1) + timedelta(days=random.randint(0, 200))).isoformat()
+    ed = (date.fromisoformat(sd) + timedelta(days=random.randint(90, 300))).isoformat()
+    tpl = random.choice(templates)
+    sql = tpl[0].format(sd=sd, ed=ed)
+    desc = tpl[1].format(sd=sd, ed=ed)
+    return sql, desc, tpl[2], tpl[3]
+
+
 # 복잡도별 생성 함수 매핑
 _GENERATORS = {
     "simple": _gen_simple,
@@ -548,16 +624,24 @@ _GENERATORS = {
     "subquery": _gen_subquery,
     "window_func": _gen_window,
     "cte": _gen_cte,
+    "case_decode": _gen_case_decode,
+    "union": _gen_union,
+    "pivot": _gen_pivot,
+    "date_func": _gen_date_func,
 }
 
-# 복잡도 분포 (10000건 기준)
+# 복잡도 분포 (10000건 기준, 요구사항 문서 준수)
 _COMPLEXITY_DIST = [
-    ("simple", 2000),
-    ("aggregation", 2500),
-    ("multi_join", 3000),
+    ("simple", 1500),
+    ("aggregation", 2000),
+    ("multi_join", 2500),
     ("subquery", 1000),
     ("window_func", 1000),
     ("cte", 500),
+    ("case_decode", 500),
+    ("union", 500),
+    ("pivot", 300),
+    ("date_func", 200),
 ]
 
 # 도메인 분포

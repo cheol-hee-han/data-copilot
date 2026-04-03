@@ -1,31 +1,47 @@
 ---
 name: 프롬프트 아키텍처 결정 사항
-description: src/agents/nodes/prompts/system_prompts.py를 마스터 저장소로 사용하는 구조 및 각 노드의 import 방식
+description: resources/prompts/ 하위 txt 파일 구조, 플레이스홀더 방식, 계층별 역할
 type: project
 ---
 
-모든 LLM 프롬프트는 `src/agents/nodes/prompts/system_prompts.py` 한 곳에서 관리한다.
-각 노드 파일은 해당 상수를 import하여 사용하며 로컬 프롬프트 상수를 정의하지 않는다.
+모든 LLM 프롬프트는 `resources/prompts/{계층}/` 하위 txt 파일로 관리한다.
+변수 치환은 `src/utils/llm/prompt.py`의 `render_prompt()` 함수로 `{variable}` 단일 중괄호 치환 방식을 사용한다.
+reason 계층도 동일하게 `.replace()` 기반이므로 `.format()` / `{{double braces}}` 사용 금지.
 
-**Why:** 프롬프트 튜닝 시 단일 파일만 수정하면 전체 파이프라인에 반영되도록 중앙화.
+**Why:** 프롬프트를 txt 파일로 분리하여 코드 수정 없이 프롬프트 튜닝이 가능하도록 중앙화.
 
-**How to apply:** 노드 파일에 프롬프트 문자열을 직접 작성하지 말 것.
-새 프롬프트가 필요하면 system_prompts.py 에 상수로 추가하고 노드에서 import한다.
+**How to apply:** 노드 파일에 프롬프트 문자열을 직접 작성하지 말 것. 신규 프롬프트는 resources/prompts/ 하위 txt 파일로 추가.
 
-## 현재 상수 목록 (system_prompts.py)
+## 파이프라인 계층별 파일 구조
 
-| 상수명 | 사용 노드 | 설명 |
-|--------|-----------|------|
-| INTENT_CLASSIFICATION | intent_classifier.py | 의도 분류 — 두 줄 출력 형식 강제 |
-| CLARIFICATION | clarifier.py | 명확화 질문 — 선택지 형태 |
-| SQL_GENERATION_RULES | sql_generator.py | SQL 생성 — {validation_feedback_section} 포함 |
-| SQL_VALIDATION_FEEDBACK_SECTION | sql_generator.py | SQL 재생성 시 오류 주입 템플릿 |
-| RESULT_FORMATTING | formatter.py | 결과 포맷팅 — system prompt 로만 사용 |
-| DATA_ANALYSIS | analyzer.py | 데이터 분석 — JSON 출력 강제 |
+### interpret/
+- context_classifier_system.txt + context_classifier_user.txt — 연속대화 여부 + 의도 분류
+- query_normalizer_phase1_system.txt + phase1_user.txt — 8-Slot 질의 분해
+- query_normalizer_phase2_system.txt + phase2_user.txt — 교차 검증 (R1~R12)
+
+### reason/
+- planner_system.txt — 지식 항목 등록 + 탐색 실행계획 생성
+- knowledge_interpreter_system.txt — 도구 결과 통합 분석 + 테이블 판정
+- table_comparison_system.txt — 유사 테이블 선별
+- sql_generator_system.txt — SQL 생성 ({fix_section} 포함)
+- sql_generator_fix_section.txt — 재생성 시 주입되는 fix 섹션
+- sql_validator_system.txt — 의미적 검증 (7개 체크포인트)
+- recovery_agent_system.txt — 추가 탐색 에이전트 (multi-turn)
+
+### present/
+- analyzer_system.txt + analyzer_user.txt — 데이터 분석 인사이트
+- analyzer_viz_judgment_system.txt + viz_judgment_user.txt — 시각화 유형 판단
+- analyzer_viz_svg_system.txt — SVG 시각화 생성
+- formatter_system.txt + formatter_user.txt — 조회 결과 보고서 포맷팅
 
 ## 메시지 구조 패턴
 
-- **intent_classifier, clarifier**: system=프롬프트, messages=[user: 입력]
-- **sql_generator**: system=SQL_GENERATION_RULES(동적 포맷), messages=[user: 입력]
-- **formatter, analyzer**: system=프롬프트(고정), messages=[user: 요청+데이터 템플릿]
-  - 사용자 요청과 데이터를 system이 아닌 user 메시지로 분리 → 소형 LLM 역할 인지 향상
+- interpret/present 계층: system=system.txt 내용, user=user.txt 내용 ({variable} 치환 후)
+- reason 계층: system=system.txt 내용 ({variable} 치환), user는 노드마다 다름
+- user.txt는 입력 데이터와 요청만 포함해야 함 (역할 정의는 system.txt에만)
+
+## 알려진 이슈
+
+- recovery_agent_system.txt의 응답 형식 JSON이 {{double braces}}로 작성되어 있음 — 버그 가능성, 확인 필요
+- analyzer_user.txt에 역할 정의가 포함되어 있음 — system/user 역할 분리 위반
+- table_comparison의 selected/rejected 스키마가 knowledge_interpreter와 다름 (단일 문자열 vs 배열)

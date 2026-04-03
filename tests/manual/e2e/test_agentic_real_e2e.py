@@ -309,16 +309,13 @@ class TestRealAgenticNodeFlow:
     """실제 데이터소스를 사용한 에이전틱 노드 흐름."""
 
     @pytest.mark.asyncio
-    async def test_01_planner_real_context(
+    async def test_01_reasoning_preparer_real_context(
         self, connector_mgr,
     ):
-        """planner 노드 — 실제 데이터소스에서 초기 컨텍스트 수집."""
-        from src.agents.state.state import (
-            PipelineState,
-            ReasoningState,
-        )
-        from src.agents.nodes.reason.planner import (
-            planner_node,
+        """reasoning_preparer 노드 — 초기 상태 준비."""
+        from src.agents.state.state import PipelineState
+        from src.agents.nodes.reason.reasoning_preparer import (
+            reasoning_preparer_node,
         )
 
         state = PipelineState(
@@ -326,7 +323,7 @@ class TestRealAgenticNodeFlow:
         )
 
         t0 = time.perf_counter()
-        result = await planner_node(state)
+        result = await reasoning_preparer_node(state)
         elapsed = (time.perf_counter() - t0) * 1000
 
         reason = result["reason"]
@@ -343,7 +340,6 @@ class TestRealAgenticNodeFlow:
                 ct.table_name
                 for ct in reason.candidate_tables
             ][:5],
-            "fast_path": reason.fast_path_triggered,
             "use_cases": len(
                 reason.explored_use_cases,
             ),
@@ -356,28 +352,23 @@ class TestRealAgenticNodeFlow:
             findings.append(
                 "후보 테이블 0건 — search_table_meta 키워드 조정 필요"
             )
-        if trace["use_cases"] == 0:
+        if trace["hypotheses"] != 1:
             findings.append(
-                "활용사례 0건 — Qdrant sql_history 검색 결과 없음"
-            )
-        if trace["hypotheses"] < 2:
-            findings.append(
-                "가설 2개 미만 — Cold Start fallback만 존재"
+                f"가설 {trace['hypotheses']}개 — H_INIT 1개 예상"
             )
 
         _record(
-            "planner_real", "customer_loan_query",
+            "reasoning_preparer_real", "customer_loan_query",
             "고객별 여신 잔액 합계", trace,
-            "PASS" if trace["phase"] in (
-                "EXPLORING", "GENERATING",
-            ) else "WARN",
+            "PASS" if trace["phase"] == "EXPLORING"
+            else "WARN",
             elapsed,
             findings=" | ".join(findings) if findings else "",
         )
 
-        assert reason.phase in (
-            "EXPLORING", "GENERATING",
-        ), f"planner가 예상 phase로 전환 실패: {reason.phase}"
+        assert reason.phase == "EXPLORING", (
+            f"reasoning_preparer가 예상 phase로 전환 실패: {reason.phase}"
+        )
 
     @pytest.mark.asyncio
     async def test_02_explorer_real_tools(
@@ -390,8 +381,8 @@ class TestRealAgenticNodeFlow:
             ExecutionStep,
             Hypothesis,
         )
-        from src.agents.nodes.reason.context_explorer import (
-            context_explorer_node,
+        from src.agents.nodes.reason.knowledge_fetcher import (
+            knowledge_fetcher_node,
         )
 
         state = PipelineState(
@@ -429,7 +420,7 @@ class TestRealAgenticNodeFlow:
         )
 
         t0 = time.perf_counter()
-        result = await context_explorer_node(state)
+        result = await knowledge_fetcher_node(state)
         elapsed = (time.perf_counter() - t0) * 1000
 
         reason = result["reason"]
@@ -480,26 +471,26 @@ class TestRealAgenticNodeFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_03_full_planner_to_explorer_flow(
+    async def test_03_full_reasoning_preparer_to_explorer_flow(
         self, connector_mgr,
     ):
-        """planner → explorer 연쇄 실행."""
+        """reasoning_preparer → explorer 연쇄 실행."""
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
         )
-        from src.agents.nodes.reason.planner import (
-            planner_node,
+        from src.agents.nodes.reason.reasoning_preparer import (
+            reasoning_preparer_node,
         )
-        from src.agents.nodes.reason.context_explorer import (
-            context_explorer_node,
+        from src.agents.nodes.reason.knowledge_fetcher import (
+            knowledge_fetcher_node,
         )
 
-        # Step 1: planner
+        # Step 1: reasoning_preparer
         state = PipelineState(
             preprocessed_input="지점별 수신 잔액",
         )
-        plan_result = await planner_node(state)
+        plan_result = await reasoning_preparer_node(state)
 
         # 상태 전이
         d = state.model_dump()
@@ -512,7 +503,7 @@ class TestRealAgenticNodeFlow:
 
         # Step 2: explorer
         t0 = time.perf_counter()
-        explore_result = await context_explorer_node(state2)
+        explore_result = await knowledge_fetcher_node(state2)
         elapsed = (time.perf_counter() - t0) * 1000
 
         d2 = state2.model_dump()
@@ -524,10 +515,10 @@ class TestRealAgenticNodeFlow:
         state3 = PipelineState(**d2)
 
         trace = {
-            "planner_hypotheses": len(
+            "preparer_hypotheses": len(
                 state2.reason.hypotheses,
             ),
-            "planner_candidates": len(
+            "preparer_candidates": len(
                 state2.reason.candidate_tables,
             ),
             "explorer_knowledge": len(
@@ -544,7 +535,7 @@ class TestRealAgenticNodeFlow:
         }
 
         _record(
-            "flow_real", "planner_to_explorer",
+            "flow_real", "reasoning_preparer_to_explorer",
             "지점별 수신 잔액", trace,
             "PASS",
             elapsed,

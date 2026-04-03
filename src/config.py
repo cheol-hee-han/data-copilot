@@ -10,7 +10,40 @@ pydantic-settings 기반으로 .env 파일 및 환경 변수에서
 모듈 수준 싱글턴 settings 를 export 하여 전역에서 참조한다.
 """
 
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+
+
+class DbConnectionInfo(BaseModel):
+    """DB 연결에 필요한 최소 정보 묶음 (Value Object)."""
+
+    host: str = "localhost"
+    port: int = 5432
+    name: str = ""
+    user: str = ""
+    password: str = ""
+
+    @property
+    def dsn(self) -> str:
+        """PostgreSQL DSN 문자열을 반환한다 (비밀번호 제외, 로깅 안전)."""
+        return (
+            f"host={self.host} port={self.port} "
+            f"dbname={self.name} user={self.user}"
+        )
+
+
+class CheckpointerConfig(BaseModel):
+    """Checkpointer 설정 — 별도 DB는 선택적."""
+
+    backend: str = "memory"  # "memory" | "postgres"
+    dedicated_db: DbConnectionInfo | None = None  # None이면 history_db 공유
+    pool_min: int = 2
+    pool_max: int = 10
+    thread_ttl_days: int = 30  # 0=무제한
+
+    def resolve_db(self, history_db: DbConnectionInfo) -> DbConnectionInfo:
+        """dedicated_db가 없으면 history_db를 그대로 사용한다."""
+        return self.dedicated_db or history_db
 
 
 class Settings(BaseSettings):
@@ -42,6 +75,9 @@ class Settings(BaseSettings):
     history_db_name: str = "history_db"
     history_db_user: str = "history_user"
     history_db_password: str = ""
+
+    # ── Checkpointer ──
+    checkpointer: CheckpointerConfig = CheckpointerConfig()
 
     # ElasticSearch
     es_host: str = "localhost"
@@ -192,9 +228,12 @@ class Settings(BaseSettings):
     agentic_total_timeout: float = 120.0  # 서브그래프 전체 타임아웃
     # 에이전틱 루프 제어 상수
     max_tool_calls: int = 20            # 도구 호출 총량 한도
-    max_replans: int = 3                # 재계획 최대 횟수
+    max_replans: int = 5                # 재계획 최대 횟수
     max_generates: int = 4              # SQL 생성 시도 최대 횟수
     max_local_fixes: int = 2            # 로컬 문법 교정 최대 횟수
+
+    # ── Recovery Agent ──
+    max_conflicted_bounces: int = 2         # CONFLICTED 왕복 가드
 
     # ── LLM 호출 ──
     llm_transport_max_retry: int = 3    # SDK 레벨 전송 재시도 (429/500/503/네트워크)
@@ -228,7 +267,7 @@ class Settings(BaseSettings):
 
     # Evaluation Tracker (자체 트래킹, 폐쇄망 호환)
     eval_tracker_enabled: bool = True
-    eval_tracker_output_dir: str = "devtools/evaluation/traces"
+    eval_tracker_output_dir: str = "logs/traces"
 
     # Application
     log_level: str = "INFO"
@@ -254,6 +293,17 @@ class Settings(BaseSettings):
     # ── 3순위: 금액 단위 기준값 (한국 금융 고정, 바뀔 일 없음) ──
     krw_eok_threshold: int = 1_0000_0000   # 억원 기준 (1억)
     krw_man_threshold: int = 1_0000        # 만원 기준 (1만)
+
+    @property
+    def history_db(self) -> DbConnectionInfo:
+        """SQL 이력 DB 연결 정보를 Value Object로 반환한다."""
+        return DbConnectionInfo(
+            host=self.history_db_host,
+            port=self.history_db_port,
+            name=self.history_db_name,
+            user=self.history_db_user,
+            password=self.history_db_password,
+        )
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

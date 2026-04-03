@@ -17,6 +17,8 @@ impl/ 패키지의 모든 커넥터 구현체가 준수해야 하는 공통 인�
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 
@@ -62,3 +64,36 @@ class DatabaseConnector(BaseConnector):
         self, query: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         """읽기 전용 쿼리를 실행한다."""
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DB row 타입 정규화
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def sanitize_row(row: dict[str, Any]) -> dict[str, Any]:
+    """DB row의 값을 JSON 직렬화 가능한 타입으로 정규화한다.
+
+    asyncpg 등 DB 드라이버가 반환하는 Python 전용 타입(Decimal, date 등)을
+    JSON 표준 타입(int, float, str)으로 변환한다.
+    모든 DatabaseConnector 구현체는 execute_query 결과를 반환하기 전에
+    이 함수를 적용해야 한다.
+    """
+    return {k: _to_json_safe(v) for k, v in row.items()}
+
+
+def _to_json_safe(value: Any) -> Any:
+    """단일 값을 JSON 직렬화 가능한 타입으로 변환한다."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        if value.is_nan() or value.is_infinite():
+            return None
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return value

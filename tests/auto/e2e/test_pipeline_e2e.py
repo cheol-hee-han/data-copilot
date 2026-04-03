@@ -10,53 +10,76 @@ API 키 없이 실행 가능하다.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.agents.models.normalization import NormalizedQuery
 from src.agents.state.state import IntentType, PipelineState, QueryStatus
+from src.services.history_resolver import HistoryDecision
 from src.services.intent_resolver import _parse_intent_response
 from src.services.sql_safety_checker import validate_sql_safety
-from src.agents.nodes.interpret.intent_classifier import classify_intent_node
-from src.agents.nodes.interpret.preprocessor import preprocess_node
+from src.agents.nodes.interpret.context_classifier import context_classifier_node
 from src.agents.nodes.interpret.query_normalizer import normalize_query_node
+from src.services.input_sanitizer import sanitize
 
 
 # ---------------------------------------------------------------------------
-# 헬퍼
+# 헬퍼 — llm_call_with_parse_retry 목(mock) 생성
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_message(text: str) -> MagicMock:
-    """Anthropic 응답 객체를 흉내 내는 Mock을 생성한다."""
-    content_block = MagicMock()
-    content_block.text = text
-    response = MagicMock()
-    response.content = [content_block]
-    return response
-
-
-def _make_intent_gate_response(
+def _make_gate_mock(
     category: str = "DATA_QUERY",
     confidence: str = "HIGH",
     reason: str = "테스트",
-) -> MagicMock:
-    """Intent Gate JSON 응답 Mock을 생성한다."""
+    resolution: str = "SKIP",
+) -> AsyncMock:
+    """context_classifier 서비스용 llm_call_with_parse_retry mock.
+
+    반환값: (raw_text, parsed_dict) — _parse_response 결과를 직접 반환.
+    parsed_dict의 resolution은 HistoryDecision enum으로 변환된 상태.
+    """
     gate_json = json.dumps({
-        "category": category,
-        "confidence": confidence,
-        "reason": reason,
+        "continuity": {
+            "label": resolution,
+            "confidence": confidence,
+            "reason": reason,
+        },
+        "intent": {
+            "label": category,
+            "confidence": confidence,
+            "reason": reason,
+        },
     })
-    return _make_mock_message(gate_json)
+    parsed = {
+        "resolution": HistoryDecision(resolution),
+        "category": category,
+        "intent_confidence": confidence,
+        "continuity_confidence": confidence,
+        "intent_reason": reason,
+        "continuity_reason": reason,
+    }
+    return AsyncMock(return_value=(gate_json, parsed))
 
 
-def _make_normalization_response(
+def _make_legacy_mock(
+    intent_text: str = "data_extraction",
+    confidence: float = 0.85,
+) -> AsyncMock:
+    """Legacy 의도분류용 llm_call_with_parse_retry mock (레거시 호환)."""
+    raw = f"INTENT: {intent_text}\nCONFIDENCE: {confidence}"
+    parsed = _parse_intent_response(raw)
+    return AsyncMock(return_value=(raw, parsed))
+
+
+def _make_normalization_mock(
     intent_primary: str = "EXTRACT",
     entities: list | None = None,
     measures: list | None = None,
-) -> MagicMock:
-    """정규화 Phase 1 LLM 응답 Mock을 생성한다."""
+    extra: dict | None = None,
+) -> AsyncMock:
+    """정규화용 llm_call_with_parse_retry mock."""
     nq_data = {
         "intent": {
             "primary": intent_primary,
@@ -76,9 +99,20 @@ def _make_normalization_response(
             "vector_search": "테스트 검색 질의",
         },
     }
-    return _make_mock_message(
-        json.dumps(nq_data, ensure_ascii=False),
-    )
+    if extra:
+        nq_data.update(extra)
+    raw = json.dumps(nq_data, ensure_ascii=False)
+    return AsyncMock(return_value=(raw, nq_data))
+
+
+# ---------------------------------------------------------------------------
+# 공통 mock 경로 상수
+# ---------------------------------------------------------------------------
+
+_INTENT_LLM = "src.services.context_classifier.llm_call_with_parse_retry"
+_NORM_LLM = "src.services.query_normalizer.llm_call_with_parse_retry"
+_NORM_RECORD = "src.services.query_normalizer.record_prompt_variables"
+_DISPATCH = "src.utils.tracker.dispatch.dispatch_tracking_event"
 
 
 # ---------------------------------------------------------------------------
@@ -96,24 +130,22 @@ class TestPreprocessToIntent:
             user_input="이번 달 신규 고객 수 알려줘",
         )
 
-        preprocess_result = await preprocess_node(state)
-        assert preprocess_result["status"] == QueryStatus.PREPROCESSING
-        state = state.model_copy(update=preprocess_result)
+        san = sanitize(state.user_input)
+        assert san.is_error is False
+        state = state.model_copy(update={
+            "preprocessed_input": san.text,
+            "status": QueryStatus.PREPROCESSING,
+        })
 
-        mock_resp = _make_intent_gate_response(
-            category="DATA_QUERY",
-            confidence="HIGH",
-            reason="고객 엔티티 + 조회 동사",
-        )
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-        ) as mock_get:
-            mock_client = AsyncMock()
-            mock_get.return_value = mock_client
-            mock_client.messages.create = AsyncMock(
-                return_value=mock_resp,
-            )
-            intent_result = await classify_intent_node(state)
+        with (
+            patch(_INTENT_LLM, _make_gate_mock(
+                category="DATA_QUERY",
+                confidence="HIGH",
+                reason="고객 엔티티 + 조회 동사",
+            )),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
+            intent_result = await context_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.DATA_EXTRACTION
         assert intent_result["query_category"] == "DATA_QUERY"
@@ -126,23 +158,21 @@ class TestPreprocessToIntent:
             user_input="지난 분기 대비 이번 분기 연체율 추이 분석해줘",
         )
 
-        preprocess_result = await preprocess_node(state)
-        state = state.model_copy(update=preprocess_result)
+        san = sanitize(state.user_input)
+        state = state.model_copy(update={
+            "preprocessed_input": san.text,
+            "status": QueryStatus.PREPROCESSING,
+        })
 
-        mock_resp = _make_intent_gate_response(
-            category="DATA_ANALYSIS",
-            confidence="HIGH",
-            reason="추이 분석 + 비교 요청",
-        )
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-        ) as mock_get:
-            mock_client = AsyncMock()
-            mock_get.return_value = mock_client
-            mock_client.messages.create = AsyncMock(
-                return_value=mock_resp,
-            )
-            intent_result = await classify_intent_node(state)
+        with (
+            patch(_INTENT_LLM, _make_gate_mock(
+                category="DATA_ANALYSIS",
+                confidence="HIGH",
+                reason="추이 분석 + 비교 요청",
+            )),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
+            intent_result = await context_classifier_node(state)
 
         # "추이", "분석" 키워드 → DATA_ANALYSIS
         assert intent_result["intent"] == IntentType.DATA_ANALYSIS
@@ -156,20 +186,15 @@ class TestPreprocessToIntent:
             status=QueryStatus.PREPROCESSING,
         )
 
-        mock_resp = _make_intent_gate_response(
-            category="CASUAL_TALK",
-            confidence="HIGH",
-            reason="인사말",
-        )
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-        ) as mock_get:
-            mock_client = AsyncMock()
-            mock_get.return_value = mock_client
-            mock_client.messages.create = AsyncMock(
-                return_value=mock_resp,
-            )
-            intent_result = await classify_intent_node(state)
+        with (
+            patch(_INTENT_LLM, _make_gate_mock(
+                category="CASUAL_TALK",
+                confidence="HIGH",
+                reason="인사말",
+            )),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
+            intent_result = await context_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.CASUAL_TALK
         assert intent_result["query_category"] == "CASUAL_TALK"
@@ -183,20 +208,15 @@ class TestPreprocessToIntent:
             status=QueryStatus.PREPROCESSING,
         )
 
-        mock_resp = _make_intent_gate_response(
-            category="META_QUESTION",
-            confidence="HIGH",
-            reason="테이블 구조 질문",
-        )
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-        ) as mock_get:
-            mock_client = AsyncMock()
-            mock_get.return_value = mock_client
-            mock_client.messages.create = AsyncMock(
-                return_value=mock_resp,
-            )
-            intent_result = await classify_intent_node(state)
+        with (
+            patch(_INTENT_LLM, _make_gate_mock(
+                category="META_QUESTION",
+                confidence="HIGH",
+                reason="테이블 구조 질문",
+            )),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
+            intent_result = await context_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.META_QUESTION
 
@@ -209,77 +229,47 @@ class TestPreprocessToIntent:
             status=QueryStatus.PREPROCESSING,
         )
 
-        mock_resp = _make_intent_gate_response(
-            category="AMBIGUOUS",
-            confidence="LOW",
-            reason="구체적 엔티티 없음",
-        )
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-        ) as mock_get:
-            mock_client = AsyncMock()
-            mock_get.return_value = mock_client
-            mock_client.messages.create = AsyncMock(
-                return_value=mock_resp,
-            )
-            intent_result = await classify_intent_node(state)
+        with (
+            patch(_INTENT_LLM, _make_gate_mock(
+                category="AMBIGUOUS",
+                confidence="LOW",
+                reason="구체적 엔티티 없음",
+            )),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
+            intent_result = await context_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.CLARIFICATION_NEEDED
 
-    @pytest.mark.asyncio
-    async def test_sql_injection_blocked_before_intent(self):
+    def test_sql_injection_blocked_before_intent(self):
         """SQL 인젝션은 전처리에서 차단된다."""
-        state = PipelineState(
-            user_input="고객 목록; DROP TABLE customers--",
-        )
-        preprocess_result = await preprocess_node(state)
-        assert preprocess_result["status"] == QueryStatus.ERROR
+        san = sanitize("고객 목록; DROP TABLE customers--")
+        assert san.is_error is True
 
     @pytest.mark.asyncio
-    async def test_llm_error_falls_back_to_legacy(self):
-        """Intent Gate LLM 실패 시 레거시 분류로 폴백한다."""
+    async def test_llm_error_falls_back_to_rules(self):
+        """LLM 실패 시 규칙 기반 분류로 폴백한다.
+
+        context_classifier의 _fallback은 이력이 없으면 LLM 호출 없이
+        classify_by_rules로 규칙 기반 의도 분류를 수행한다.
+        "목록" + "조회" 키워드 → DATA_EXTRACTION으로 분류된다.
+        """
         state = PipelineState(
-            user_input="이번 달 신규 고객 수",
-            preprocessed_input="이번 달 신규 고객 수",
+            user_input="이번 달 고객 목록 조회해줘",
+            preprocessed_input="이번 달 고객 목록 조회해줘",
             status=QueryStatus.PREPROCESSING,
         )
 
-        # Intent Gate 호출 실패 → _classify_legacy 폴백
-        # _classify_legacy 는 llm_call_with_parse_retry 를 사용
-        legacy_resp = _make_mock_message(
-            "INTENT: data_extraction\nCONFIDENCE: 0.85",
-        )
+        # LLM 호출 실패 → _fallback → 이력 없음 → classify_by_rules
+        mock_llm = AsyncMock(side_effect=Exception("API 연결 오류"))
 
-        # Intent Gate 용 클라이언트: 에러 발생
-        gate_client = AsyncMock()
-        gate_client.messages.create = AsyncMock(
-            side_effect=Exception("API 연결 오류"),
-        )
-        # 레거시 폴백용 클라이언트: 정상 응답
-        legacy_client = AsyncMock()
-        legacy_client.messages.create = AsyncMock(
-            return_value=legacy_resp,
-        )
-
-        call_count = 0
-
-        def _mock_get_client():
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return gate_client
-            return legacy_client
-
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-            side_effect=_mock_get_client,
-        ), patch(
-            "src.utils.llm.retry.get_llm_client",
-            return_value=legacy_client,
+        with (
+            patch(_INTENT_LLM, mock_llm),
+            patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await classify_intent_node(state)
+            intent_result = await context_classifier_node(state)
 
-        # 레거시 폴백으로 정상 분류
+        # 규칙 기반 폴백으로 정상 분류 ("목록" + "조회" → DATA_EXTRACTION)
         assert intent_result["intent"] == IntentType.DATA_EXTRACTION
 
 
@@ -300,42 +290,34 @@ class TestNormalizationNode:
             status=QueryStatus.INTENT_CLASSIFIED,
         )
 
-        phase1_resp = _make_normalization_response(
-            intent_primary="AGGREGATE",
-            entities=[
-                {
-                    "term": "고객",
-                    "type": "DIRECT",
-                    "confidence": "HIGH",
-                },
-            ],
-            measures=[
-                {
-                    "term": "고객수",
-                    "measure_type": "RAW",
-                    "agg_function": "COUNT",
-                    "confidence": "HIGH",
-                },
-            ],
-        )
-
-        with patch(
-            "src.services.query_normalizer.settings",
-        ) as mock_settings:
+        with (
+            patch(
+                "src.services.query_normalizer.settings",
+            ) as mock_settings,
+            patch(_NORM_LLM, _make_normalization_mock(
+                intent_primary="AGGREGATE",
+                entities=[
+                    {
+                        "term": "고객",
+                        "type": "DIRECT",
+                    },
+                ],
+                measures=[
+                    {
+                        "term": "고객수",
+                        "measure_type": "RAW",
+                        "agg_function": "COUNT",
+                    },
+                ],
+            )),
+            patch(_NORM_RECORD, new_callable=AsyncMock),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-
-            with patch(
-                "src.services.query_normalizer.get_llm_client",
-            ) as mock_get:
-                mock_client = AsyncMock()
-                mock_get.return_value = mock_client
-                mock_client.messages.create = AsyncMock(
-                    return_value=phase1_resp,
-                )
-                result = await normalize_query_node(state)
+            result = await normalize_query_node(state)
 
         assert result["status"] == QueryStatus.QUERY_NORMALIZED
         nq = result["normalized_query"]
@@ -358,15 +340,14 @@ class TestNormalizationNode:
         phase1_data = {
             "intent": {"primary": "RANK", "secondary": ["AGGREGATE"]},
             "entities": [
-                {"term": "대출", "type": "DIRECT", "confidence": "HIGH"},
-                {"term": "지점", "type": "DIRECT", "confidence": "HIGH"},
+                {"term": "대출", "type": "DIRECT"},
+                {"term": "지점", "type": "DIRECT"},
             ],
             "measures": [
                 {
                     "term": "여신잔액",
                     "measure_type": "RAW",
                     "agg_function": "SUM",
-                    "confidence": "HIGH",
                 },
             ],
             "dimensions": [
@@ -374,7 +355,6 @@ class TestNormalizationNode:
                     "term": "지점",
                     "role": "GROUP",
                     "granularity": "CATEGORY",
-                    "confidence": "HIGH",
                 },
             ],
             "filters": [],
@@ -390,9 +370,6 @@ class TestNormalizationNode:
                 "vector_search": "지점별 여신잔액 상위 10개",
             },
         }
-        phase1_resp = _make_mock_message(
-            json.dumps(phase1_data, ensure_ascii=False),
-        )
 
         # Phase 2: by 필드 채워서 반환
         phase2_data = dict(phase1_data)
@@ -404,27 +381,30 @@ class TestNormalizationNode:
                 "by": "여신잔액",
             },
         ]
-        phase2_resp = _make_mock_message(
-            json.dumps(phase2_data, ensure_ascii=False),
-        )
 
-        with patch(
-            "src.services.query_normalizer.settings",
-        ) as mock_settings:
+        phase1_raw = json.dumps(phase1_data, ensure_ascii=False)
+        phase2_raw = json.dumps(phase2_data, ensure_ascii=False)
+
+        # _call_llm_and_parse 내부에서 llm_call_with_parse_retry를 호출하고
+        # parsed(dict)만 반환. mock은 (raw, parsed) 튜플을 반환해야 함.
+        mock_llm = AsyncMock(side_effect=[
+            (phase1_raw, phase1_data),
+            (phase2_raw, phase2_data),
+        ])
+
+        with (
+            patch(
+                "src.services.query_normalizer.settings",
+            ) as mock_settings,
+            patch(_NORM_LLM, mock_llm),
+            patch(_NORM_RECORD, new_callable=AsyncMock),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
             mock_settings.normalization_phase2_enabled = True
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-
-            with patch(
-                "src.services.query_normalizer.get_llm_client",
-            ) as mock_get:
-                mock_client = AsyncMock()
-                mock_get.return_value = mock_client
-                mock_client.messages.create = AsyncMock(
-                    side_effect=[phase1_resp, phase2_resp],
-                )
-                result = await normalize_query_node(state)
+            result = await normalize_query_node(state)
 
         nq = result["normalized_query"]
         assert nq.intent.primary == "RANK"
@@ -444,7 +424,7 @@ class TestNormalizationNode:
         nq_data = {
             "intent": {"primary": "EXTRACT", "secondary": []},
             "entities": [
-                {"term": "대출", "type": "DIRECT", "confidence": "HIGH"},
+                {"term": "대출", "type": "DIRECT"},
             ],
             "measures": [],
             "dimensions": [],
@@ -465,7 +445,6 @@ class TestNormalizationNode:
                 "expected_columns": [
                     "대출번호", "고객명", "연체금액", "연체일수",
                 ],
-                "confidence": "HIGH",
             },
             "ambiguities": [],
             "rewritten_query": "2026년 3월 연체명세서 조회",
@@ -474,27 +453,21 @@ class TestNormalizationNode:
                 "vector_search": "연체명세서 조회",
             },
         }
-        mock_resp = _make_mock_message(
-            json.dumps(nq_data, ensure_ascii=False),
-        )
+        raw = json.dumps(nq_data, ensure_ascii=False)
 
-        with patch(
-            "src.services.query_normalizer.settings",
-        ) as mock_settings:
+        with (
+            patch(
+                "src.services.query_normalizer.settings",
+            ) as mock_settings,
+            patch(_NORM_LLM, AsyncMock(return_value=(raw, nq_data))),
+            patch(_NORM_RECORD, new_callable=AsyncMock),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-
-            with patch(
-                "src.services.query_normalizer.get_llm_client",
-            ) as mock_get:
-                mock_client = AsyncMock()
-                mock_get.return_value = mock_client
-                mock_client.messages.create = AsyncMock(
-                    return_value=mock_resp,
-                )
-                result = await normalize_query_node(state)
+            result = await normalize_query_node(state)
 
         nq = result["normalized_query"]
         assert nq.output_hint.format == "SPEC_SHEET"
@@ -511,23 +484,22 @@ class TestNormalizationNode:
             status=QueryStatus.INTENT_CLASSIFIED,
         )
 
-        with patch(
-            "src.services.query_normalizer.settings",
-        ) as mock_settings:
+        with (
+            patch(
+                "src.services.query_normalizer.settings",
+            ) as mock_settings,
+            patch(
+                _NORM_LLM,
+                AsyncMock(side_effect=Exception("LLM 연결 실패")),
+            ),
+            patch(_NORM_RECORD, new_callable=AsyncMock),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-
-            with patch(
-                "src.services.query_normalizer.get_llm_client",
-            ) as mock_get:
-                mock_client = AsyncMock()
-                mock_get.return_value = mock_client
-                mock_client.messages.create = AsyncMock(
-                    side_effect=Exception("LLM 연결 실패"),
-                )
-                result = await normalize_query_node(state)
+            result = await normalize_query_node(state)
 
         # 실패해도 파이프라인 계속 진행
         assert result["status"] == QueryStatus.QUERY_NORMALIZED
@@ -552,56 +524,48 @@ class TestFullFlowWithNormalization:
         )
 
         # 1. 전처리
-        pre_result = await preprocess_node(state)
-        assert pre_result["status"] == QueryStatus.PREPROCESSING
-        state = state.model_copy(update=pre_result)
+        san = sanitize(state.user_input)
+        assert san.is_error is False
+        state = state.model_copy(update={
+            "preprocessed_input": san.text,
+            "status": QueryStatus.PREPROCESSING,
+        })
 
-        # 2. 의도 분류 (Mock Intent Gate)
-        intent_resp = _make_intent_gate_response("DATA_QUERY")
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-        ) as mock_get:
-            mock_client = AsyncMock()
-            mock_get.return_value = mock_client
-            mock_client.messages.create = AsyncMock(
-                return_value=intent_resp,
-            )
-            intent_result = await classify_intent_node(state)
+        # 2. 의도 분류 (Mock context_classifier)
+        with (
+            patch(_INTENT_LLM, _make_gate_mock("DATA_QUERY")),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
+            intent_result = await context_classifier_node(state)
         state = state.model_copy(update=intent_result)
         assert state.intent == IntentType.DATA_EXTRACTION
 
         # 3. 정규화 (Mock LLM)
-        norm_resp = _make_normalization_response(
-            intent_primary="AGGREGATE",
-            entities=[
-                {"term": "대출", "type": "DIRECT", "confidence": "HIGH"},
-            ],
-            measures=[
-                {
-                    "term": "건수",
-                    "measure_type": "RAW",
-                    "agg_function": "COUNT",
-                    "confidence": "HIGH",
-                },
-            ],
-        )
-        with patch(
-            "src.services.query_normalizer.settings",
-        ) as mock_settings:
+        with (
+            patch(
+                "src.services.query_normalizer.settings",
+            ) as mock_settings,
+            patch(_NORM_LLM, _make_normalization_mock(
+                intent_primary="AGGREGATE",
+                entities=[
+                    {"term": "대출", "type": "DIRECT"},
+                ],
+                measures=[
+                    {
+                        "term": "건수",
+                        "measure_type": "RAW",
+                        "agg_function": "COUNT",
+                    },
+                ],
+            )),
+            patch(_NORM_RECORD, new_callable=AsyncMock),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-
-            with patch(
-                "src.services.query_normalizer.get_llm_client",
-            ) as mock_get:
-                mock_client = AsyncMock()
-                mock_get.return_value = mock_client
-                mock_client.messages.create = AsyncMock(
-                    return_value=norm_resp,
-                )
-                norm_result = await normalize_query_node(state)
+            norm_result = await normalize_query_node(state)
         state = state.model_copy(update=norm_result)
         assert state.normalized_query is not None
         assert state.status == QueryStatus.QUERY_NORMALIZED
@@ -614,41 +578,34 @@ class TestFullFlowWithNormalization:
         )
 
         # 전처리
-        pre_result = await preprocess_node(state)
-        state = state.model_copy(update=pre_result)
+        san = sanitize(state.user_input)
+        state = state.model_copy(update={
+            "preprocessed_input": san.text,
+            "status": QueryStatus.PREPROCESSING,
+        })
 
         # 의도 분류
-        intent_resp = _make_intent_gate_response("DATA_QUERY")
-        with patch(
-            "src.services.intent_resolver.get_llm_client",
-        ) as mock_get:
-            mock_client = AsyncMock()
-            mock_get.return_value = mock_client
-            mock_client.messages.create = AsyncMock(
-                return_value=intent_resp,
-            )
-            intent_result = await classify_intent_node(state)
+        with (
+            patch(_INTENT_LLM, _make_gate_mock("DATA_QUERY")),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
+            intent_result = await context_classifier_node(state)
         state = state.model_copy(update=intent_result)
 
         # 정규화
-        norm_resp = _make_normalization_response("AGGREGATE")
-        with patch(
-            "src.services.query_normalizer.settings",
-        ) as mock_settings:
+        with (
+            patch(
+                "src.services.query_normalizer.settings",
+            ) as mock_settings,
+            patch(_NORM_LLM, _make_normalization_mock("AGGREGATE")),
+            patch(_NORM_RECORD, new_callable=AsyncMock),
+            patch(_DISPATCH, new_callable=AsyncMock),
+        ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-
-            with patch(
-                "src.services.query_normalizer.get_llm_client",
-            ) as mock_get:
-                mock_client = AsyncMock()
-                mock_get.return_value = mock_client
-                mock_client.messages.create = AsyncMock(
-                    return_value=norm_resp,
-                )
-                norm_result = await normalize_query_node(state)
+            norm_result = await normalize_query_node(state)
         state = state.model_copy(update=norm_result)
 
         # SQL 검증 (서비스 레이어 직접 호출)
@@ -719,7 +676,7 @@ class TestIntentParser:
         assert conf == pytest.approx(0.95)
 
     def test_parse_data_analysis(self):
-        intent, conf = _parse_intent_response(
+        intent, _ = _parse_intent_response(
             "INTENT: data_analysis\nCONFIDENCE: 0.80",
         )
         assert intent == IntentType.DATA_ANALYSIS

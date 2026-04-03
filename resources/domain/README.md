@@ -6,17 +6,17 @@
 
 | 파일 | 용도 | 사용처 |
 |------|------|--------|
-| `domain_dictionary.yaml` | 금융 용어 → DB 표현 매핑 | `domain_dictionary.py` → 검색 쿼리 확장 + SQL 생성 프롬프트 |
+| `business_dictionary.yaml` | 금융 용어 → DB 표현 매핑 | `domain_dictionary.py` → 검색 쿼리 확장 + SQL 생성 프롬프트 |
 | `business_synonyms.yaml` | 동의어·약어 사전 (여신↔대출 등) | `query_normalizer.py` → 프롬프트 주입·약어 확장 |
 | `business_categories.yaml` | 업무 카테고리 분류 | `search_query_builder.py` → 검색 범위 결정 |
-| `similar_tables.yaml` | 유사 테이블 그룹 정의 | `similar_table_resolver.py` → 테이블 모호성 해소 |
+| `output_templates.yaml` | 출력 템플릿 정의 | 결과 포맷팅 |
 | `stopwords.yaml` | 검색 불용어 | `search_query_builder.py` → 검색 쿼리 정제 |
 | `pii_columns.yaml` | PII 컬럼 정의 (금지/마스킹) | `sql_safety_checker.py` → SQL 내 PII 노출 차단 |
 | `chart_config.yaml` | 차트 색상/폰트 설정 | `chart_generator.py` → 템플릿 SVG 스타일 |
 
 ## 강화 방법
 
-### domain_dictionary.yaml
+### business_dictionary.yaml
 가장 중요한 파일. 용어 매핑이 정확할수록 SQL 생성 정확도가 올라간다.
 
 ```yaml
@@ -28,15 +28,6 @@
 신규 고객: "TB_CUSTOMER.CUST_REG_DT >= 기준일"
 연체: "TB_OVERDUE.OVDU_YN = 'Y' (TB_OVERDUE 테이블)"
 BIS비율: "자기자본 / 위험가중자산 × 100 (TB_CAPITAL_ADEQUACY)"
-```
-
-### similar_tables.yaml
-정보계 DB에 유사 테이블이 많을수록 중요. 그룹별로 용도 차이를 명시한다.
-
-```yaml
-deposit_group:
-  tables: [TB_DEPOSIT_BAL, TB_DEPOSIT_TXN, TB_DEPOSIT_MASTER]
-  disambiguation: "BAL=잔액스냅샷, TXN=거래이력, MASTER=계좌기본정보"
 ```
 
 ### business_synonyms.yaml

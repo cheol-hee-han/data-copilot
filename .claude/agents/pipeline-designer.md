@@ -15,7 +15,7 @@ LangGraph 기반 시스템 아키텍트. 각 노드의 책임, State 스키마, 
 
 - LangGraph: StateGraph, conditional_edges
 - State 관리: TypedDict 기반 그래프 State
-- 다중 소스: ElasticSearch (메타/보고서), Qdrant (업무매뉴얼), PostgreSQL (과거 SQL)
+- 다중 소스: MongoDB (메타/코드/용어), Qdrant (업무매뉴얼/과거 SQL), PostgreSQL (정보계)
 - 멀티턴: 명확화 질문 → 사용자 응답 → 재처리 루프
 
 # 핵심 원칙

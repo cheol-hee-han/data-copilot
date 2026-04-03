@@ -66,14 +66,9 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "label": "질의 전처리, 보안 검사",
         "thinking": "입력 전처리 중",
     },
-    "resolve_history": {
+    "context_classifier": {
         "phase": "interpret",
-        "label": "대화이력 기반 질의 의도 분석",
-        "thinking": "대화 이력 해소 중",
-    },
-    "classify_intent": {
-        "phase": "interpret",
-        "label": "질의 유형 분류",
+        "label": "대화 맥락 분석 및 질의 의도 분류",
         "thinking": "질문 의도 파악 중",
     },
     "normalize_query": {
@@ -87,9 +82,9 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "thinking": "명확화 질문 생성 중",
     },
     # ── Reason ──
-    "planner": {
+    "reasoning_preparer": {
         "phase": "reason",
-        "label": "데이터 탐색 전략 수립",
+        "label": "데이터 탐색 준비",
         "thinking": "탐색 계획 수립 중",
     },
     "context_explorer": {
@@ -97,7 +92,17 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "label": "관련 테이블·데이터 탐색",
         "thinking": "데이터 소스 탐색 중",
     },
-    "confidence_evaluator": {
+    "knowledge_fetcher": {
+        "phase": "reason",
+        "label": "관련 테이블·데이터 수집",
+        "thinking": "데이터 소스 수집 중",
+    },
+    "knowledge_interpreter": {
+        "phase": "reason",
+        "label": "수집 데이터 해석",
+        "thinking": "데이터 해석 중",
+    },
+    "readiness_gate": {
         "phase": "reason",
         "label": "수집 정보 충분성 판단",
         "thinking": "준비도 평가 중",
@@ -117,12 +122,22 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "label": "대안 탐색",
         "thinking": "대안 탐색 중",
     },
+    "recovery_agent": {
+        "phase": "reason",
+        "label": "복구 탐색",
+        "thinking": "복구 탐색 중",
+    },
     "result_finalizer": {
         "phase": "reason",
         "label": "최종 결과 정리",
         "thinking": "결과 확정 중",
     },
     # ── Present ──
+    "simple_responder": {
+        "phase": "present",
+        "label": "간단 응답 생성",
+        "thinking": "응답 작성 중",
+    },
     "execute_sql": {
         "phase": "present",
         "label": "데이터 조회",
@@ -153,8 +168,7 @@ _TRACKED_STATE_KEYS = frozenset({
     "intent_confidence",
     "query_category",
     "preprocessed_input",
-    "clarification_question",
-    "awaiting_clarification",
+    "is_continuation",
     # reason (중첩 객체는 요약만)
     "reason",
     # present
@@ -745,14 +759,14 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
         if node not in NODE_PROGRESS_MAP:
             return
 
-        if node == "context_explorer" and action == "add":
+        if node in ("context_explorer", "knowledge_fetcher") and action == "add":
             self._explore_count += 1
 
         info = NODE_PROGRESS_MAP[node]
         label = info["label"]
         phase = info["phase"]
         if (
-            node == "context_explorer"
+            node in ("context_explorer", "knowledge_fetcher")
             and self._explore_count > 1
         ):
             label = (

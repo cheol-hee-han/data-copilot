@@ -7,19 +7,20 @@
   3. 결과를 상태에 넣는다
 
 Outer Head 노드:
-  - preprocessor: 입력 정규화 + 인젝션 감지
-  - history_resolver: 대화 이력 판정
-  - intent_classifier: LLM 의도 분류
+  - context_classifier: 연속 여부 판정 + 의도 분류 통합
   - query_normalizer: 8-Slot 질의 정규화
-  - clarifier: 명확화 질문 생성
+
+명확화 노드 (interpret/ 내):
+  - clarification_handler: 통합 명확화 (2계층 판정 + interrupt)
 
 Agentic Core 노드 (agentic/ 서브패키지):
-  - planner: 질의 분해 + 가설 수립 + 실행계획
-  - context_explorer: 점진적 탐색 루프
-  - confidence_evaluator: 확신도 평가 (rule-based)
+  - reasoning_preparer: 결정론적 reasoning 초기화 + 실행계획 생성
+  - knowledge_fetcher: 실행계획 도구 실행 + 관찰 데이터 수집
+  - knowledge_interpreter: 배치 LLM 해석 + 상태 반영
+  - readiness_gate: 확신도 평가 (rule-based)
   - sql_generator: 누적 지식 기반 SQL 생성
   - sql_validator: 3-레이어 SQL 검증
-  - recovery_planner: 실패 분석 + 재계획
+  - recovery_agent: ReAct-style 반응적 복구 루프
   - result_finalizer: 최종 출력 구성
 
 Outer Tail 노드:

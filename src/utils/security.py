@@ -7,11 +7,17 @@
     - 프롬프트 인젝션 감지(detect_prompt_injection): 영어·한국어·간접 인젝션 등
       총 82개 정규식 패턴으로 시스템 프롬프트 우회 시도를 탐지한다.
       유니코드 정규화 후 재탐지하여 전각 문자 우회도 차단한다.
-    - SQL 인젝션 방어(validate_sql_safety): sql_safety_checker와 독립적으로
-      동작하는 이중 방어 레이어로, DML/DDL·시간 지연·파일 I/O·다중 쿼리·
-      시스템 카탈로그 접근·주석 인젝션을 차단한다.
+    - SQL 이중 방어(check_sql_safety_quick): sql_safety_checker의 정밀 검증과
+      독립적으로 동작하는 경량 이중 방어 레이어로, FORBIDDEN_SQL_PATTERNS 공유
+      상수를 기반으로 DML/DDL·시간 지연·파일 I/O·다중 쿼리·시스템 카탈로그
+      접근·주석 인젝션을 차단한다.
     - PII 마스킹(mask_pii): 주민등록번호·카드번호·계좌번호·전화번호·이메일을
       구분자 형식을 보존하면서 마스킹하여 로그 및 응답에서 개인정보를 보호한다.
+
+공유 상수:
+    - FORBIDDEN_SQL_PATTERNS: SQL 금지 패턴 목록 (정규식, 오류 메시지) 튜플.
+      sql_safety_checker(서비스 계층)와 check_sql_safety_quick(유틸 계층) 모두
+      이 단일 목록을 참조하여 패턴 불일치를 방지한다.
 
 전처리 함수:
     - normalize_unicode: NFKC 정규화로 전각 문자(ｓｅｌｅｃｔ 등) 우회를 방지하고
@@ -96,6 +102,61 @@ _PROMPT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"<\s*\|[^|]+\|\s*>", re.IGNORECASE),  # 특수 태그 인젝션
 ]
 
+# ── SQL 금지 패턴 (공유 상수) ──────────────────────────────────
+# sql_safety_checker(서비스)와 check_sql_safety_quick(유틸) 모두 참조한다.
+# 패턴 추가·수정 시 이 목록만 변경하면 양쪽에 동시 반영된다.
+_MSG_TIME_DELAY = "시간 지연 함수는 허용되지 않습니다"
+
+FORBIDDEN_SQL_PATTERNS: list[tuple[str, str]] = [
+    (
+        r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE)\b",
+        "DML/DDL 문은 허용되지 않습니다",
+    ),
+    (
+        r"\bEXEC(?:UTE)?\b",
+        "프로시저 실행은 허용되지 않습니다",
+    ),
+    (
+        r"\bCALL\b",
+        "프로시저 호출은 허용되지 않습니다",
+    ),
+    (
+        r"\b(information_schema|pg_\w+|sys\.\w+|mysql\.\w+)\b",
+        "시스템 카탈로그 접근은 금지됩니다",
+    ),
+    (
+        r";\s*\w+",
+        "다중 쿼리는 허용되지 않습니다",
+    ),
+    (
+        r"\bINTO\s+OUTFILE\b",
+        "파일 출력은 허용되지 않습니다",
+    ),
+    (
+        r"\bINTO\s+DUMPFILE\b",
+        "파일 덤프는 허용되지 않습니다",
+    ),
+    (
+        r"\bLOAD_FILE\s*\(",
+        "파일 읽기는 허용되지 않습니다",
+    ),
+    (
+        r"\bLOAD\s+DATA\b",
+        "데이터 로드는 허용되지 않습니다",
+    ),
+    (r"\bSLEEP\s*\(", _MSG_TIME_DELAY),
+    (r"\bWAITFOR\s+DELAY\b", _MSG_TIME_DELAY),
+    (r"\bBENCHMARK\s*\(", _MSG_TIME_DELAY),
+    (r"\bPG_SLEEP\s*\(", _MSG_TIME_DELAY),
+    (r"--", "SQL 주석은 허용되지 않습니다"),
+    (r"/\*", "SQL 블록 주석은 허용되지 않습니다"),
+    (r"\bxp_\w+", "확장 저장 프로시저는 허용되지 않습니다"),
+    (
+        r"\bUNION\s+(?:ALL\s+)?SELECT\b",
+        "UNION SELECT는 허용되지 않습니다",
+    ),
+]
+
 
 def _make_masked(match: str) -> str:
     """매치된 문자열에서 마스킹 값을 생성한다.
@@ -170,14 +231,14 @@ def detect_prompt_injection(text: str) -> bool:
     return False
 
 
-def validate_sql_safety(sql: str) -> tuple[bool, list[str]]:
-    """SQL의 안전성을 검증한다.
+def check_sql_safety_quick(sql: str) -> tuple[bool, list[str]]:
+    """SQL의 안전성을 경량 검증한다 (이중 방어 레이어).
 
-    sql_validator.py의 검증과 독립적으로 동작하는 이중 방어 레이어.
-    WITH(CTE) 구문으로 시작하는 SELECT도 허용한다.
+    sql_safety_checker.validate_sql_safety()의 정밀 검증과 독립적으로 동작하는
+    경량 이중 방어 레이어. SQL 실행 직전(sql_executor)에서 호출된다.
+    FORBIDDEN_SQL_PATTERNS 공유 상수를 사용하여 패턴 불일치를 방지한다.
     """
     errors: list[str] = []
-    # 유니코드 정규화 적용 — 전각 문자 우회 방어
     sql = normalize_unicode(sql)
     sql_upper = sql.upper().strip()
 
@@ -185,51 +246,9 @@ def validate_sql_safety(sql: str) -> tuple[bool, list[str]]:
     if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
         errors.append("SELECT 문만 허용됩니다")
 
-    # DML/DDL 감지 — 서브쿼리 내부도 탐지
-    forbidden_keywords = [
-        "INSERT", "UPDATE", "DELETE", "DROP",
-        "TRUNCATE", "ALTER", "CREATE", "GRANT", "REVOKE",
-        "EXEC", "EXECUTE", "CALL",
-    ]
-    for keyword in forbidden_keywords:
-        if re.search(rf"\b{keyword}\b", sql_upper):
-            errors.append(f"{keyword} 문은 허용되지 않습니다")
-
-    # 시간 기반 인젝션 감지
-    time_injection_patterns = [
-        r"\bSLEEP\s*\(",
-        r"\bWAITFOR\s+DELAY\b",
-        r"\bBENCHMARK\s*\(",
-        r"\bPG_SLEEP\s*\(",
-    ]
-    for pattern in time_injection_patterns:
-        if re.search(pattern, sql_upper):
-            errors.append("시간 지연 함수는 허용되지 않습니다")
-            break
-
-    # 파일 I/O 감지
-    file_io_patterns = [
-        r"\bLOAD_FILE\s*\(",
-        r"\bINTO\s+OUTFILE\b",
-        r"\bINTO\s+DUMPFILE\b",
-        r"\bLOAD\s+DATA\b",
-    ]
-    for pattern in file_io_patterns:
-        if re.search(pattern, sql_upper):
-            errors.append("파일 입출력 함수는 허용되지 않습니다")
-            break
-
-    # 다중 쿼리 감지 — 세미콜론 이후 추가 토큰 존재 여부
-    stripped = sql.strip().rstrip(";")
-    if ";" in stripped:
-        errors.append("다중 쿼리는 허용되지 않습니다")
-
-    # 시스템 카탈로그 접근
-    if _CATALOG_PATTERN.search(sql):
-        errors.append("시스템 카탈로그 접근은 금지됩니다")
-
-    # 주석 기반 인젝션 감지
-    if re.search(r"--", sql) or re.search(r"/\*", sql):
-        errors.append("SQL 주석은 허용되지 않습니다")
+    # 공유 금지 패턴 검사
+    for pattern, msg in FORBIDDEN_SQL_PATTERNS:
+        if re.search(pattern, sql, re.IGNORECASE):
+            errors.append(msg)
 
     return len(errors) == 0, errors

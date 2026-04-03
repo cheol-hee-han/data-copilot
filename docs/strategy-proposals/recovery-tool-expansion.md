@@ -1328,7 +1328,7 @@ Layer 4: 입력 출처 제한
    - 도구 추가 전/후 A/B 비교
 
 2. 트레이스 분석
-   - evaluation/traces/에서 recovery 경로 추출
+   - logs/traces/에서 recovery 경로 추출
    - 도구 호출 패턴 → 성공/실패 상관관계 분석
 
 3. LoopGuard 모니터링

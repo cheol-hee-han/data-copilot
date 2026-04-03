@@ -163,6 +163,40 @@ def merge_hints(
     return merged
 
 
+def extract_select_alias_map(
+    sql: str,
+    dialect: str | None = None,
+) -> dict[str, str | None]:
+    """SELECT 절에서 {출력alias: 원본컬럼명} 매핑을 추출한다.
+
+    예: SELECT A.LOAN_DCD AS 대출구분 → {"대출구분": "LOAN_DCD"}
+        SELECT COUNT(*) AS 건수       → {"건수": None}  (집계/함수는 None)
+        SELECT A.LOAN_DCD             → {"LOAN_DCD": "LOAN_DCD"}
+    """
+    ast = parse_sql_safe(sql, dialect)
+    if ast is None:
+        return {}
+
+    alias_map: dict[str, str | None] = {}
+
+    select = ast.find(exp.Select)
+    if not select:
+        return {}
+
+    for sel_expr in select.expressions:
+        if isinstance(sel_expr, exp.Alias):
+            alias_name = sel_expr.alias
+            child = sel_expr.this
+            if isinstance(child, exp.Column):
+                alias_map[alias_name] = child.name
+            else:
+                alias_map[alias_name] = None
+        elif isinstance(sel_expr, exp.Column):
+            alias_map[sel_expr.name] = sel_expr.name
+
+    return alias_map
+
+
 def get_real_tables(ast: sqlglot.Expression) -> list[str]:
     """CTE 오인을 방지하여 실제 테이블명만 추출한다.
 
@@ -177,6 +211,56 @@ def get_real_tables(ast: sqlglot.Expression) -> list[str]:
                 if name and name not in tables:
                     tables.append(name)
     return tables
+
+
+# ── 폐쇄망 테이블 네이밍 패턴 (TB_{시스템3자리}_{영숫자7자리}) ──
+_TABLE_NAME_RE = re.compile(r"\b(TB_[A-Z]{3}_[A-Z0-9]{7})\b", re.IGNORECASE)
+
+# 주석·문자열 리터럴 제거 (regex fallback 오탐 방지)
+_COMMENT_OR_LITERAL_RE = re.compile(
+    r"--[^\n]*"           # 한줄 주석
+    r"|/\*.*?\*/"         # 블록 주석
+    r"|'(?:[^']|'')*'"    # 작은따옴표 문자열 ('' 이스케이프 포함)
+    r'|"(?:[^"]|"")*"',   # 큰따옴표 문자열
+    re.DOTALL,
+)
+
+
+def _strip_comments_and_literals(sql: str) -> str:
+    """SQL에서 주석과 문자열 리터럴을 제거한다."""
+    return _COMMENT_OR_LITERAL_RE.sub(" ", sql)
+
+
+def get_real_tables_with_fallback(
+    sql: str,
+    dialect: str | None = None,
+) -> list[str]:
+    """AST 파싱 → 실패 시 regex fallback으로 테이블명을 추출한다.
+
+    Sybase IQ의 BEGIN...END / IF...THEN 등 PL/SQL 블록은
+    sqlglot이 파싱하지 못하므로, 테이블 네이밍 규칙(TB_XXX_XXXXXXX)
+    기반 regex로 보완한다.
+
+    주석과 문자열 리터럴 내 테이블명은 제거 후 매칭하여 오탐을 방지한다.
+    """
+    ast = parse_sql_safe(sql, dialect)
+
+    # 1차: AST 파싱 성공 시 정밀 추출
+    ast_tables: list[str] = []
+    if ast is not None:
+        ast_tables = get_real_tables(ast)
+
+    # 2차: regex fallback — 주석·리터럴 제거 후 매칭
+    cleaned = _strip_comments_and_literals(sql)
+    regex_tables = _TABLE_NAME_RE.findall(cleaned)
+    # 대소문자 무관 중복 제거
+    seen_upper: set[str] = {t.upper() for t in ast_tables}
+    for t in regex_tables:
+        if t.upper() not in seen_upper:
+            seen_upper.add(t.upper())
+            ast_tables.append(t)
+
+    return ast_tables
 
 
 def get_real_columns(ast: sqlglot.Expression) -> list[str]:

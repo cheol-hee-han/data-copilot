@@ -1,2 +1,0 @@
-[intent]: {intent}
-{ambiguities_block}[사용자 입력]: {query}

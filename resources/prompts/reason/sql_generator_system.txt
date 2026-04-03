@@ -3,6 +3,10 @@
 추측이나 가정으로 컬럼명이나 코드값을 사용하지 마세요.
 CONFIRMED/PROBABLE 상태의 지식 항목만 사용하세요.
 
+## 현재 날짜
+
+{current_date}
+
 ## 사용자 질의
 
 {original_query}
@@ -13,18 +17,15 @@ CONFIRMED/PROBABLE 상태의 지식 항목만 사용하세요.
 - filters (조건): {filters}
 - group_by (그룹): {group_by}
 - order_limit (정렬/제한): {order_limit}
+- output_hint (출력 형식): {output_hint}
 
 ## 확인된 지식 항목 (CONFIRMED)
 
 {confirmed_terms}
 
-## 사용할 테이블
+## 사용할 테이블 및 샘플 데이터
 
 {tables}
-
-## 테이블 조인 경로
-
-{join_path}
 
 ## 검증된 참고 SQL (구조 참고용 — 그대로 복사 금지)
 
@@ -39,6 +40,10 @@ CONFIRMED/PROBABLE 상태의 지식 항목만 사용하세요.
 
 {fix_section}
 
+## 명확화 컨텍스트
+
+{clarification_context}
+
 ## SQL 작성 규칙
 
 1. SELECT 문만 작성. INSERT/UPDATE/DELETE/DROP/TRUNCATE/ALTER 절대 금지.
@@ -46,9 +51,13 @@ CONFIRMED/PROBABLE 상태의 지식 항목만 사용하세요.
 3. 시스템 카탈로그(information_schema, pg_catalog) 접근 금지.
 4. 직접 노출 금지: 주민등록번호, 계좌번호, 카드번호, 비밀번호, CVC.
 5. 마스킹 필수: 전화번호, 이메일, 생년월일, 주소 → LEFT(col, 3) || '****' 형태.
-6. 집계 함수(COUNT, SUM, AVG 등)에는 의미 있는 한글 alias를 붙인다.
+6. 모든 SELECT 컬럼에 의미 있는 한글 alias를 붙인다. (예: BRANCH_CD AS 지점코드, BAL_AMT AS 잔액, COUNT(*) AS 건수)
 7. 대용량 테이블에는 반드시 날짜 조건 포함.
 8. SQL 외 어떤 설명·주석·마크다운도 출력하지 않는다.
+9. 행 제한 필수: 모든 쿼리에 행 제한을 포함한다.
+   - tsql: SELECT TOP 1000 ...
+   - postgresql / hive: ... LIMIT 1000
+10. 요청에 출력 컬럼이 명시되지 않은 경우(예: "명세 뽑아줘", "현황 알려줘"), 테이블 컬럼 목록에서 해당 업무에 필요한 주요 컬럼을 선택한다. output_hint의 expected_columns가 있으면 이를 참고하되, 실제 테이블에 존재하는 컬럼만 사용한다. PK·일자·금액·상태 등 핵심 컬럼 위주로 선택하고, 코드값 컬럼은 반드시 대응하는 명칭 컬럼(코드명, 지점명, 상품명 등)을 함께 포함하여 사용자가 결과를 업무 용어로 이해할 수 있도록 한다. 내부 관리용 컬럼(등록일시, 변경자ID 등)은 제외한다.
 
 ## 한국어 금액 단위 변환 규칙
 
@@ -71,7 +80,8 @@ CONFIRMED/PROBABLE 상태의 지식 항목만 사용하세요.
 1. "사용할 테이블" 섹션에 나열되지 않은 테이블명을 SQL에 사용하지 마라.
 2. 해당 테이블의 컬럼 목록에 없는 컬럼명을 SQL에 사용하지 마라.
 3. "확인된 지식 항목"에 없는 코드값을 SQL에 사용하지 마라.
-4. 확실하지 않으면 추측하지 말고 explanation에 "확인 필요: {항목}"을 기재하라.
+4. 테이블에 샘플 데이터가 있으면, WHERE 조건의 필터 값(코드값, 상태값, 구분값 등)을 샘플에서 확인하고 사용하라.
+5. 확실하지 않으면 추측하지 말고 explanation에 "확인 필요: {항목}"을 기재하라.
 
 위반 예시:
 - confirmed_terms에 TB_LOAN_INFO만 있는데 TB_LOAN_SUMMARY를 사용 → 금지
@@ -136,7 +146,7 @@ JSON 외 다른 텍스트는 절대 출력하지 마세요. 마크다운 코드�
 
 출력:
 {
-  "sql": "SELECT COUNT(*) AS 실행건수, SUM(EXEC_AMT) AS 실행금액합계 FROM TB_LOAN_EXEC WHERE EXEC_DT >= DATE_TRUNC('month', CURRENT_DATE) AND EXEC_DT < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month' LIMIT 10000",
+  "sql": "SELECT COUNT(*) AS 실행건수, SUM(EXEC_AMT) AS 실행금액합계 FROM TB_LOAN_EXEC WHERE EXEC_DT >= DATE_TRUNC('month', CURRENT_DATE) AND EXEC_DT < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month' LIMIT 1000",
   "explanation": "이번 달 여신 실행 테이블에서 건수와 금액 합계를 집계"
 }
 
@@ -147,13 +157,13 @@ JSON 외 다른 텍스트는 절대 출력하지 마세요. 마크다운 코드�
 입력:
 - 사용자 질의: "지점별 수신 잔액 현황 뽑아줘"
 - dialect: tsql
-- 질의 분해: measures=[{term: "잔액", agg: "SUM"}], group_by=["지점"]
-- confirmed_terms: [table:TB_DEPOSIT_BAL → 수신잔액, table:TB_BRANCH → 지점마스터, measure:잔액 → SUM(BAL_AMT), dimension:지점 → TB_BRANCH.BRANCH_NM, join:TB_DEPOSIT_BAL.BRANCH_CD = TB_BRANCH.BRANCH_CD]
-- join_path: TB_DEPOSIT_BAL.BRANCH_CD → TB_BRANCH.BRANCH_CD
+- 질의 분해: measures=[{term: "잔액", agg: "SUM"}], group_by=["지점"], filters=[{term: "기간", value: "최근 1개월"}]
+- confirmed_terms: [table:TB_DEPOSIT_BAL → 수신잔액, table:TB_BRANCH → 지점마스터, measure:잔액 → SUM(BAL_AMT), dimension:지점 → TB_BRANCH.BRANCH_NM, filter:기간 → BASE_DT >= 최근 1개월, join:TB_DEPOSIT_BAL.BRANCH_CD = TB_BRANCH.BRANCH_CD]
+- join: TB_DEPOSIT_BAL.BRANCH_CD = TB_BRANCH.BRANCH_CD (confirmed_terms에서 확인)
 
 출력:
 {
-  "sql": "SELECT TOP 10000 B.BRANCH_NM AS 지점명, COUNT(*) AS 계좌건수, SUM(A.BAL_AMT) AS 수신잔액합계 FROM TB_DEPOSIT_BAL A INNER JOIN TB_BRANCH B ON A.BRANCH_CD = B.BRANCH_CD WHERE A.BASE_DT >= CONVERT(VARCHAR, DATEADD(month, -1, GETDATE()), 112) GROUP BY B.BRANCH_NM ORDER BY 수신잔액합계 DESC",
+  "sql": "SELECT TOP 1000 B.BRANCH_NM AS 지점명, COUNT(*) AS 계좌건수, SUM(A.BAL_AMT) AS 수신잔액합계 FROM TB_DEPOSIT_BAL A INNER JOIN TB_BRANCH B ON A.BRANCH_CD = B.BRANCH_CD WHERE A.BASE_DT >= CONVERT(VARCHAR, DATEADD(month, -1, GETDATE()), 112) GROUP BY B.BRANCH_NM ORDER BY 수신잔액합계 DESC",
   "explanation": "지점마스터와 조인하여 지점별 수신 잔액과 계좌 건수를 집계 (Sybase IQ TOP 문법)"
 }
 
@@ -166,10 +176,10 @@ JSON 외 다른 텍스트는 절대 출력하지 마세요. 마크다운 코드�
 - dialect: hive
 - 질의 분해: measures=[], filters=[{term: "등급", value: "1"}], group_by=[]
 - confirmed_terms: [table:TB_OVERDUE → 연체 테이블, table:TB_CUSTOMER → 고객마스터, code:CUST_GRD_CD → 01=1등급, filter:CUST_GRD_CD='01', column:MOBILE_NO → PII 마스킹 필수]
-- join_path: TB_OVERDUE.CUST_ID → TB_CUSTOMER.CUST_ID
+- join: TB_OVERDUE.CUST_ID = TB_CUSTOMER.CUST_ID (confirmed_terms에서 확인)
 
 출력:
 {
-  "sql": "SELECT A.CUST_ID AS 고객ID, B.CUST_NM AS 고객명, CONCAT(SUBSTR(B.MOBILE_NO, 1, 3), '****') AS 전화번호, A.OVDU_AMT AS 연체금액, A.OVDU_DT AS 연체시작일 FROM TB_OVERDUE A INNER JOIN TB_CUSTOMER B ON A.CUST_ID = B.CUST_ID WHERE B.CUST_GRD_CD = '01' AND A.OVDU_DT >= DATE_SUB(CURRENT_DATE(), 30) ORDER BY A.OVDU_AMT DESC LIMIT 10000",
+  "sql": "SELECT A.CUST_ID AS 고객ID, B.CUST_NM AS 고객명, CONCAT(SUBSTR(B.MOBILE_NO, 1, 3), '****') AS 전화번호, A.OVDU_AMT AS 연체금액, A.OVDU_DT AS 연체시작일 FROM TB_OVERDUE A INNER JOIN TB_CUSTOMER B ON A.CUST_ID = B.CUST_ID WHERE B.CUST_GRD_CD = '01' AND A.OVDU_DT >= DATE_SUB(CURRENT_DATE(), 30) ORDER BY A.OVDU_AMT DESC LIMIT 1000",
   "explanation": "1등급 연체 고객 목록을 Impala 문법으로 조회, 전화번호는 CONCAT+SUBSTR로 마스킹"
 }

@@ -18,7 +18,8 @@ re-export 대상:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import operator
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -50,6 +51,8 @@ from src.models.trace import (  # noqa: F401
     add_trace,
     format_trace_summary,
 )
+from src.agents.models.clarification import AmbiguitySignal
+from src.agents.models.normalization import NormalizedQuery
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -78,6 +81,8 @@ class KnowledgeItem(BaseModel):
     source: str = ""
     evidence: list[str] = Field(default_factory=list)
     is_critical: bool = True
+    knowledge_id: str = ""       # "K1", "K2" 등. reasoning_preparer에서 초기 생성 시 채번
+    is_inferred: bool = False    # True이면 도구 증거 없는 추론
 
     def promote(
         self, new_status: ConfidenceStatus, value: str,
@@ -112,7 +117,6 @@ class ExecutionStep(BaseModel):
     purpose: str
     expected_output: str = ""
     status: StepStatus = StepStatus.PENDING
-    result_ref: str | None = None
     insight: str | None = None
 
 
@@ -153,8 +157,8 @@ class CandidateTable(BaseModel):
     description: str = ""
     schema_name: str = ""
     db_source: str = ""
+    subject_area: str = ""
     columns: list[ColumnInfo] = Field(default_factory=list)
-    join_keys: list[str] = Field(default_factory=list)
 
     # ── 관찰 사실 (rule-based, DB 쿼리) ──
     key_date_columns: list[KeyDateColumn] = Field(
@@ -163,7 +167,7 @@ class CandidateTable(BaseModel):
     observed_date_columns: list[ObservedDateColumn] = Field(
         default_factory=list,
     )
-    sample_rows: list[dict] = Field(default_factory=list)
+    sample_rows: list[dict] | None = None
 
     # ── LLM 추론 (출처 구분 필요) ──
     inferred_entity_scope: str = ""
@@ -212,6 +216,7 @@ class CandidateTable(BaseModel):
             ),
             schema_name=meta.get("schema_name", ""),
             db_source=ConnectorManager.parse_db_source(table_name),
+            subject_area=meta.get("subject_area", ""),
             columns=col_infos,
         )
 
@@ -227,7 +232,7 @@ class CodeMeta(BaseModel):
     """코드 컬럼의 코드값 매핑 정보.
 
     search_code_meta 결과를 컬럼 단위로 저장하여
-    sql_generator, recovery_planner 등에서 풍부한 추론에 활용한다.
+    sql_generator, recovery_agent 등에서 풍부한 추론에 활용한다.
     """
 
     column_name: str          # "LOAN_STS_CD"
@@ -273,7 +278,7 @@ class StructuralHints(BaseModel):
     """유사 SQL에서 sqlglot으로 추출한 구조적 힌트.
 
     활용사례 SQL을 파싱하여 12가지 구조 정보를 저장한다.
-    각 노드(planner, sql_generator, sql_validator)에서 필요한 것만 골라 사용한다.
+    각 노드(reasoning_preparer, sql_generator, sql_validator)에서 필요한 것만 골라 사용한다.
     """
 
     # ── 기존 4가지 ──
@@ -363,48 +368,48 @@ class ReasoningState(BaseModel):
     """에이전틱 추론 루프의 내부 상태.
 
     PipelineState.reason 필드로 중첩되며,
-    reason 계층 노드(planner → context_explorer → confidence_evaluator →
-    sql_generator → sql_validator → recovery_planner → result_finalizer)가
-    사용한다.
+    reason 계층 노드(reasoning_preparer → knowledge_fetcher → knowledge_interpreter →
+    readiness_gate → sql_generator → sql_validator → recovery_agent →
+    result_finalizer)가 사용한다.
 
     W/R 표기: W=기록(Write), R=참조(Read) 하는 노드.
-    약어: PLN=planner, EXP=context_explorer, EVL=confidence_evaluator,
-          GEN=sql_generator, VAL=sql_validator, RCV=recovery_planner,
-          FIN=result_finalizer
+    약어: PRP=reasoning_preparer, FET=knowledge_fetcher, INT=knowledge_interpreter,
+          RDG=readiness_gate, GEN=sql_generator, VAL=sql_validator,
+          RCV=recovery_agent, FIN=result_finalizer
     """
 
     # ── 진행 상태 ──
-    # W: PLN/EXP/EVL/GEN/VAL/RCV/FIN  R: pipeline 라우팅
+    # W: PRP/EXP/EVL/GEN/VAL/RCV/FIN  R: pipeline 라우팅
     phase: Phase = Phase.PLANNING
 
     # ── 플래너 산출물 ──
-    # W: PLN  R: GEN/VAL (SQL 생성 시 체크리스트)
+    # W: PRP  R: GEN/VAL (SQL 생성 시 체크리스트)
     query_decomposition: dict = Field(default_factory=dict)
-    # W: PLN/RCV  R: RCV (PENDING 가설 소비)
+    # W: PRP/RCV  R: RCV (PENDING 가설 소비)
     hypotheses: list[Hypothesis] = Field(
         default_factory=list,
     )
-    # W: PLN/RCV  R: RCV (FAILED 전환 시)
+    # W: PRP/RCV  R: RCV (FAILED 전환 시)
     current_hypothesis: Hypothesis | None = None
-    # W: PLN/RCV  R: EXP (스텝 순차 실행)
+    # W: PRP/RCV  R: EXP (스텝 순차 실행)
     execution_plan: list[ExecutionStep] = Field(
         default_factory=list,
     )
 
     # ── 누적 지식 ──
-    # W: PLN/EXP  R: EVL/GEN/VAL/RCV/FIN
+    # W: PRP/EXP  R: EVL/GEN/VAL/RCV/FIN
     knowledge_items: list[KnowledgeItem] = Field(
         default_factory=list,
     )
-    # W: PLN/EXP (search_use_cases 결과)  R: PLN/GEN/FIN
+    # W: PRP/EXP (search_use_cases 결과)  R: PRP/GEN/FIN
     explored_use_cases: list[dict] = Field(
         default_factory=list,
     )
-    # W: PLN/EXP  R: GEN/VAL/RCV/FIN
+    # W: PRP/EXP  R: GEN/VAL/RCV/FIN
     candidate_tables: list[CandidateTable] = Field(
         default_factory=list,
     )
-    # W: PLN/EXP  R: PLN/EXP/RCV (중복 검색 방지)
+    # W: PRP/EXP  R: PRP/EXP/RCV (중복 검색 방지)
     searched_queries: list[str] = Field(
         default_factory=list,
     )
@@ -447,9 +452,17 @@ class ReasoningState(BaseModel):
         default_factory=LoopGuard,
     )
 
-    # ── Fast-Path ──
-    # W: PLN  R: pipeline 라우팅 (_route_after_planner)
-    fast_path_triggered: bool = False
+    # ── Recovery 제어 ──
+    # W: PRP (초기화), recovery_agent (갱신)  R: readiness_gate, pipeline 라우팅
+    exploration_phase: Literal["initial", "recovery"] = "initial"
+    recovery_rounds: int = 0
+    last_verdict: str | None = None  # ReadinessVerdict.value 문자열
+    recovery_entry_source: Literal[
+        "readiness_gate", "sql_validator", None,
+    ] = None
+    inference_notes: list[str] = Field(default_factory=list)
+    conflicted_bounce_count: int = 0
+    is_force_generated: bool = False
 
     # ── 최종 출력 ──
     # W: RCV/FIN  R: pipeline 라우팅
@@ -533,39 +546,54 @@ class PipelineState(BaseModel):
     reason 계층의 에이전틱 추론 상태는 reason 필드에 중첩된다.
 
     W/R 표기: W=기록, R=참조 하는 노드/계층.
-    약어: PRE=preprocess, HIS=resolve_history, INT=classify_intent,
+    약어: PRE=preprocess, CTX=context_classifier,
           NRM=normalize_query, CLR=clarify, EXE=execute_sql,
           ANL=analyze_data, FMT=format_response
     """
 
     # ── 공통 ──
-    # W: runner (초기값)  R: PRE/HIS
+    # W: runner (초기값)  R: HIS
     user_input: str = ""
     session_id: str = ""
+    # W: runner (초기값, immutable)  R: 감사 추적, 복귀 노드 프롬프트
+    original_query: str = ""
     # W: runner (초기값)  R: HIS (대화 맥락)
     conversation_history: list[dict[str, str]] = Field(
         default_factory=list,
     )
 
+    # ── 턴 격리 ──
+    # W: runner (매 턴 uuid4 생성)  R: clarification_context, pipeline 라우팅
+    turn_id: str = ""
+
     # ── Interpret 계층 ──
-    # W: PRE  R: INT/NRM/CLR/reason 계층 전체
+    # W: runner (sanitize 후)  R: CTX/NRM/reason 계층 전체
     preprocessed_input: str = ""
-    # W: INT  R: pipeline 라우팅/CLR/NRM
+    # W: CTX  R: pipeline 라우팅/NRM
     intent: IntentType = IntentType.UNKNOWN
-    # W: INT  R: 로깅
+    # W: CTX  R: 로깅
     intent_confidence: float = 0.0
-    # W: INT  R: 로깅
+    # W: CTX  R: 로깅
     query_category: str = ""
-    # W: NRM  R: reason 계층 (planner 시드)
-    normalized_query: Any = None
-    # W: CLR/result_finalizer  R: pipeline 라우팅/runner
-    clarification_question: str = ""
-    # W: runner (재진입 시)  R: HIS
-    clarification_response: str = ""
-    # W: CLR/result_finalizer  R: pipeline 라우팅/runner
-    awaiting_clarification: bool = False
-    # W: CLR/result_finalizer  R: pipeline 라우팅 (max_turns 체크)
-    clarification_turns: int = 0
+    # W: CTX  R: 하류 노드 (CONTINUE 시 맥락 힌트)
+    is_continuation: bool = False
+    # W: CTX  R: 하류 노드 (CONTINUE 시 대화 맥락 반영 질문 해석)
+    continue_context: str = ""
+    # W: NRM  R: reason 계층 (reasoning_preparer 시드)
+    normalized_query: NormalizedQuery | None = None
+
+    # ── Unified Clarification (2계층 판정) ──
+    # 현재 턴의 미처리 시그널 — 노드가 반환, clarification_handler가 소비 후 [] 로 비움
+    # 일반 필드 (reducer 없음, 덮어쓰기)
+    pending_signals: list[AmbiguitySignal] = Field(
+        default_factory=list,
+    )
+    # 처리 완료된 시그널 누적 — ASK(answer 채워짐) + INFER 모두 append
+    # operator.add: LangGraph 표준 누적 패턴
+    resolved_signals: Annotated[
+        list[AmbiguitySignal], operator.add,
+    ] = Field(default_factory=list)
+
 
     # ── Reason 계층 (에이전틱 추론) ──
     # W/R: reason 계층 전체 (상세는 ReasoningState 참조)

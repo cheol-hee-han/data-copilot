@@ -50,7 +50,7 @@ def build_insight(state: dict[str, Any]) -> dict[str, Any]:
         "validation_detail": _build_validation_detail(reason),
         "sql_summary": _build_sql_summary(reason, sql_tables),
         "sql_code": _extract_sql(reason),
-        "join_path": _format_join_path(reason),
+        "join_path": "",
         "references": _build_references(reason),
         "confidence": _assess_confidence(reason),
         "caveats": _build_caveats(state, reason),
@@ -214,21 +214,6 @@ def _extract_sql(reason: Any) -> str:
     )
 
 
-def _format_join_path(reason: Any) -> str:
-    """후보 테이블의 join_keys로 조인 힌트를 구성한다."""
-    if not reason:
-        return ""
-
-    candidates = _get_attr_or_key(reason, "candidate_tables", [])
-    entries = [
-        f"{_table_name(ct)}({', '.join(_join_keys(ct))})"
-        for ct in candidates
-        if _join_keys(ct)
-        and _get_attr_or_key(ct, "selection_status", "") != TableSelectionStatus.REJECTED
-    ]
-    return " ↔ ".join(entries) if entries else ""
-
-
 def _table_name(ct: Any) -> str:
     """CandidateTable 또는 dict에서 테이블명을 추출한다."""
     if hasattr(ct, "qualified_name"):
@@ -236,15 +221,6 @@ def _table_name(ct: Any) -> str:
     if isinstance(ct, dict):
         return ct.get("table_name", "")
     return str(ct)
-
-
-def _join_keys(ct: Any) -> list[str]:
-    """CandidateTable 또는 dict에서 join_keys를 추출한다."""
-    if hasattr(ct, "join_keys"):
-        return ct.join_keys
-    if isinstance(ct, dict):
-        return ct.get("join_keys", [])
-    return []
 
 
 def _build_references(reason: Any) -> list[dict[str, str]]:
@@ -331,9 +307,12 @@ def _build_step_timings(trace_log: list[Any]) -> list[dict[str, Any]]:
         "resolve_history": "대화 이력 분석",
         "classify_intent": "질문 의도 분석",
         "normalize_query": "질문 정규화",
-        "planner": "탐색 계획 수립",
+        "reasoning_preparer": "탐색 준비",
         "context_explorer": "데이터 탐색",
-        "confidence_evaluator": "탐색 평가",
+        "knowledge_fetcher": "데이터 수집",
+        "knowledge_interpreter": "데이터 해석",
+        "readiness_gate": "탐색 평가",
+        "recovery_agent": "복구 탐색",
         "sql_generator": "SQL 생성",
         "sql_validator": "SQL 검증",
         "recovery_planner": "대안 탐색",
@@ -427,11 +406,9 @@ def _build_caveats(
         if _get_attr_or_key(ct, "selection_status", "") != TableSelectionStatus.REJECTED
     ]
     if len(selected) > 1:
-        has_keys = any(_join_keys(ct) for ct in selected)
-        if not has_keys:
-            caveats.append(
-                "테이블 간 연결 경로가 명시되지 않아 컬럼명으로 추론했습니다.",
-            )
+        caveats.append(
+            "다중 테이블 사용 — 조인 조건은 LLM이 컬럼명으로 추론했습니다.",
+        )
 
     dead_ends = _get_attr_or_key(reason, "dead_ends", [])
     if dead_ends:

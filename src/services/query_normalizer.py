@@ -54,7 +54,6 @@ from src.utils.llm import llm_call_with_parse_retry
 from src.utils.llm.prompt import (
     render_prompt,
     serialize_synonym_dict,
-    serialize_template_registry,
 )
 from src.utils.llm.response import extract_json
 from src.utils.logger import get_logger
@@ -78,13 +77,6 @@ ABBREVIATION_MAP: dict[str, str] = _synonyms_data.get(
     "abbreviations", {},
 )
 
-_templates_data: dict = load_yaml(
-    "domain/output_templates.yaml", {},
-)
-OUTPUT_TEMPLATE_REGISTRY: dict[str, dict] = _templates_data.get(
-    "templates", {},
-)
-
 
 # ──────────────────────────────────────────────────────────────
 # 전처리기
@@ -97,13 +89,16 @@ def _preprocess_for_normalization(text: str) -> str:
     """
     text = re.sub(r"[~～]+", "~", text)
 
-    for abbr, full in ABBREVIATION_MAP.items():
-        text = re.sub(
-            rf"\b{re.escape(abbr)}\b",
-            full,
-            text,
-            flags=re.IGNORECASE,
-        )
+    # NOTE: 약어 확장을 LLM 추론으로 전환 (2026-04-03)
+    # ABBREVIATION_MAP 정의는 유지하되, 전처리 단계에서의 치환은 비활성화.
+    # LLM이 normalized_term에서 표준 용어를 직접 추론한다.
+    # for abbr, full in ABBREVIATION_MAP.items():
+    #     text = re.sub(
+    #         rf"\b{re.escape(abbr)}\b",
+    #         full,
+    #         text,
+    #         flags=re.IGNORECASE,
+    #     )
 
     return text
 
@@ -358,11 +353,26 @@ def _post_aggregate_fix(
         return
     for m in data.get("measures", []):
         if m.get("agg_function") == "NONE":
+            term = m.get("term", "")
             m["agg_function"] = "SUM"
-            data.setdefault("ambiguities", []).append(
-                f"'{m.get('term')}'의 집계함수가 "
-                "명시되지 않아 SUM으로 추정됨"
-            )
+            data.setdefault("ambiguities", []).append({
+                "ambiguity_type": "INTENT",
+                "confidence": "MEDIUM",
+                "question": (
+                    f"'{term}'을(를) 어떤 방식으로 "
+                    "집계할까요?"
+                ),
+                "question_type": "single_select",
+                "options": [
+                    "합계(SUM)", "평균(AVG)",
+                    "건수(COUNT)", "최대값(MAX)",
+                ],
+                "inferred_value": "SUM",
+                "reasoning": (
+                    "GROUP BY가 있는 집계 질의에서 "
+                    "집계함수 미명시 시 합계(SUM)가 가장 일반적"
+                ),
+            })
 
 
 def _post_rank_fix(data: dict) -> None:
@@ -587,18 +597,15 @@ async def run_normalization(
 
     # Phase 1 LLM
     today = today_kst().isoformat()
-    synonym_text = serialize_synonym_dict(ALL_SYNONYMS)
-    template_text = serialize_template_registry(
-        OUTPUT_TEMPLATE_REGISTRY,
-    )
+    # NOTE: 동의어 사전 주입을 LLM 추론으로 전환 (2026-04-03)
+    # ALL_SYNONYMS 정의는 유지하되, 프롬프트 주입은 비활성화.
+    # LLM이 은행 업무 동의어·약어를 자체 추론하여 normalized_term에 기재한다.
+    # synonym_text = serialize_synonym_dict(ALL_SYNONYMS)
 
-    p1_system, _ = render_prompt(phase1_system, {
-        "{output_template_text}": template_text,
-    })
+    p1_system = phase1_system
     phase1_user, p1_vars = render_prompt(p1_user_tpl, {
         "{query}": cleaned,
         "{today}": today,
-        "{synonym_dict}": synonym_text,
     })
 
     logger.info("Phase 1 LLM 호출")

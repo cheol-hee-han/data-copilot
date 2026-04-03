@@ -17,7 +17,7 @@ DataCopilotCallbackHandler로 추론 과정을 자동 기록하며,
     # 카테고리 필터
     python -m evaluation.run_evaluation --category 고객
 
-결과는 evaluation/traces/{batch_id}/ 에 저장된다:
+결과는 logs/traces/{batch_id}/ 에 저장된다:
     summary.json    - 종합 보고서
     failures.json   - 실패 케이스 상세
     traces/         - 개별 트레이스 파일

@@ -120,6 +120,9 @@ async def judge_visualization(
                 node_name="시각화판단",
             )
         )
+        await record_prompt_variables({
+            "data_summary": data_summary[:200],
+        })
         return chart_type, chart_title
     except ParseError:
         logger.warning(

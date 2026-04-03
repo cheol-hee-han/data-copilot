@@ -1,7 +1,7 @@
 # ============================================================
-# 파일: resources/domain/domain_dictionary.yaml
+# 파일: resources/domain/business_dictionary.yaml
 # 용도: 금융 도메인 용어 사전 (자연어 표현 → DB 스키마 매핑)
-# 적용: src/services/domain/domain_dictionary.py 에서 모듈 로드 시 자동 반영
+# 적용: resource_loader를 통해 로드
 #
 # 이 파일이 존재하면 코드 내장 기본 사전 대신 이 파일을 사용합니다.
 # 이 파일이 없으면 domain_dictionary.py의 기본값으로 동작합니다.

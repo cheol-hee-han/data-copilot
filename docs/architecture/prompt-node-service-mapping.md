@@ -1,10 +1,12 @@
 # 프롬프트 · 노드 · 서비스 매핑표
 
-> **Version 1.2** (2026-03-29)
+> **Version 1.4** (2026-04-02)
 > 프롬프트 변수, 템플릿 파일, 노드, 서비스/유틸리티 간의 전체 매핑을 정리한다.
 >
 > v1.1: `sql_hint_extractor.py` → `utils/sqlglot_analyzer.py` 이동 반영, 횡단 관심사 위치 컬럼 추가
 > v1.2: 전체 노드 재검증 — LLM 직접 호출 여부, `utils/llm/` 모듈 매핑, `batch_interpret_system.txt` 변수 추가(`{unresolved_items}`) 반영
+> v1.3: 노드 리네임 반영 — `context_explorer` → `knowledge_fetcher` + `knowledge_interpreter` 분리, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent`, `preprocessor` 제거(sanitize → runner.py 이관), `clarifier` → `clarification_handler`(규칙 기반, 프롬프트 미사용)
+> v1.4: `planner` → `reasoning_preparer` 리네임 반영 (규칙 기반, LLM/프롬프트 미사용). `PLANNER_SYSTEM` 프롬프트 미사용 처리.
 
 ---
 
@@ -25,18 +27,15 @@
 
 | 프롬프트 변수 | 프롬프트 파일 | 노드 | 서비스 / 유틸리티 | LLM 호출 |
 | --- | --- | --- | --- | --- |
-| `INTENT_CLASSIFIER_SYSTEM` | `interpret/intent_classifier_system.txt` | `intent_classifier.py` | `intent_resolver.py` — `classify_with_gate()` | 서비스 위임 |
-| `INTENT_CLASSIFIER_USER` | `interpret/intent_classifier_user.txt` | 〃 | 〃 | 〃 |
-| `INTENT_CLASSIFIER_LEGACY_SYSTEM` | `interpret/intent_classifier_legacy_system.txt` | 〃 | `intent_resolver.py` — `classify_legacy()` | 서비스 위임 |
-| `CLARIFIER_SYSTEM` | `interpret/clarifier_system.txt` | `clarifier.py` | `utils/llm` — `render_prompt()` | **노드 직접** |
-| `CLARIFIER_USER` | `interpret/clarifier_user.txt` | 〃 | 〃 | 〃 |
+| `CONTEXT_CLASSIFIER_SYSTEM` | `interpret/context_classifier_system.txt` | `context_classifier.py` | `context_classifier.py` — 이력해소 + 의도분류 통합 | **서비스 위임** |
+| `CONTEXT_CLASSIFIER_USER` | `interpret/context_classifier_user.txt` | 〃 | 〃 | 〃 |
+| ~~`INTENT_CLASSIFIER_SYSTEM`~~ | `interpret/미사용_intent_classifier_system.txt` | ~~`intent_classifier.py`~~ → `context_classifier.py` | 통합됨 — 프롬프트 미사용 (파일은 `미사용_` 접두사로 잔존) | 없음 |
+| ~~`HISTORY_RESOLVER_SYSTEM`~~ | `interpret/미사용_history_resolver_system.txt` | ~~`history_resolver.py`~~ → `context_classifier.py` | 통합됨 — 프롬프트 미사용 (파일은 `미사용_` 접두사로 잔존) | 없음 |
 | `QUERY_NORMALIZER_PHASE1_SYSTEM` | `interpret/query_normalizer_phase1_system.txt` | `query_normalizer.py` | `query_normalizer.py` — `run_normalization()` | 서비스 위임 |
 | `QUERY_NORMALIZER_PHASE1_USER` | `interpret/query_normalizer_phase1_user.txt` | 〃 | 〃 | 〃 |
 | `QUERY_NORMALIZER_PHASE2_SYSTEM` | `interpret/query_normalizer_phase2_system.txt` | 〃 | 〃 | 〃 |
 | `QUERY_NORMALIZER_PHASE2_USER` | `interpret/query_normalizer_phase2_user.txt` | 〃 | 〃 | 〃 |
-| `HISTORY_RESOLVER_SYSTEM` | `interpret/history_resolver_system.txt` | `history_resolver.py` | `history_resolver.py` — `resolve_history()` | 서비스 위임 |
-| `HISTORY_RESOLVER_USER` | `interpret/history_resolver_user.txt` | 〃 | 〃 | 〃 |
-| *(프롬프트 없음)* | — | `preprocessor.py` | `input_sanitizer.py` — 입력 정제, 인젝션 감지 | 없음 |
+| *(프롬프트 없음)* | — | ~~`preprocessor.py`~~ **제거됨** | `input_sanitizer.py` — sanitize가 `runner.py`로 이관 | 없음 |
 
 ---
 
@@ -44,15 +43,16 @@
 
 | 프롬프트 변수 | 프롬프트 파일 | 노드 | 서비스 / 유틸리티 | LLM 호출 |
 | --- | --- | --- | --- | --- |
-| `PLANNER_SYSTEM` | `reason/planner_system.txt` | `planner.py` | `tools.py` — `search_table_meta()`, `search_use_cases()`, `extract_hints_from_use_cases()` | **노드 직접** |
-| `CONTEXT_EXPLORER_SYSTEM` | `reason/context_explorer_system.txt` | `context_explorer.py` | `confidence_scorer.py` — `evaluate_readiness()`, `tools.py` — `execute_tool()` 등 | **노드 직접** |
-| `BATCH_INTERPRET_SYSTEM` | `reason/batch_interpret_system.txt` | 〃 | 〃 | 〃 |
-| `TABLE_COMPARISON_SYSTEM` | `reason/table_comparison_system.txt` | 〃 | 〃 | 〃 |
+| ~~`PLANNER_SYSTEM`~~ | `reason/미사용_planner_system.txt` | ~~`planner.py`~~ → `reasoning_preparer.py` | 통합됨 — **프롬프트 미사용** (규칙 기반, LLM 호출 없음). 파일은 `미사용_` 접두사로 잔존 | 없음 |
+| *(프롬프트 없음)* | — | `reasoning_preparer.py` | 규칙 기반 가설 생성·탐색 계획 수립 (deterministic, LLM 호출 없음) | 없음 |
+| *(프롬프트 없음)* | — | `knowledge_fetcher.py` | `tools.py` — 도구 실행 + 관찰 데이터 수집 (rule-based) | 없음 |
+| `KNOWLEDGE_INTERPRETER_SYSTEM` | `reason/knowledge_interpreter_system.txt` | `knowledge_interpreter.py` | `utils/llm/response` — `extract_json()`, `utils/llm/prompt` — `render_prompt()` | **노드 직접** |
+| ~~`TABLE_COMPARISON_SYSTEM`~~ | `reason/미사용_table_comparison_system.txt` | 〃 | 통합됨 — 프롬프트 미사용 (파일은 `미사용_` 접두사로 잔존) | 없음 |
 | `SQL_GENERATOR_SYSTEM` | `reason/sql_generator_system.txt` | `sql_generator.py` | `utils/llm/prompt` — `serialize_decomp_slots()` | **노드 직접** |
 | `SQL_GENERATOR_FIX_SECTION` | `reason/sql_generator_fix_section.txt` | 〃 | 〃 | 〃 |
 | `SQL_VALIDATOR_SYSTEM` | `reason/sql_validator_system.txt` | `sql_validator.py` | `sql_safety_checker.py` (L1), `sqlglot_analyzer.py` (L1 AST), `utils/llm/prompt` — `serialize_decomp_slots()` (L2b) | **조건부** (L2b만) |
-| `RECOVERY_PLANNER_SYSTEM` | `reason/recovery_planner_system.txt` | `recovery_planner.py` | `tools.py` — `TOOL_MAP` | **노드 직접** |
-| *(프롬프트 없음)* | — | `confidence_evaluator.py` | `confidence_scorer.py` — `calculate_readiness()`, `evaluate_readiness()` | 없음 |
+| `RECOVERY_AGENT_SYSTEM` | `reason/recovery_agent_system.txt` | `recovery_agent.py` | `tools.py` — `TOOL_MAP`, `confidence_scorer.py` | **노드 직접** |
+| *(프롬프트 없음)* | — | `readiness_gate.py` | `confidence_scorer.py` — `calculate_readiness()`, `evaluate_readiness()` | 없음 |
 | *(프롬프트 없음)* | — | `result_finalizer.py` | **없음** — 최종 결과 조립 (순수 변환) | 없음 |
 | *(프롬프트 없음)* | — | `tools.py` | `sqlglot_analyzer.py` — `extract_structural_hints()`, `merge_hints()` | 없음 |
 
@@ -70,6 +70,7 @@
 | `ANALYZER_VIZ_SVG_USER` | `present/analyzer_viz_svg_user.txt` | 〃 | 〃 | 〃 |
 | `FORMATTER_SYSTEM` | `present/formatter_system.txt` | `formatter.py` | `response_formatter.py` — `format_response()` | 서비스 위임 |
 | `FORMATTER_USER` | `present/formatter_user.txt` | 〃 | 〃 | 〃 |
+| *(프롬프트 없음)* | — | `simple_responder.py` | 규칙 기반 — 비데이터 의도 경량 정형 응답 (LLM 호출 없음) | 없음 |
 | *(프롬프트 없음)* | — | `sql_executor.py` | `utils/security` — `validate_sql_safety()`, 커넥터로 SQL 실행 | 없음 |
 
 ---
@@ -80,10 +81,10 @@
 
 | 모듈 | 위치 | 사용 노드 | 역할 |
 | --- | --- | --- | --- |
-| `confidence_scorer.py` | `services/` | confidence_evaluator, context_explorer, pipeline.py | 확신도 계산 + 행동 판정 (SSOT) |
+| `confidence_scorer.py` | `services/` | readiness_gate, recovery_agent, pipeline.py | 확신도 계산 + 행동 판정 (SSOT) |
 | `sql_safety_checker.py` | `services/` | sql_validator (L1), sql_executor (이중 방어) | SQL 안전성 검증 (DML/DDL 차단) |
 | `sqlglot_analyzer.py` | `utils/` | tools.py, sql_validator.py | sqlglot AST 파싱, 테이블/컬럼 추출, 구조적 힌트 추출 |
-| `input_sanitizer.py` | `services/` | preprocessor | 입력 정제, 인젝션 감지 |
+| `input_sanitizer.py` | `services/` | **runner.py** (파이프라인 러너) | 입력 정제, 인젝션 감지 (기존 preprocessor에서 runner.py로 이관) |
 | `insight_builder.py` | `services/` | **runner.py** (파이프라인 러너) | 최종 응답 인사이트 문구 조립 |
 
 ---
@@ -94,9 +95,9 @@
 
 | 모듈 | 위치 | 제공 함수 | 사용 노드 |
 | --- | --- | --- | --- |
-| `client.py` | `utils/llm/` | `get_llm_client()` — AsyncAnthropic 싱글턴 | clarifier, planner, context_explorer, sql_generator, sql_validator(L2b), recovery_planner |
+| `client.py` | `utils/llm/` | `get_llm_client()` — AsyncAnthropic 싱글턴 | knowledge_interpreter, sql_generator, sql_validator(L2b), recovery_agent |
 | `prompt.py` | `utils/llm/` | `render_prompt()` — 템플릿 변수 치환 + 추적, `serialize_decomp_slots()` — query_decomposition 직렬화 | 〃 |
-| `response.py` | `utils/llm/` | `extract_json()` — LLM 응답에서 JSON 추출 | planner, context_explorer, sql_generator, sql_validator(L2b), recovery_planner |
+| `response.py` | `utils/llm/` | `extract_json()` — LLM 응답에서 JSON 추출 | knowledge_interpreter, sql_generator, sql_validator(L2b), recovery_agent |
 | `retry.py` | `utils/llm/` | LLM 호출 재시도 (지수 백오프) | 모든 LLM 호출 노드 |
 
 ---
@@ -111,7 +112,7 @@
 
 ---
 
-## 7. 프롬프트 변수 매핑 (batch_interpret_system.txt)
+## 7. 프롬프트 변수 매핑 (knowledge_interpreter_system.txt)
 
 배치 해석 프롬프트의 변수-데이터 소스 매핑:
 

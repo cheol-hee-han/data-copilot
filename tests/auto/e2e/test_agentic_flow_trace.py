@@ -28,18 +28,18 @@ from src.agents.state.state import (
     LoopGuard,
     StructuralHints,
 )
-from src.agents.nodes.reason.planner import planner_node
-from src.agents.nodes.reason.context_explorer import (
-    context_explorer_node,
+from src.agents.nodes.reason.reasoning_preparer import reasoning_preparer_node
+from src.agents.nodes.reason.knowledge_fetcher import (
+    knowledge_fetcher_node,
 )
-from src.agents.nodes.reason.confidence_evaluator import (
-    confidence_evaluator_node,
+from src.agents.nodes.reason.readiness_gate import (
+    readiness_gate_node,
 )
 from src.agents.nodes.reason.sql_validator import (
     sql_validator_node,
 )
-from src.agents.nodes.reason.recovery_planner import (
-    recovery_planner_node,
+from src.agents.nodes.reason.recovery_agent import (
+    _handle_hypothesis_transition,
 )
 from src.agents.nodes.reason.result_finalizer import (
     result_finalizer_node,
@@ -87,20 +87,20 @@ def _apply(state: PipelineState, updates: dict):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 시나리오 1: planner 노드 — Dummy 데이터로 실제 탐색
+# 시나리오 1: reasoning_preparer 노드 — Dummy 데이터로 실제 탐색
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestPlannerFlowTrace:
-    """planner 노드 실제 흐름 추적."""
+class TestReasoningPreparerFlowTrace:
+    """reasoning_preparer 노드 실제 흐름 추적."""
 
     @pytest.mark.asyncio
-    async def test_planner_with_customer_query(self):
-        """고객 관련 질의 → planner가 가설 수립."""
+    async def test_reasoning_preparer_with_customer_query(self):
+        """고객 관련 질의 → reasoning_preparer가 가설 수립."""
         state = PipelineState(
             preprocessed_input="이번 달 신규 고객 수",
         )
 
-        result = await planner_node(state)
+        result = await reasoning_preparer_node(state)
         new_state = _apply(state, result)
 
         # 상태 추적
@@ -114,7 +114,6 @@ class TestPlannerFlowTrace:
             "candidate_tables_count": len(
                 reason.candidate_tables
             ),
-            "fast_path": reason.fast_path_triggered,
             "execution_steps": len(
                 reason.execution_plan
             ),
@@ -122,7 +121,7 @@ class TestPlannerFlowTrace:
         }
 
         _record(
-            "planner", "customer_query",
+            "reasoning_preparer", "customer_query",
             "이번 달 신규 고객 수",
             f"가설 {trace['hypotheses_count']}개, "
             f"후보테이블 {trace['candidate_tables_count']}개",
@@ -134,21 +133,19 @@ class TestPlannerFlowTrace:
             ),
         )
 
-        # 검증
-        assert reason.phase in (
-            Phase.EXPLORING, Phase.GENERATING,
-        )
-        assert len(reason.hypotheses) >= 1
+        # 검증: reasoning_preparer는 항상 H_INIT 1개 생성
+        assert reason.phase == Phase.EXPLORING
+        assert len(reason.hypotheses) == 1
         assert reason.current_hypothesis is not None
 
     @pytest.mark.asyncio
-    async def test_planner_with_loan_query(self):
-        """여신 관련 질의 → planner가 가설 수립."""
+    async def test_reasoning_preparer_with_loan_query(self):
+        """여신 관련 질의 → reasoning_preparer가 가설 수립."""
         state = PipelineState(
             preprocessed_input="지점별 여신 잔액 합계",
         )
 
-        result = await planner_node(state)
+        result = await reasoning_preparer_node(state)
         new_state = _apply(state, result)
 
         reason = new_state.reason
@@ -165,13 +162,13 @@ class TestPlannerFlowTrace:
         }
 
         _record(
-            "planner", "loan_query",
+            "reasoning_preparer", "loan_query",
             "지점별 여신 잔액 합계",
             f"후보: {trace['candidates']}",
             trace, "PASS",
         )
 
-        assert len(reason.hypotheses) >= 1
+        assert len(reason.hypotheses) == 1
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -218,7 +215,7 @@ class TestExplorerFlowTrace:
             ),
         )
 
-        result = await context_explorer_node(state)
+        result = await knowledge_fetcher_node(state)
         new_state = _apply(state, result)
 
         reason = new_state.reason
@@ -289,7 +286,7 @@ class TestExplorerFlowTrace:
             ),
         )
 
-        result = await context_explorer_node(state)
+        result = await knowledge_fetcher_node(state)
         new_state = _apply(state, result)
 
         reason = new_state.reason
@@ -369,7 +366,7 @@ class TestEvaluatorFlowTrace:
 
         score = calculate_readiness(state.reason)
         verdict = evaluate_readiness(state.reason)
-        result = await confidence_evaluator_node(state)
+        result = await readiness_gate_node(state)
 
         trace = {
             "score": score,
@@ -422,7 +419,7 @@ class TestEvaluatorFlowTrace:
 
         score = calculate_readiness(state.reason)
         verdict = evaluate_readiness(state.reason)
-        result = await confidence_evaluator_node(state)
+        result = await readiness_gate_node(state)
 
         trace = {
             "score": score,
@@ -537,53 +534,41 @@ class TestValidatorFlowTrace:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TestRecoveryFlowTrace:
-    """recovery_planner 재계획 추적."""
+    """recovery_agent 가설 전이 추적."""
 
-    @pytest.mark.asyncio
-    async def test_recovery_with_pending_hypothesis(self):
+    def test_recovery_with_pending_hypothesis(self):
         """대기 가설 있음 → 다음 가설로 전환."""
-        state = PipelineState(
-            reason=ReasoningState(
-                hypotheses=[
-                    Hypothesis(
-                        hypothesis_id="H1",
-                        description="활용사례 기반",
-                        status=HypothesisStatus.ACTIVE,
-                    ),
-                    Hypothesis(
-                        hypothesis_id="H2",
-                        description="직접 탐색",
-                        status=HypothesisStatus.PENDING,
-                        required_tables=["TB_NEW"],
-                    ),
-                ],
-                current_hypothesis=Hypothesis(
+        reason = ReasoningState(
+            hypotheses=[
+                Hypothesis(
                     hypothesis_id="H1",
                     description="활용사례 기반",
                     status=HypothesisStatus.ACTIVE,
                 ),
-                failure_type=FailureType.SQL_STRUCTURAL,
-                failure_reason="테이블 구조 불일치",
+                Hypothesis(
+                    hypothesis_id="H2",
+                    description="직접 탐색",
+                    status=HypothesisStatus.PENDING,
+                    required_tables=["TB_NEW"],
+                ),
+            ],
+            current_hypothesis=Hypothesis(
+                hypothesis_id="H1",
+                description="활용사례 기반",
+                status=HypothesisStatus.ACTIVE,
             ),
+            failure_type=FailureType.SQL_STRUCTURAL,
+            failure_reason="테이블 구조 불일치",
         )
 
-        result = await recovery_planner_node(state)
-        new_state = _apply(state, result)
+        _handle_hypothesis_transition(reason)
 
-        reason = new_state.reason
         trace = {
-            "phase": reason.phase,
             "current_hyp": (
                 reason.current_hypothesis.hypothesis_id
                 if reason.current_hypothesis else None
             ),
             "dead_ends": len(reason.dead_ends),
-            "new_plan_steps": len(
-                reason.execution_plan
-            ),
-            "replan_count": (
-                reason.loop_guard.replan_count
-            ),
         }
 
         _record(
@@ -597,50 +582,40 @@ class TestRecoveryFlowTrace:
 
         assert trace["current_hyp"] == "H2"
         assert trace["dead_ends"] >= 1
-        assert reason.phase == Phase.EXPLORING
 
-    @pytest.mark.asyncio
-    async def test_recovery_fallback_hypothesis(self):
-        """모든 가설 소진 → rule-based fallback 가설 생성."""
-        state = PipelineState(
-            preprocessed_input="고객 수",
-            reason=ReasoningState(
-                hypotheses=[
-                    Hypothesis(
-                        hypothesis_id="H1",
-                        description="t",
-                        status=HypothesisStatus.FAILED,
-                    ),
-                ],
-                current_hypothesis=None,
-            ),
+    def test_recovery_no_pending_hypothesis(self):
+        """모든 가설 소진 → current_hypothesis가 None."""
+        reason = ReasoningState(
+            hypotheses=[
+                Hypothesis(
+                    hypothesis_id="H1",
+                    description="t",
+                    status=HypothesisStatus.FAILED,
+                ),
+            ],
+            current_hypothesis=None,
         )
 
-        result = await recovery_planner_node(state)
+        _handle_hypothesis_transition(reason)
 
         trace = {
-            "phase": result["reason"].phase,
-            "new_hyp": (
-                result["reason"].current_hypothesis.hypothesis_id
-                if result["reason"].current_hypothesis
+            "current_hyp": (
+                reason.current_hypothesis.hypothesis_id
+                if reason.current_hypothesis
                 else None
-            ),
-            "new_plan_steps": len(
-                result["reason"].execution_plan,
             ),
         }
 
         _record(
-            "recovery", "fallback_hypothesis",
-            "모든 가설 FAILED → fallback",
-            f"phase={trace['phase']}, hyp={trace['new_hyp']}",
+            "recovery", "no_pending_hypothesis",
+            "모든 가설 FAILED → None",
+            f"hyp={trace['current_hyp']}",
             trace,
-            "PASS" if trace["phase"] == Phase.EXPLORING
+            "PASS" if trace["current_hyp"] is None
             else "FAIL",
         )
 
-        assert result["reason"].phase == Phase.EXPLORING
-        assert result["reason"].current_hypothesis is not None
+        assert reason.current_hypothesis is None
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

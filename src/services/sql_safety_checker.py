@@ -23,61 +23,9 @@ from dataclasses import dataclass, field
 from src.utils.logger import get_logger
 from src.utils.sqlglot_analyzer import parse_sql_safe
 from src.utils.resource_loader import load_yaml
-from src.utils.security import normalize_unicode
+from src.utils.security import FORBIDDEN_SQL_PATTERNS, normalize_unicode
 
 logger = get_logger(__name__)
-
-_MSG_TIME_DELAY = "시간 지연 함수는 허용되지 않습니다"
-
-FORBIDDEN_PATTERNS = [
-    (
-        r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE)\b",
-        "DML/DDL 문은 허용되지 않습니다",
-    ),
-    (
-        r"\bEXEC(?:UTE)?\b",
-        "프로시저 실행은 허용되지 않습니다",
-    ),
-    (
-        r"\bCALL\b",
-        "프로시저 호출은 허용되지 않습니다",
-    ),
-    (
-        r"\b(information_schema|pg_\w+|sys\.\w+|mysql\.\w+)\b",
-        "시스템 카탈로그 접근은 금지됩니다",
-    ),
-    (
-        r";\s*\w+",
-        "다중 쿼리는 허용되지 않습니다",
-    ),
-    (
-        r"\bINTO\s+OUTFILE\b",
-        "파일 출력은 허용되지 않습니다",
-    ),
-    (
-        r"\bINTO\s+DUMPFILE\b",
-        "파일 덤프는 허용되지 않습니다",
-    ),
-    (
-        r"\bLOAD_FILE\s*\(",
-        "파일 읽기는 허용되지 않습니다",
-    ),
-    (
-        r"\bLOAD\s+DATA\b",
-        "데이터 로드는 허용되지 않습니다",
-    ),
-    (r"\bSLEEP\s*\(", _MSG_TIME_DELAY),
-    (r"\bWAITFOR\s+DELAY\b", _MSG_TIME_DELAY),
-    (r"\bBENCHMARK\s*\(", _MSG_TIME_DELAY),
-    (r"\bPG_SLEEP\s*\(", _MSG_TIME_DELAY),
-    (r"--", "SQL 주석은 허용되지 않습니다"),
-    (r"/\*", "SQL 블록 주석은 허용되지 않습니다"),
-    (r"\bxp_\w+", "확장 저장 프로시저는 허용되지 않습니다"),
-    (
-        r"\bUNION\s+(?:ALL\s+)?SELECT\b",
-        "UNION SELECT는 허용되지 않습니다",
-    ),
-]
 
 _DEFAULT_PII_COLUMNS = {
     "JUMIN_NO", "JUMIN_NUM", "SSN", "RESIDENT_NO",
@@ -172,7 +120,7 @@ def check_forbidden_patterns(sql: str) -> list[str]:
     """금지 패턴을 검사한다."""
     return [
         msg
-        for pattern, msg in FORBIDDEN_PATTERNS
+        for pattern, msg in FORBIDDEN_SQL_PATTERNS
         if re.search(pattern, sql, re.IGNORECASE)
     ]
 

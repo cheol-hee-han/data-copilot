@@ -16,7 +16,7 @@ LangGraph 기반 데이터 에이전트 핵심 개발자. 파이프라인 설계
 - LangGraph: StateGraph, conditional_edges, human-in-the-loop
 - AsyncAnthropic: 비동기 Claude API
 - Pydantic v2: State 스키마, 요청/응답 모델
-- SQLAlchemy async + elasticsearch-py + qdrant-client
+- SQLAlchemy async + pymongo (async) + qdrant-client
 
 # 핵심 원칙
 

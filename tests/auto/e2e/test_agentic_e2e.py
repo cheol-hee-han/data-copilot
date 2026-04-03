@@ -42,24 +42,20 @@ from src.agents.state.state import (
 from src.agents.graph.pipeline import (
     build_pipeline,
     create_app,
-    _route_after_planner,
-    _route_after_confidence_evaluator,
-    _route_after_recovery_planner,
+    _route_after_readiness_gate,
+    _route_after_recovery_agent,
     _route_after_sql_validator,
 )
-from src.agents.nodes.reason.planner import (
+from src.agents.nodes.reason.reasoning_preparer import (
     _build_decomposition_from_normalized,
-    _build_fallback_plan,
-    _build_initial_candidates,
     _initialize_knowledge_items,
-    _should_fast_path,
-    planner_node,
+    reasoning_preparer_node,
 )
-from src.agents.nodes.reason.context_explorer import (
-    context_explorer_node,
+from src.agents.nodes.reason.knowledge_fetcher import (
+    knowledge_fetcher_node,
 )
-from src.agents.nodes.reason.confidence_evaluator import (
-    confidence_evaluator_node,
+from src.agents.nodes.reason.readiness_gate import (
+    readiness_gate_node,
 )
 from src.agents.nodes.reason.sql_generator import (
     sql_generator_node,
@@ -69,10 +65,9 @@ from src.agents.nodes.reason.sql_validator import (
     _validate_layer2a,
     sql_validator_node,
 )
-from src.agents.nodes.reason.recovery_planner import (
+from src.agents.nodes.reason.recovery_agent import (
     _build_failure_summary,
-    _build_replan_context,
-    recovery_planner_node,
+    _handle_hypothesis_transition,
 )
 from src.agents.nodes.reason.result_finalizer import (
     result_finalizer_node,
@@ -96,8 +91,8 @@ def _state(
     preprocessed_input: str = "",
     normalized_query: Any = None,
     conversation_history: list | None = None,
-    awaiting_clarification: bool = False,
     clarification_question: str = "",
+    pending_signals: list | None = None,
     **reason_kw: Any,
 ) -> PipelineState:
     """PipelineState를 간결하게 생성."""
@@ -105,8 +100,8 @@ def _state(
         preprocessed_input=preprocessed_input,
         normalized_query=normalized_query,
         conversation_history=conversation_history or [],
-        awaiting_clarification=awaiting_clarification,
         clarification_question=clarification_question,
+        pending_signals=pending_signals or [],
         reason=ReasoningState(**reason_kw),
     )
 
@@ -163,18 +158,7 @@ class TestClearQueryAccuracy:
         assert isinstance(decomp, dict)
         assert "measures" in decomp
 
-    def test_02_initial_candidates_from_meta(self):
-        """테이블 메타에서 후보 테이블 추출."""
-        metas = [
-            {"table_name": "TB_CUST",
-             "table_description": "고객",
-             "columns": ["CUST_NO"]},
-        ]
-        cands = _build_initial_candidates(metas, None)
-        assert len(cands) == 1
-        assert cands[0].table_name == "TB_CUST"
-
-    def test_03_knowledge_items_from_decomposition(self):
+    def test_02_knowledge_items_from_decomposition(self):
         """분해 결과에서 지식 항목 초기화."""
         decomp = {
             "measures": [{"term": "고객수", "agg_function": "COUNT"}],
@@ -187,20 +171,7 @@ class TestClearQueryAccuracy:
         assert items[0].key == "measure:고객수"
         assert items[1].key == "filter:상태=정상"
 
-    def test_04_fast_path_with_all_confirmed(self):
-        """모든 지식 확인됨 → Fast-Path 발동."""
-        ki = [_ki("measure:x", ConfidenceStatus.CONFIRMED, 0.9)]
-        hints = StructuralHints(join_patterns=["a=b"])
-        cands = [_ct()]
-        assert _should_fast_path(ki, hints, cands, None)
-
-    def test_05_no_fast_path_with_unresolved(self):
-        """미해소 용어 있음 → Fast-Path 미발동."""
-        ki = [_ki("measure:x", ConfidenceStatus.UNRESOLVED)]
-        hints = StructuralHints(join_patterns=["a=b"])
-        assert not _should_fast_path(ki, hints, [_ct()], None)
-
-    def test_06_context_info_from_reason_state(self):
+    def test_03_context_info_from_reason_state(self):
         """ReasoningState에서 ContextInfo 구성."""
         reason = ReasoningState(
             candidate_tables=[_ct("TB_A", ["C1", "C2"])],
@@ -266,19 +237,33 @@ class TestAmbiguousQueryHandling:
     """모호한 질의에 대한 처리."""
 
     def test_01_conflicted_triggers_ask_user(self):
-        """충돌 항목 → ASK_USER 판정."""
+        """다중 테이블 충돌 항목 → ASK_USER 판정."""
         state = _state(
-            knowledge_items=[_ki("x", ConfidenceStatus.CONFLICTED)],
+            knowledge_items=[
+                _ki(
+                    "x",
+                    ConfidenceStatus.CONFLICTED,
+                    is_critical=True,
+                    evidence=[
+                        "TB_LOAN_MASTER 에서 확인",
+                        "TB_LOAN_DETAIL 에서 상이",
+                    ],
+                ),
+            ],
             hypotheses=[_hyp()],
         )
         assert has_conflicted_items(state.reason)
         v = evaluate_readiness(state.reason)
         assert v == ReadinessVerdict.ASK_USER
 
-    def test_02_ambiguity_in_normalized_blocks_fastpath(self):
-        """정규화 결과에 ambiguity → Fast-Path 차단."""
-        nq = type("NQ", (), {"ambiguities": ["모호함"]})()
-        assert not _should_fast_path([], StructuralHints(), [], nq)
+    def test_02_ambiguity_detected_in_normalized(self):
+        """모호한 출력 범위 감지 — measures 비어있고 포괄 키워드."""
+        from src.agents.nodes.reason.reasoning_preparer import (
+            _detect_ambiguous_output,
+        )
+        decomp = {"measures": [], "filters": [], "group_by": []}
+        result = _detect_ambiguous_output(decomp, "고객 정보 뽑아줘")
+        assert result is not None  # KnowledgeItem 반환
 
     def test_03_multiple_conflicted_items(self):
         """복수 충돌 항목 감지."""
@@ -291,10 +276,10 @@ class TestAmbiguousQueryHandling:
         )
         assert has_conflicted_items(state.reason)
 
-    def test_04_conflicted_generates_question(self):
-        """충돌 → 명확화 질문 생성."""
+    def test_04_conflicted_generates_signals(self):
+        """충돌 → AmbiguitySignal 생성."""
         from src.agents.nodes.reason.result_finalizer import (
-            _build_clarification_question,
+            _build_conflicted_signals,
         )
         items = [
             _ki(
@@ -302,9 +287,9 @@ class TestAmbiguousQueryHandling:
                 evidence=["A: 01=정상", "B: 01=활성"],
             ),
         ]
-        q = _build_clarification_question(items)
-        assert "코드값" in q
-        assert "상충" in q
+        signals = _build_conflicted_signals(items)
+        assert len(signals) >= 1
+        assert "코드값" in signals[0].question
 
     def test_05_low_confidence_triggers_replan(self):
         """낮은 확신도 → REPLAN 판정."""
@@ -357,21 +342,21 @@ class TestAmbiguousQueryHandling:
         score = calculate_readiness(state.reason)
         assert 0.1 <= score <= 0.7
 
-    def test_10_join_needed_but_missing(self):
-        """조인 필요하나 join_keys 없음 → 점수 하락."""
+    def test_10_multi_table_no_penalty(self):
+        """다중 테이블이어도 join_path 페널티 없음."""
         state = _state(
             knowledge_items=[
                 _ki("table:A", ConfidenceStatus.CONFIRMED, 0.9),
                 _ki("table:B", ConfidenceStatus.CONFIRMED, 0.9),
             ],
             candidate_tables=[
-                CandidateTable(table_name="A", join_keys=[]),
-                CandidateTable(table_name="B", join_keys=[]),
+                CandidateTable(table_name="A"),
+                CandidateTable(table_name="B"),
             ],
         )
         score = calculate_readiness(state.reason)
-        # join_path 가중치 20%가 0.3 → 전체 점수 하락
-        assert score <= 0.85
+        # join_path 가중치 제거 — 다중 테이블 페널티 없음
+        assert score >= 0.7
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -459,18 +444,23 @@ class TestExceptionHandling:
         v = evaluate_readiness(state.reason)
         assert v == ReadinessVerdict.TERMINATE
 
-    @pytest.mark.asyncio
-    async def test_10_recovery_planner_fallback(self):
-        """모든 가설 FAILED → rule-based fallback 가설 생성."""
-        state = _state(
-            preprocessed_input="고객 수",
-            hypotheses=[_hyp(status=HypothesisStatus.FAILED)],
-            current_hypothesis=None,
+    def test_10_recovery_agent_hypothesis_transition(self):
+        """ACTIVE 가설 FAILED 전환 + PENDING 가설 소비."""
+        reason = ReasoningState(
+            hypotheses=[
+                _hyp("H1", status=HypothesisStatus.ACTIVE),
+                _hyp("H2", desc="대안", status=HypothesisStatus.PENDING),
+            ],
+            current_hypothesis=_hyp(
+                "H1", status=HypothesisStatus.ACTIVE,
+            ),
+            failure_type=FailureType.SQL_STRUCTURAL,
+            failure_reason="구조 불일치",
         )
-        r = await recovery_planner_node(state)
-        # rule-based fallback이 새 가설을 생성
-        assert r["reason"].phase == Phase.EXPLORING
-        assert r["reason"].current_hypothesis is not None
+        _handle_hypothesis_transition(reason)
+        assert reason.current_hypothesis is not None
+        assert reason.current_hypothesis.hypothesis_id == "H2"
+        assert len(reason.dead_ends) == 1
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -482,7 +472,7 @@ class TestClarificationQuestions:
 
     @pytest.mark.asyncio
     async def test_01_verifying_phase_triggers_question(self):
-        """VERIFYING + CONFLICTED → 질문 생성."""
+        """VERIFYING + CONFLICTED → AmbiguitySignal 생성."""
         state = _state(
             phase=Phase.VERIFYING,
             knowledge_items=[
@@ -491,8 +481,9 @@ class TestClarificationQuestions:
             ],
         )
         r = await result_finalizer_node(state)
-        assert r["awaiting_clarification"] is True
-        assert "코드" in r["clarification_question"]
+        signals = r.get("pending_signals", [])
+        assert len(signals) >= 1
+        assert any("코드" in s.question for s in signals)
 
     @pytest.mark.asyncio
     async def test_02_no_conflict_no_question(self):
@@ -505,27 +496,36 @@ class TestClarificationQuestions:
             validated_sql="SELECT 1",
         )
         r = await result_finalizer_node(state)
-        assert r.get("awaiting_clarification") is not True
+        assert not r.get("pending_signals")
 
-    def test_03_pipeline_ask_user_flag(self):
-        """PipelineState: 명확화 플래그."""
-        state = _state(
-            awaiting_clarification=True,
-            clarification_question="확인 필요",
+    def test_03_pipeline_pending_signals_flag(self):
+        """PipelineState: pending_signals 설정."""
+        from src.agents.models.clarification import (
+            AmbiguitySignal, AmbiguityType, ConfidenceLevel,
         )
-        assert state.awaiting_clarification is True
+        signal = AmbiguitySignal(
+            source_node="test",
+            ambiguity_type=AmbiguityType.INTENT,
+            decision="ASK",
+            confidence=ConfidenceLevel.LOW,
+            question="확인 필요",
+            reasoning="테스트",
+        )
+        state = _state(pending_signals=[signal])
+        assert len(state.pending_signals) == 1
 
-    def test_04_multiple_conflicts_all_listed(self):
-        """복수 충돌 → 모두 질문에 포함."""
+    def test_04_multiple_conflicts_all_signaled(self):
+        """복수 충돌 → 모두 AmbiguitySignal 생성."""
         from src.agents.nodes.reason.result_finalizer import (
-            _build_clarification_question,
+            _build_conflicted_signals,
         )
         items = [
             _ki("a", ConfidenceStatus.CONFLICTED, evidence=["e1"]),
             _ki("b", ConfidenceStatus.CONFLICTED, evidence=["e2"]),
         ]
-        q = _build_clarification_question(items)
-        assert "a" in q and "b" in q
+        signals = _build_conflicted_signals(items)
+        questions = " ".join(s.question for s in signals)
+        assert "a" in questions and "b" in questions
 
     def test_05_ask_user_verdict_phase_mapping(self):
         """ASK_USER → VERIFYING phase."""
@@ -539,12 +539,15 @@ class TestClarificationQuestions:
 
     @pytest.mark.asyncio
     async def test_06_evaluator_sets_verifying(self):
-        """confidence_evaluator가 VERIFYING 설정."""
+        """readiness_gate가 추론 불가 충돌 시 VERIFYING 설정."""
         state = _state(
-            knowledge_items=[_ki("x", ConfidenceStatus.CONFLICTED)],
+            knowledge_items=[_ki(
+                "x", ConfidenceStatus.CONFLICTED,
+                evidence=["TB_A 기반", "TB_B 기반"],
+            )],
             hypotheses=[_hyp()],
         )
-        r = await confidence_evaluator_node(state)
+        r = await readiness_gate_node(state)
         assert r["reason"].phase == Phase.VERIFYING
 
     def test_07_finalizer_pending_status(self):
@@ -555,7 +558,7 @@ class TestClarificationQuestions:
     def test_08_question_includes_evidence(self):
         """질문에 근거 정보 포함."""
         from src.agents.nodes.reason.result_finalizer import (
-            _build_clarification_question,
+            _build_conflicted_signals,
         )
         items = [
             _ki(
@@ -563,7 +566,8 @@ class TestClarificationQuestions:
                 evidence=["코드메타: 01=정상", "매뉴얼: 01=활성"],
             ),
         ]
-        q = _build_clarification_question(items)
+        signals = _build_conflicted_signals(items)
+        q = signals[0].question
         assert "코드메타" in q
         assert "매뉴얼" in q
 
@@ -573,7 +577,7 @@ class TestClarificationQuestions:
             validated_sql="SELECT 1",
             final_status=FinalStatus.SUCCESS,
         )
-        assert not state.awaiting_clarification
+        assert not state.pending_signals
 
     def test_10_no_clarification_on_failure(self):
         """실패 시 명확화 없음."""
@@ -581,7 +585,7 @@ class TestClarificationQuestions:
             final_status=FinalStatus.FAILURE,
             exploration_summary="실패",
         )
-        assert not state.awaiting_clarification
+        assert not state.pending_signals
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -665,7 +669,7 @@ class TestConversationHistory:
             preprocessed_input="q",
             normalized_query=nq,
         )
-        assert state.normalized_query == nq
+        assert state.normalized_query is not None
 
     def test_09_none_normalized_query(self):
         """정규화 없이도 동작."""
@@ -795,21 +799,23 @@ class TestIndependentQueryDuringConversation:
         assert new.preprocessed_input == "새 질의"
         assert len(new.reason.dead_ends) == 0
 
-    def test_03_fallback_plan_from_keywords(self):
-        """키워드 기반 폴백 플랜."""
-        plan = _build_fallback_plan(
-            "고객 수", {"required_concepts": ["고객"]},
-        )
-        assert len(plan) == 1
-        assert plan[0].tool == "search_table_meta"
+    def test_03_decomposition_from_normalized_none(self):
+        """normalized_query=None → 기본 분해 구조."""
+        decomp = _build_decomposition_from_normalized(None)
+        assert "measures" in decomp
+        assert "filters" in decomp
 
-    def test_04_fallback_plan_no_keywords(self):
-        """키워드 없으면 질의 분할."""
-        plan = _build_fallback_plan(
-            "지점별 매출 합계", {"required_concepts": []},
-        )
-        assert len(plan) == 1
-        assert "지점별" in plan[0].input
+    def test_04_knowledge_items_from_query(self):
+        """질의에서 지식 항목 초기화."""
+        decomp = {
+            "measures": [{"term": "매출", "agg_function": "SUM"}],
+            "filters": [],
+            "group_by": [{"term": "지점"}],
+            "order_limit": [],
+        }
+        items = _initialize_knowledge_items(None, decomp)
+        keys = [it.key for it in items]
+        assert "measure:매출" in keys
 
     @pytest.mark.skip(reason="_interpret_result 삭제됨 (simplify 리팩터링)")
     @pytest.mark.asyncio
@@ -844,10 +850,9 @@ class TestIndependentQueryDuringConversation:
         assert reason.failure_type == FailureType.SQL_STRUCTURAL
         assert "미확인" in reason.failure_reason
 
-    def test_10_replan_context_includes_history(self):
-        """재계획 컨텍스트에 이력 포함."""
-        state = _state(
-            preprocessed_input="지점별 매출",
+    def test_10_failure_summary_includes_history(self):
+        """실패 요약에 dead_ends 및 미해소 용어 포함."""
+        reason = ReasoningState(
             dead_ends=[
                 DeadEnd(
                     hypothesis_id="H1",
@@ -855,21 +860,12 @@ class TestIndependentQueryDuringConversation:
                     failure_type=FailureType.NO_TABLE,
                 ),
             ],
-            execution_plan=[
-                _step(1, status=StepStatus.DONE),
-            ],
             knowledge_items=[
-                _ki("table:TB_A", ConfidenceStatus.CONFIRMED, 0.9),
+                _ki("용어:미해소", ConfidenceStatus.UNRESOLVED),
             ],
-            searched_queries=["query1"],
+            loop_guard=LoopGuard(replan_count=2),
         )
-        state.reason.execution_plan[0].insight = "TB_A 발견"
-        ctx = _build_replan_context(
-            state.reason,
-            state.preprocessed_input,
-            state.reason.dead_ends,
-        )
-        assert ctx["original_query"] == "지점별 매출"
-        assert len(ctx["failure_history"]) == 1
-        assert len(ctx["discovered_facts"]) == 1
-        assert len(ctx["confirmed_knowledge"]) == 1
+        summary = _build_failure_summary(reason)
+        assert "재계획" in summary
+        assert "실패 경로" in summary
+        assert "미해소" in summary

@@ -6,8 +6,8 @@
 데이터 흐름이 올바르게 연결되는지 검증한다.
 
 검증 대상 연쇄:
-  1. preprocessor → intent_classifier (preprocessed_input 전달)
-  2. intent_classifier → query_normalizer (intent + preprocessed_input)
+  1. preprocessor → context_classifier (preprocessed_input 전달)
+  2. context_classifier → query_normalizer (intent + preprocessed_input)
   3. sql_validator → sql_generator (validation_feedback 재시도 루프)
   4. sql_validator 출력 → sql_executor 입력 (validated_sql 전달)
 
@@ -47,36 +47,40 @@ _HAS_API_KEY = bool(os.getenv("ANTHROPIC_API_KEY"))
 
 
 # ══════════════════════════════════════════════════════════════
-# Chain 1: preprocessor → intent_classifier
+# Chain 1: preprocessor → context_classifier
 # ══════════════════════════════════════════════════════════════
 
 @pytest.mark.live_llm
 @pytest.mark.skipif(not _HAS_API_KEY, reason="ANTHROPIC_API_KEY 필요")
 @pytest.mark.asyncio
 async def test_chain_preprocess_to_intent():
-    """전처리 출력이 의도 분류의 입력으로 올바르게 전달된다."""
-    from src.agents.nodes.interpret.intent_classifier import classify_intent_node
-    from src.agents.nodes.interpret.preprocessor import preprocess_node
+    """전처리 출력이 맥락 분류의 입력으로 올바르게 전달된다."""
+    from src.agents.nodes.interpret.context_classifier import context_classifier_node
+    from src.services.input_sanitizer import sanitize
 
     # Step 1: 전처리
     state = PipelineState(user_input="이번달 신규 대출 건수 알려줘")
-    prep_result = await preprocess_node(state)
+    san = sanitize(state.user_input)
 
-    assert prep_result["status"] == QueryStatus.PREPROCESSING
-    assert len(prep_result["preprocessed_input"]) > 0
+    assert san.is_error is False
+    assert len(san.text) > 0
 
-    # Step 2: 전처리 결과를 state에 반영 후 의도 분류
-    state_after_prep = state.model_copy(update=prep_result)
-    intent_result = await classify_intent_node(state_after_prep)
+    # Step 2: 전처리 결과를 state에 반영 후 맥락 분류
+    state_after_prep = state.model_copy(update={
+        "preprocessed_input": san.text,
+        "status": QueryStatus.PREPROCESSING,
+    })
+    intent_result = await context_classifier_node(state_after_prep)
 
     assert intent_result["status"] == QueryStatus.INTENT_CLASSIFIED
     assert intent_result["intent"] in (IntentType.DATA_EXTRACTION, IntentType.DATA_ANALYSIS)
     assert 0.0 <= intent_result["intent_confidence"] <= 1.0
+    assert "query_category" in intent_result
 
     log_test_case(logger, "test_chain_preprocess_to_intent",
                   "이번달 신규 대출 건수 알려줘",
                   "PREPROCESSING → INTENT_CLASSIFIED",
-                  f"{prep_result['status']} → {intent_result['status']}",
+                  f"PREPROCESSING → {intent_result['status']}",
                   True)
 
 
@@ -210,27 +214,29 @@ def test_state_transition_sequence():
 
 @pytest.mark.asyncio
 async def test_chain_clarification_roundtrip():
-    """명확화 질문 → 사용자 응답 → preprocess → resolve_history 재진입 흐름을 검증한다.
+    """명확화 질문 → 사용자 응답 → preprocess → context_classifier 재진입 흐름을 검증한다.
 
-    명확화 합성은 resolve_history 노드에서 처리되므로,
-    preprocess는 보안 검사만, resolve_history가 맥락 판정을 수행한다.
-    LLM 호출이 필요하므로 Mock으로 CONTINUE 판정을 시뮬레이션한다.
+    context_classifier가 이전의 history_resolver + intent_classifier를 통합했으므로,
+    context_classifier_node를 직접 사용하여 CONTINUE 판정을 시뮬레이션한다.
     """
+    import json
     from unittest.mock import AsyncMock, patch
 
-    from src.agents.nodes.interpret.preprocessor import preprocess_node
-    from src.agents.nodes.interpret.history_resolver import resolve_history_node
+    from src.agents.nodes.interpret.context_classifier import context_classifier_node
+    from src.services.input_sanitizer import sanitize
 
     # Step 1: 최초 전처리
     state = PipelineState(user_input="데이터 좀 뽑아줘")
-    prep1 = await preprocess_node(state)
-    state = state.model_copy(update=prep1)
+    san = sanitize(state.user_input)
+    state = state.model_copy(update={
+        "preprocessed_input": san.text,
+        "status": QueryStatus.PREPROCESSING,
+    })
 
     # Step 2: 명확화 상태 시뮬레이션 + 사용자 재입력
     state = state.model_copy(update={
         "user_input": "이번달 여신 잔액",
         "preprocessed_input": "이번달 여신 잔액",
-        "awaiting_clarification": True,
         "clarification_question": "어떤 데이터가 필요하신가요?",
         "conversation_history": [
             {"role": "user", "content": "데이터 좀 뽑아줘"},
@@ -238,32 +244,38 @@ async def test_chain_clarification_roundtrip():
         ],
     })
 
-    # Step 3: resolve_history에서 CONTINUE 판정 (LLM Mock)
-    from src.services.history_resolver import (
-        HistoryDecision,
-        HistoryResolveResult,
+    # Step 3: context_classifier에서 CONTINUE 판정 (LLM Mock)
+    from src.services.history_resolver import HistoryDecision
+
+    mock_parsed = {
+        "resolution": HistoryDecision.CONTINUE,
+        "category": "DATA_EXTRACTION",
+        "intent_confidence": "HIGH",
+        "intent_reason": "여신 잔액 데이터 추출 요청",
+        "continue_reason": "명확화 응답으로 구체적 데이터 요청",
+        "continue_context": "이번달 여신 잔액 현황 알려줘",
+    }
+    raw = json.dumps(
+        {k: v.value if hasattr(v, "value") else v for k, v in mock_parsed.items()}
     )
 
-    mock_result = HistoryResolveResult(
-        decision=HistoryDecision.CONTINUE,
-        resolved_query="이번달 여신 잔액 현황 알려줘",
-        reason="명확화 응답 판단 필요",
-    )
     with patch(
-        "src.agents.nodes.interpret.history_resolver.resolve_history",
+        "src.services.context_classifier.llm_call_with_parse_retry",
         new_callable=AsyncMock,
-        return_value=mock_result,
+        return_value=(raw, mock_parsed),
+    ), patch(
+        "src.utils.tracker.dispatch.dispatch_tracking_event",
+        new_callable=AsyncMock,
     ):
-        resolve_result = await resolve_history_node(state)
+        result = await context_classifier_node(state)
 
-    assert resolve_result["awaiting_clarification"] is False
-    assert "여신 잔액" in resolve_result["preprocessed_input"]
+    assert "여신 잔액" in result["preprocessed_input"]
 
     log_test_case(
         logger,
         "test_chain_clarification_roundtrip",
         "데이터 좀 뽑아줘 → 이번달 여신 잔액",
-        "resolve_history가 CONTINUE 판정, 명확화 리셋",
-        resolve_result["preprocessed_input"][:60],
+        "context_classifier가 CONTINUE 판정",
+        result["preprocessed_input"][:60],
         True,
     )

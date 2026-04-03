@@ -1,7 +1,7 @@
 ---
 name: verify-test-data
 description: |
-  PostgreSQL, ElasticSearch, Qdrant에 적재된 테스트 데이터가
+  PostgreSQL, MongoDB, Qdrant에 적재된 테스트 데이터가
   test-data-requirements.md의 TYPE-1~4 불완전성 요건을 충족하는지 검증합니다.
   시딩 후 검증, 데이터 증강 후 확인, 정기 점검 시 사용하세요.
 user-invocable: true
@@ -18,8 +18,8 @@ user-invocable: true
 - `docs/agent-guides/test-data-requirements.md`를 검증 기준으로 사용
   - 섹션 4: TYPE-1~4 불완전성 상세 요건 (테이블·컬럼·코드값·이중화 쌍)
   - 섹션 5: 테이블 카탈로그 (★ 테이블 목록, 테이블명, PK)
-  - 섹션 6: 테이블 규모 요약 (총 수, ★ 수, ES 메타 수)
-  - 섹션 7: ES 인덱스 명세 (인덱스별 목표 건수)
+  - 섹션 6: 테이블 규모 요약 (총 수, ★ 수, MongoDB 메타 수)
+  - 섹션 7: MongoDB 컬렉션 명세 (컬렉션별 목표 건수)
   - 섹션 8: Qdrant 컬렉션 명세 (목표 건수, 분포 비율)
 - 각 TYPE(1~4) 별로 PASS/FAIL 판정
 - FAIL 항목에는 원인과 보완 방법 제시
@@ -33,7 +33,7 @@ user-invocable: true
 |------|----------|
 | PostgreSQL (정보계) | 연결 성공, `biz_schema` 존재 |
 | PostgreSQL (이력) | 연결 성공, `sql_exec_log` 존재 |
-| ElasticSearch | 연결 성공, 클러스터 상태 |
+| MongoDB | 연결 성공, 컬렉션 상태 |
 | Qdrant | 연결 성공, 컬렉션 목록 |
 
 ## 2. 데이터 건수 검증
@@ -44,8 +44,8 @@ user-invocable: true
 - `biz_schema` 내 테이블 수가 섹션 6 합계와 일치하는지 (`information_schema.tables`)
 - 각 ★ 테이블 행 수가 최소 건수 이상인지 (★ 목록은 섹션 5에서 확인)
 
-### ES 검증
-- 각 인덱스 문서 수가 섹션 7의 목표 건수 이상인지 (`_count`)
+### MongoDB 검증
+- 각 컬렉션 문서 수가 섹션 7의 목표 건수 이상인지
 
 ### Qdrant 검증
 - 각 컬렉션 포인트 수가 섹션 8의 목표 건수 이상인지
@@ -64,17 +64,17 @@ user-invocable: true
 
 **요구사항 문서 섹션 4 TYPE-2의 핵심 재현 목록에서:**
 
-- PG 실데이터에 ES `code_meta`에 없는 미정의 코드가 존재하는지
-- ES `code_meta`에 미정의 코드가 잘못 포함되어 있지 않은지 (공식 코드만 정의되어야 함)
+- PG 실데이터에 MongoDB `code_meta`에 없는 미정의 코드가 존재하는지
+- MongoDB `code_meta`에 미정의 코드가 잘못 포함되어 있지 않은지 (공식 코드만 정의되어야 함)
 - 각 테이블·컬럼에 대해 미정의 코드가 1건 이상 존재하는지
 
-**PASS 기준**: 요구사항 문서의 모든 TYPE-2 케이스에서 미정의 코드가 PG에 존재하고, ES에는 미포함
+**PASS 기준**: 요구사항 문서의 모든 TYPE-2 케이스에서 미정의 코드가 PG에 존재하고, MongoDB에는 미포함
 
 ## 5. TYPE-3 검증: 메타 설명 부실
 
 **요구사항 문서 섹션 4 TYPE-3의 품질 분포 비율에서:**
 
-- ES `table_meta`/`column_meta`의 설명 품질 분포가 요구사항의 목표 비율과 일치하는지
+- MongoDB `table_meta`/`column_meta`의 설명 품질 분포가 요구사항의 목표 비율과 일치하는지
 - 필수 POOR/MISSING 케이스가 모두 반영되어 있는지
 
 **PASS 기준**: POOR + MISSING 비율이 요구사항 목표 이상이고, 필수 케이스가 모두 존재
@@ -97,9 +97,9 @@ user-invocable: true
 
 ## 8. 교차 정합성 검증
 
-- PG 테이블 목록 ↔ ES `table_meta` 문서 목록 일치
-- PG 코드 컬럼 ↔ ES `code_meta` 코드 그룹 매핑 확인
-- ES `term_dict` 용어 ↔ 실제 컬럼명 매칭 확인
+- PG 테이블 목록 ↔ MongoDB `table_meta` 문서 목록 일치
+- PG 코드 컬럼 ↔ MongoDB `code_meta` 코드 그룹 매핑 확인
+- MongoDB `term_dict` 용어 ↔ 실제 컬럼명 매칭 확인
 
 # 출력 형식
 
@@ -111,7 +111,7 @@ user-invocable: true
 [연결 상태]
   PostgreSQL (정보계) : ✅ 연결 성공
   PostgreSQL (이력)   : ✅ 연결 성공
-  ElasticSearch       : ✅ 연결 성공 (v8.x)
+  MongoDB             : ✅ 연결 성공
   Qdrant              : ✅ 연결 성공
 
 [데이터 건수]
@@ -139,7 +139,7 @@ user-invocable: true
   ...
 
 [교차 정합성]                 ✅ PASS
-  PG↔ES 테이블 매핑   : 일치
+  PG↔MongoDB 테이블 매핑 : 일치
   ...
 
 ══════════════════════════════════════════════

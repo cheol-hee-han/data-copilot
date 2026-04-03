@@ -180,7 +180,7 @@ project-planner ──→ pipeline-designer ──→ design-critic
 - [ ] 입력 전처리 보안 검증 (SQL 인젝션 우회 시뮬레이션)
 - [ ] 프롬프트 인젝션 방어 검증 (영어 + 한국어 패턴)
 - [ ] 유니코드 정규화 우회 검증
-- [ ] 산출물: `docs/design-reviews/20260321-security-audit.md`
+- [ ] 산출물: `docs/reviews/design/20260321-security-audit.md`
 - [ ] **파일 소유권**: `src/utils/security.py`, `src/agents/nodes/interpret/preprocessor.py`(보안 부분만)
 
 ### 게이트 1: Walking Skeleton 검증

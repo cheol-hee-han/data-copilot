@@ -34,14 +34,14 @@ resources/
 from src.utils.resource_loader import load_text_required, load_yaml, load_json, load_es_query
 
 prompt = load_text_required("prompts/reason/plan_system.txt")     # 필수 (없으면 에러)
-terms = load_yaml("domain/domain_dictionary.yaml", default={})    # 선택 (없으면 기본값)
+terms = load_yaml("domain/business_dictionary.yaml", default={})   # 선택 (없으면 기본값)
 body = load_es_query("connectors/elasticsearch/table_meta_query.json", query)
 ```
 
 ## 커스터마이징 우선순위
 
 1. `.env` — 인프라 접속 정보 (LLM, DB, ES, Qdrant)
-2. `domain/domain_dictionary.yaml` — 실제 금융 용어로 교체
+2. `domain/business_dictionary.yaml` — 실제 금융 용어로 교체
 3. `security/pii_columns.yaml` — 실제 PII 컬럼명으로 교체
 4. `prompts/reason/generate_sql_system.txt` — 실제 DB 기반 dialect/few-shot 조정
 5. `prompts/present/visualization_svg.txt` — 차트 스타일 커스터마이징

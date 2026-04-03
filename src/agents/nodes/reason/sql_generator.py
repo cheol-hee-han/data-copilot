@@ -7,30 +7,34 @@ dead_ends를 참고하여 이전 실패 패턴을 반복하지 않는다.
 멀티 DB 라우팅:
     candidate_tables의 db_source(테이블명 시스템코드에서 자동 파싱)를 확인하여
     SQL dialect(postgres, sybase, impala)을 결정한다.
-    크로스 DB(ADW+BDP 혼재) 감지 시 명확화 질문으로 사용자에게 안내한다.
+    크로스 DB(ADW+BDP 혼재) 감지 시 AmbiguitySignal(INFER)로 자동 선택한다.
 
-프롬프트 구성:
+프롬프트 구성 ({슬롯} 치환 방식):
     - 기본: SQL_GENERATOR_SYSTEM (dialect 힌트 내장)
     - 재시도: SQL_GENERATOR_FIX_SECTION (failure_reason 포함)
-    - 테이블 상세: _format_table_details()로 inferred_* 필드를 "(LLM 추론)" 태그와 함께 주입
+    - 테이블 상세: _format_table_for_sql_prompt()로 컬럼·샘플·추론 정보 주입
     - confirmed_terms: CONFIRMED 지식 항목을 자연어로 정리
+    - clarification_context: INFER 추론 결과 + ASK 질의응답 (resolved_signals)
+    - current_date: 현재 날짜 (today_kst)
 
 핵심 함수:
     - sql_generator_node: 메인 노드 함수
-    - _call_llm_for_sql: LLM 호출 + SQL 추출 (explanation 필드는 현재 미사용)
-    - _format_table_details: CandidateTable → 프롬프트용 텍스트 변환
-    - _detect_db_source: 후보 테이블에서 dialect 자동 판정
+    - _build_agentic_prompt: 상태 → 프롬프트 치환 변수 조립
+    - _call_llm_for_sql: LLM 호출 + SQL 추출
+    - _format_table_for_sql_prompt: CandidateTable → 프롬프트용 텍스트 변환
 
 위임 구조:
     - 프롬프트: system_prompts.py의 SQL_GENERATOR_SYSTEM, SQL_GENERATOR_FIX_SECTION
-
-v2.0 (2026-03-25): agentic 전용 프롬프트(dialect 힌트 내장)로 전환.
+    - 명확화 컨텍스트: clarification_context.py의 build_clarification_context
 """
 
 from __future__ import annotations
 
-import time
-
+from src.agents.models.clarification import (
+    AmbiguitySignal,
+    AmbiguityType,
+    ConfidenceLevel,
+)
 from src.agents.state.state import (
     CandidateTable,
     ColumnInfo,
@@ -39,7 +43,10 @@ from src.agents.state.state import (
     ReasoningState,
     TableSelectionStatus,
 )
-from src.connectors.manager import ConnectorManager, get_connector_manager
+from src.connectors.manager import (
+    ConnectorManager,
+    get_connector_manager,
+)
 from src.agents.nodes.system_prompts import (
     SQL_GENERATOR_SYSTEM,
     SQL_GENERATOR_FIX_SECTION,
@@ -52,8 +59,9 @@ from src.utils.llm.prompt import (
     serialize_decomp_slots,
 )
 from src.utils.logger import get_logger
+from src.utils.timezone import today_kst
 from src.utils.tracker import record_prompt_variables
-from src.utils.truncate import format_sql, truncate_log
+from src.utils.truncate import format_sql
 
 logger = get_logger(__name__)
 
@@ -75,6 +83,8 @@ def _format_table_header(ct: CandidateTable) -> str:
     header = f"- {ct.qualified_name}"
     if ct.alt_name:
         header += f" ({ct.alt_name})"
+    if ct.subject_area:
+        header += f" [{ct.subject_area}]"
     if ct.description:
         header += f": {ct.description}"
     return header
@@ -102,10 +112,8 @@ def _format_columns(ct: CandidateTable) -> list[str]:
 
 
 def _format_table_details(ct: CandidateTable) -> list[str]:
-    """join_keys, LLM 추론, 날짜 관찰 라인 목록을 생성한다."""
+    """LLM 추론, 날짜 관찰 라인 목록을 생성한다."""
     lines: list[str] = []
-    if ct.join_keys:
-        lines.append(f"  join_keys: {ct.join_keys}")
     if ct.inferred_entity_scope:
         lines.append(f"  엔티티: {ct.inferred_entity_scope} (LLM 추론)")
     if ct.inferred_functional_usage:
@@ -120,6 +128,10 @@ def _format_table_details(ct: CandidateTable) -> list[str]:
     if not ct.observed_date_columns and ct.key_date_columns:
         for kdc in ct.key_date_columns:
             lines.append(f"  기준컬럼(PK): {kdc.column_name}")
+    if ct.sample_rows:
+        lines.append(f"  샘플 데이터 ({len(ct.sample_rows)}행):")
+        for row in ct.sample_rows[:3]:
+            lines.append(f"    {row}")
     return lines
 
 
@@ -144,33 +156,59 @@ async def sql_generator_node(state: PipelineState) -> dict:
     sources.discard("")
 
     if len(sources) > 1:
-        adw_tables = [
-            ct.qualified_name for ct in reason.candidate_tables
-            if (ct.db_source or ConnectorManager.parse_db_source(ct.table_name)) == "adw"
+        # ── T4: Cross-DB → AmbiguitySignal(INFER) ──
+        # 전략 §2.3 T4: 사용자는 DB 아키텍처를 모르므로
+        # 항상 INFER — 현재 접근 가능한 DB(primary)를 자동 선택
+        primary_source = dialect  # 현재 커넥터 기준 DB
+        chosen_tables = [
+            ct.qualified_name
+            for ct in reason.candidate_tables
+            if (
+                ct.db_source
+                or ConnectorManager.parse_db_source(
+                    ct.table_name,
+                )
+            ) == primary_source
+            or not ct.db_source
         ]
-        bdp_tables = [
-            ct.qualified_name for ct in reason.candidate_tables
-            if (ct.db_source or ConnectorManager.parse_db_source(ct.table_name)) == "bigdata"
+        other_tables = [
+            ct.qualified_name
+            for ct in reason.candidate_tables
+            if ct.qualified_name not in chosen_tables
         ]
-        reason.phase = Phase.VERIFYING
-        question = (
-            "요청하신 데이터가 서로 다른 시스템에 있습니다:\n"
-            f"  - 정보계 DW(ADW): {', '.join(adw_tables)}\n"
-            f"  - 빅데이터(BDP): {', '.join(bdp_tables)}\n"
-            "한 번의 SQL로 조회할 수 없어 각각 따로 조회해야 합니다.\n"
-            "어느 쪽 데이터를 먼저 조회할까요?"
+        signal = AmbiguitySignal(
+            source_node="sql_generator",
+            ambiguity_type=AmbiguityType.TABLE,
+            decision="INFER",
+            confidence=ConfidenceLevel.MEDIUM,
+            question=(
+                "요청하신 데이터가 서로 다른 "
+                "시스템에 분산되어 있습니다."
+            ),
+            inferred_value=(
+                f"{primary_source} DB에서 조회 "
+                f"({', '.join(chosen_tables)})"
+            ),
+            reasoning=(
+                f"현재 접근 가능한 {primary_source} "
+                "DB의 테이블을 우선 사용합니다. "
+                f"제외된 테이블: {', '.join(other_tables)}"
+            ),
+        )
+        logger.info(
+            "T4 Cross-DB INFER",
+            primary=primary_source,
+            chosen=chosen_tables,
+            excluded=other_tables,
         )
         return {
             "reason": reason,
-            "awaiting_clarification": True,
-            "clarification_turns": state.clarification_turns + 1,
-            "clarification_question": question,
-            "formatted_response": question,
+            "pending_signals": [signal],
         }
 
     # agentic 전용 프롬프트 조립
     prompt, prompt_vars = _build_agentic_prompt(
-        reason, state.preprocessed_input, dialect,
+        reason, state.preprocessed_input, dialect, state,
     )
 
     try:
@@ -206,6 +244,7 @@ def _build_agentic_prompt(
     reason: ReasoningState,
     original_query: str,
     dialect: str,
+    state: PipelineState,
 ) -> tuple[str, dict[str, str]]:
     """SQL_GENERATOR_SYSTEM 템플릿에 상태를 주입한다.
 
@@ -226,14 +265,6 @@ def _build_agentic_prompt(
         _format_table_for_sql_prompt(ct)
         for ct in active_tables
     ) if active_tables else "(후보 테이블 없음)"
-
-    # 조인 힌트 (각 테이블의 join_keys 기반)
-    join_entries = [
-        f"{ct.qualified_name}: join_keys={ct.join_keys}"
-        for ct in active_tables
-        if ct.join_keys
-    ]
-    join_text = "\n".join(join_entries) if join_entries else "(미확인)"
 
     # 검증된 활용사례 SQL (관련 판정분만, reason 포함)
     relevant = [
@@ -266,16 +297,23 @@ def _build_agentic_prompt(
             "{fix_instruction}", reason.failure_reason,
         )
 
+    # 명확화 컨텍스트 (INFER 추론 + ASK Q&A)
+    from src.agents.utils.clarification_context import (
+        build_clarification_context,
+    )
+    clarification_text = build_clarification_context(state)
+
     prompt = SQL_GENERATOR_SYSTEM
     replacements = {
+        "{current_date}": today_kst().isoformat(),
         "{original_query}": original_query or "",
         **serialize_decomp_slots(decomp),
         "{confirmed_terms}": confirmed_text,
         "{tables}": tables_text,
-        "{join_path}": join_text,
         "{reference_sqls}": ref_text,
         "{dead_ends}": dead_text,
         "{fix_section}": fix_text,
+        "{clarification_context}": clarification_text or "(없음)",
         "{dialect}": dialect,
     }
     prompt, variables = render_prompt(prompt, replacements)

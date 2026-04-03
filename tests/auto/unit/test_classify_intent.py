@@ -35,8 +35,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.agents.nodes.interpret.intent_classifier import (
-    classify_intent_node,
+from src.agents.nodes.interpret.context_classifier import (
+    context_classifier_node,
 )
 from src.services.intent_resolver import (
     _map_category_to_intent,
@@ -207,7 +207,7 @@ class TestParseLegacyResponse:
 async def test_classify_data_extraction_live():
     """실제 LLM 호출로 데이터 추출 의도를 분류한다."""
     state = PipelineState(preprocessed_input="이번 달 신규 고객 수 알려줘")
-    result = await classify_intent_node(state)
+    result = await context_classifier_node(state)
 
     intent = result["intent"]
     confidence = result["intent_confidence"]
@@ -228,7 +228,7 @@ async def test_classify_data_extraction_live():
 async def test_classify_casual_talk_live():
     """실제 LLM 호출로 일반 대화를 분류한다."""
     state = PipelineState(preprocessed_input="안녕하세요 좋은 아침이에요")
-    result = await classify_intent_node(state)
+    result = await context_classifier_node(state)
 
     intent = result["intent"]
     log_test_case(logger, "test_classify_casual_talk_live",
@@ -248,7 +248,7 @@ async def test_classify_casual_talk_live():
 async def test_classify_analysis_live():
     """실제 LLM 호출로 데이터 분석 의도를 분류한다."""
     state = PipelineState(preprocessed_input="분기별 대출 추이를 분석해줘")
-    result = await classify_intent_node(state)
+    result = await context_classifier_node(state)
 
     intent = result["intent"]
     log_test_case(logger, "test_classify_analysis_live",

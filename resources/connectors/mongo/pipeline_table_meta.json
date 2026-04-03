@@ -22,10 +22,10 @@
           "as": "col",
           "in": {
             "name": "$$col.name",
-            "alt_name": {"$ifNull": ["$$col.column_alt_name", ""]},
-            "type": {"$ifNull": ["$$col.column_type", ""]},
-            "description": {"$ifNull": ["$$col.column_desc", ""]},
-            "is_pk": {"$ifNull": ["$$col.column_pk", false]}
+            "alt_name": {"$ifNull": ["$$col.alt_name", ""]},
+            "type": {"$ifNull": ["$$col.data_type", ""]},
+            "description": {"$ifNull": ["$$col.desc", ""]},
+            "is_pk": {"$ifNull": ["$$col.pk", false]}
           }
         }
       }

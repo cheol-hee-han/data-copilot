@@ -48,4 +48,4 @@ type: project
 - PII_COLUMNS 목록이 sql_validator.py와 security.py에 분산
 
 ## 감사 문서 위치
-`docs/design-reviews/20260321-security-audit.md`
+`docs/reviews/design/20260321-security-audit.md`

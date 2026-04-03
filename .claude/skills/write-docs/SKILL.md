@@ -37,7 +37,9 @@ user_invocable: true
 | `agent-guides/` | AI 서브에이전트 참조 지침서·체크리스트·포맷 명세 | `{주제}.md` |
 | `architecture/` | 전체적인 프로젝틍 아키텍처 설계 | `{주제}.md` |
 | `data-generation-rules/` | 테스트 데이터 생성 시 불완전성·분포·품질 규칙 | `{NN}-{주제}.md` |
-| `design-reviews/` | 설계 리뷰, 보안 감사 등 시점별 평가 기록 | `YYYYMMDD-{주제}.md` |
+| `reviews/code/` | 코드 리뷰 보고서 | `YYYYMMDD-{주제}.md` |
+| `reviews/design/` | 설계 리뷰, 보안 감사 등 시점별 평가 기록 | `YYYYMMDD-{주제}.md` |
+| `design/` | 기능 설계 문서 | `{주제}.md` |
 | `guides/` | 개발자·운영자 대상 실행 가이드 (환경 구성, 배포, 운영) | `{주제}-guide.md` |
 | `strategy-proposals/` | 현재 설계의 문제 분석 + 구체적 개선안 제안서 | `{주제}-strategy.md` |
 

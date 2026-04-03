@@ -42,9 +42,12 @@ _NODE_LAYER: dict[str, str] = {
     "classify_intent": "interpret",
     "normalize_query": "interpret",
     "clarify": "interpret",
-    "planner": "reason",
+    "reasoning_preparer": "reason",
     "context_explorer": "reason",
-    "confidence_evaluator": "reason",
+    "knowledge_fetcher": "reason",
+    "knowledge_interpreter": "reason",
+    "readiness_gate": "reason",
+    "recovery_agent": "reason",
     "sql_generator": "reason",
     "sql_validator": "reason",
     "recovery_planner": "reason",
@@ -1177,7 +1180,7 @@ def save_report(
     if output_path is None:
         run_id = trace_data.get("run_id", "unknown")
         output_path = Path(
-            f"evaluation/traces/report_{run_id}.md"
+            f"logs/traces/report_{run_id}.md"
         )
 
     path = Path(output_path)

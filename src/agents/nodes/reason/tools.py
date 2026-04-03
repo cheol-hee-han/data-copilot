@@ -1,21 +1,40 @@
 """탐색 도구 래퍼 — 기존 커넥터/서비스를 에이전틱 코어에서 호출.
 
-context_explorer 노드가 ExecutionStep.tool 값에 따라 호출하는 도구 함수들.
-각 함수는 ConnectorManager를 통해 실제/Dummy 데이터 소스를 투명하게 전환한다.
+context_explorer·recovery_agent 노드가 ExecutionStep.tool 값에 따라
+호출하는 도구 함수들. 각 함수는 ConnectorManager를 통해
+실제/Dummy 데이터 소스를 투명하게 전환한다.
+
+호출 구조:
+    LLM이 execution_plan에 {"tool": "도구명", "input": "문자열"} 을 생성하면,
+    knowledge_fetcher가 execute_tool(name, input)을 호출한다.
+    복수 파라미터 도구(DB 직접 조회류)는 TOOL_MAP 어댑터가
+    쉼표 구분 문자열을 파싱하여 실제 함수 시그니처에 맞춘다.
 
 도구 목록:
+    검색 도구 (단일 파라미터, 문자열 검색어):
     - search_use_cases: Qdrant 유사 SQL 벡터 검색 (하이브리드 + Reranker 내장)
-    - search_table_meta: ES 테이블/컬럼 메타데이터 검색
-    - search_code_meta: ES 코드 필드/코드값 검색
+    - search_table_meta: MongoDB 테이블/컬럼 메타데이터 검색
+    - search_code_meta: MongoDB 코드 필드/코드값 검색
     - search_manual: Qdrant 업무 매뉴얼 벡터 검색
-    - search_glossary: ES 용어 사전 검색
-    - get_sample_rows: 정보계 DB에서 테이블 샘플 데이터 조회 (LIMIT 적용)
-    - get_date_distribution: 날짜 컬럼의 MIN/MAX 분포 조회
-    - detect_date_pattern: 날짜 컬럼의 포맷 패턴 추론 (YYYYMMDD 등)
+    - search_glossary: MongoDB 용어 사전 검색
+
+    DB 직접 조회 도구 (복수 파라미터, 쉼표 구분):
+    - get_sample_rows: 테이블 샘플 데이터 조회 (LIMIT 적용)
+    - search_column_values: 특정 컬럼 키워드 LIKE 검색 (필터 값 탐색)
+    - get_column_profile: 컬럼 통계 조회 (건수, 고유값, NULL율, MIN/MAX)
+    - get_date_distribution: 날짜 컬럼 DISTINCT 분포 조회
+
+    분석 도구 (내부 전용, TOOL_MAP 미등록):
+    - detect_date_pattern: 날짜 DISTINCT 값에서 입도 패턴 추론
     - extract_hints_from_use_cases: 유사 SQL에서 sqlglot 구조적 힌트 추출
 
-    TOOL_MAP: tool 이름 → 함수 매핑 딕셔너리
-    execute_tool: TOOL_MAP을 통해 도구를 이름으로 실행하는 디스패처
+    디스패처:
+    - TOOL_MAP: tool 이름 → 함수 매핑 딕셔너리
+    - execute_tool: TOOL_MAP을 통해 도구를 이름으로 실행
+
+SQL 인젝션 방지:
+    DB 직접 조회 도구는 모두 _IDENT_RE(식별자 화이트리스트)로
+    테이블명·컬럼명을 검증한 뒤 실행한다.
 """
 
 from __future__ import annotations
@@ -42,6 +61,8 @@ __all__ = [
     "search_manual",
     "search_glossary",
     "get_sample_rows",
+    "search_column_values",
+    "get_column_profile",
     "extract_hints_from_use_cases",
     "get_date_distribution",
     "detect_date_pattern",
@@ -146,6 +167,129 @@ async def get_sample_rows(
         return []
 
 
+async def search_column_values(
+    table_name: str,
+    column_name: str,
+    keyword: str,
+    limit: int = 20,
+    schema_name: str = "",
+    db_source: str = "",
+) -> list[str]:
+    """특정 컬럼에서 키워드를 포함하는 고유값을 검색한다.
+
+    WHERE column LIKE '%keyword%' 로 실제 DB 값을 조회하여
+    필터 조건에 사용할 정확한 값을 찾는다.
+
+    SQL 인젝션 방지: 식별자 화이트리스트 + 키워드 sanitize 후 실행.
+    TOOL_MAP에 어댑터(_tool_search_column_values)로 등록됨.
+    """
+    if not _IDENT_RE.match(table_name):
+        return []
+    if not _IDENT_RE.match(column_name):
+        return []
+    if schema_name and not _IDENT_RE.match(schema_name):
+        return []
+
+    sanitized_kw = keyword.replace("'", "''").replace("\\", "\\\\")
+
+    qualified = f"{schema_name}.{table_name}" if schema_name else table_name
+
+    mgr = get_connector_manager()
+    db = mgr.get_query_db(db_source=db_source)
+
+    if db.dialect == "tsql":
+        sql = (
+            f"SELECT DISTINCT TOP {limit} {column_name} "
+            f"FROM {qualified} "
+            f"WHERE {column_name} LIKE '%{sanitized_kw}%' "
+            f"ORDER BY {column_name}"
+        )
+    else:
+        sql = (
+            f"SELECT DISTINCT {column_name} "
+            f"FROM {qualified} "
+            f"WHERE {column_name} LIKE '%{sanitized_kw}%' "
+            f"ORDER BY {column_name} LIMIT {limit}"
+        )
+    try:
+        result = await db.execute_query(sql)
+        if hasattr(result, "rows") and isinstance(result.rows, list):
+            return [
+                str(row.get(column_name, ""))
+                for row in result.rows
+            ]
+        return []
+    except Exception as e:
+        logger.warning(
+            "search_column_values 실패",
+            table=table_name, column=column_name,
+            keyword=keyword, error=str(e),
+        )
+        return []
+
+
+async def get_column_profile(
+    table_name: str,
+    column_name: str,
+    schema_name: str = "",
+    db_source: str = "",
+) -> dict:
+    """컬럼 통계를 조회한다 (건수, 고유값 수, NULL율, MIN/MAX).
+
+    recovery_agent가 0건 원인 진단, 컬럼 특성 파악에 사용한다.
+    SQL 인젝션 방지: 식별자 화이트리스트 검증 후 실행.
+    TOOL_MAP에 어댑터(_tool_get_column_profile)로 등록됨.
+    """
+    if not _IDENT_RE.match(table_name):
+        return {}
+    if not _IDENT_RE.match(column_name):
+        return {}
+    if schema_name and not _IDENT_RE.match(schema_name):
+        return {}
+
+    qualified = f"{schema_name}.{table_name}" if schema_name else table_name
+
+    mgr = get_connector_manager()
+    db = mgr.get_query_db(db_source=db_source)
+
+    sql = (
+        f"SELECT "
+        f"COUNT(*) AS total_rows, "
+        f"COUNT({column_name}) AS non_null_count, "
+        f"COUNT(DISTINCT {column_name}) AS distinct_count, "
+        f"MIN({column_name}) AS min_val, "
+        f"MAX({column_name}) AS max_val "
+        f"FROM {qualified}"
+    )
+    try:
+        result = await db.execute_query(sql)
+        if hasattr(result, "rows") and result.rows:
+            row = result.rows[0]
+            total = int(row.get("total_rows", 0))
+            non_null = int(row.get("non_null_count", 0))
+            return {
+                "total_rows": total,
+                "non_null_count": non_null,
+                "null_count": total - non_null,
+                "null_rate": round(
+                    (total - non_null) / total, 3,
+                ) if total > 0 else 0.0,
+                "distinct_count": int(
+                    row.get("distinct_count", 0),
+                ),
+                "min_val": str(row.get("min_val", "")),
+                "max_val": str(row.get("max_val", "")),
+            }
+        return {}
+    except Exception as e:
+        logger.warning(
+            "get_column_profile 실패",
+            table=table_name, column=column_name,
+            error=str(e),
+        )
+        return {}
+
+
 def extract_hints_from_use_cases(use_cases: list[dict]) -> StructuralHints:
     """유사 SQL 목록에서 sqlglot 기반 구조적 힌트를 추출한다."""
     hints_list = [
@@ -158,6 +302,7 @@ def extract_hints_from_use_cases(use_cases: list[dict]) -> StructuralHints:
     return StructuralHints(**merged)
 
 
+# SQL 인젝션 방지 — 영문자/언더스코어로 시작하는 식별자만 허용
 _IDENT_RE = _re.compile(r"^[A-Za-z_]\w*$")
 
 
@@ -252,15 +397,26 @@ def detect_date_pattern(dates: list[str]) -> str:
 
 
 # ── TOOL_MAP 어댑터 ───────────────────────────────────
-# get_sample_rows, get_date_distribution은 복수 파라미터 함수이므로
+# DB 직접 조회 도구는 복수 파라미터이므로
 # execute_tool(name, str) 시그니처에 맞추는 래퍼를 정의한다.
-# input 형식: "테이블명" 또는 "테이블명,컬럼명" (쉼표 구분)
+# 쉼표 구분 문자열을 파싱하여 실제 함수에 전달한다.
+# 스키마 포함 시 "스키마.테이블명"을 _split_qualified_name으로 분리한다.
+
+
+def _split_qualified_name(qualified: str) -> tuple[str, str]:
+    """'schema.table' → (schema, table), 'table' → ('', table)."""
+    if "." in qualified:
+        schema, _, table = qualified.rpartition(".")
+        return schema, table
+    return "", qualified
+
 
 async def _tool_get_sample_rows(tool_input: str) -> Any:
     """get_sample_rows TOOL_MAP 어댑터."""
     parts = [p.strip() for p in tool_input.split(",")]
-    table_name = parts[0] if parts else ""
-    return await get_sample_rows(table_name)
+    raw_table = parts[0] if parts else ""
+    schema_name, table_name = _split_qualified_name(raw_table)
+    return await get_sample_rows(table_name, schema_name=schema_name)
 
 
 async def _tool_get_date_distribution(
@@ -268,11 +424,52 @@ async def _tool_get_date_distribution(
 ) -> Any:
     """get_date_distribution TOOL_MAP 어댑터."""
     parts = [p.strip() for p in tool_input.split(",")]
-    table_name = parts[0] if parts else ""
+    raw_table = parts[0] if parts else ""
     date_column = parts[1] if len(parts) > 1 else ""
-    if not table_name or not date_column:
+    if not raw_table or not date_column:
         return []
-    return await get_date_distribution(table_name, date_column)
+    schema_name, table_name = _split_qualified_name(raw_table)
+    return await get_date_distribution(
+        table_name, date_column, schema_name=schema_name,
+    )
+
+
+async def _tool_get_column_profile(
+    tool_input: str,
+) -> Any:
+    """get_column_profile TOOL_MAP 어댑터.
+
+    입력 형식: "테이블명,컬럼명" 또는 "스키마.테이블명,컬럼명"
+    """
+    parts = [p.strip() for p in tool_input.split(",")]
+    raw_table = parts[0] if parts else ""
+    column_name = parts[1] if len(parts) > 1 else ""
+    if not raw_table or not column_name:
+        return {}
+    schema_name, table_name = _split_qualified_name(raw_table)
+    return await get_column_profile(
+        table_name, column_name, schema_name=schema_name,
+    )
+
+
+async def _tool_search_column_values(
+    tool_input: str,
+) -> Any:
+    """search_column_values TOOL_MAP 어댑터.
+
+    입력 형식: "테이블명,컬럼명,키워드" 또는 "스키마.테이블명,컬럼명,키워드"
+    """
+    parts = [p.strip() for p in tool_input.split(",")]
+    raw_table = parts[0] if parts else ""
+    column_name = parts[1] if len(parts) > 1 else ""
+    keyword = parts[2] if len(parts) > 2 else ""
+    if not raw_table or not column_name or not keyword:
+        return []
+    schema_name, table_name = _split_qualified_name(raw_table)
+    return await search_column_values(
+        table_name, column_name, keyword,
+        schema_name=schema_name,
+    )
 
 
 # ── 도구 디스패치 맵 ──────────────────────────────────
@@ -283,6 +480,8 @@ TOOL_MAP: dict[str, Any] = {
     "search_manual": search_manual,
     "search_glossary": search_glossary,
     "get_sample_rows": _tool_get_sample_rows,
+    "search_column_values": _tool_search_column_values,
+    "get_column_profile": _tool_get_column_profile,
     "get_date_distribution": _tool_get_date_distribution,
 }
 

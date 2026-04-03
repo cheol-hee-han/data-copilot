@@ -12,6 +12,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "openai>=1.0.0",
     "langgraph>=0.2.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
     "langchain-core>=0.3.0",
     
     # Web Framework
@@ -62,6 +63,7 @@ dependencies = [
     # Utilities
     "httpx>=0.27.0",
     "structlog>=24.0.0",
+    "PyYAML>=5.0",
     
     # Tracing (외부망 개발 환경 전용, 폐쇄망에서는 비활성화)
     "langsmith>=0.1.0",

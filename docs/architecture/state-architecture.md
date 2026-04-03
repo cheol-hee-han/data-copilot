@@ -1,11 +1,13 @@
 # State Architecture 비판적 분석 — 데이터 활용 파이프라인 관점
 
-> **Version 2.0** (2026-03-29)
+> **Version 2.2** (2026-04-02)
 > 현재 `PipelineState` + `ReasoningState` 구조가 "데이터 분석가의 사고 흐름"을 적절히 모델링하고 있는지
 > 다각도로 분석한다.
 >
 > v1.1 (2026-03-28): 초안 작성
 > v2.0 (2026-03-29): table_verifier/TableResolution 삭제 반영, 중복 분석 갱신, 권고안 재정리, KI 승격 갭 반영
+> v2.1 (2026-04-01): 노드 리네임 반영 (context_explorer→knowledge_fetcher+knowledge_interpreter, confidence_evaluator→readiness_gate, recovery_planner→recovery_agent, clarify→clarification_handler, preprocessor 삭제), 신규 state 필드 기재, W/R 약어 갱신
+> v2.2 (2026-04-02): planner→reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용), W/R 약어 갱신 (PRP)
 
 ---
 
@@ -39,7 +41,7 @@
 
 | 사고 단계 | State 매핑 | 충분도 |
 | --- | --- | --- |
-| ① 요청 해석 | `user_input` → `preprocessed_input` → `intent` → `normalized_query` | **양호** |
+| ① 요청 해석 | `user_input` → `intent` → `normalized_query` (sanitize는 runner.py에서 처리) | **양호** |
 | ② 초기 가설 | `hypotheses`, `query_decomposition`, `execution_plan` | **양호** |
 | ③ 지식 탐색 | `knowledge_items`, `candidate_tables`, `structural_hints`, `explored_use_cases` | **양호** |
 | ④ 이해 심화 | `KnowledgeItem.promote()`, `ConfidenceStatus` 전이 | **부분적** — 승격 경로 불완전 |
@@ -47,6 +49,30 @@
 | ⑥ 결론·검증 | `generated_sql` → `validated_sql` → `sql_result` | **양호** |
 
 **"양호"와 "부분적" 사이의 간극이 이 문서의 분석 대상이다.**
+
+### 1.3 v2.1에서 추가된 State 필드
+
+| 필드 | 타입 | 용도 |
+| --- | --- | --- |
+| `exploration_phase` | `Literal["initial", "recovery"]` | 현재 탐색이 최초 탐색인지 recovery 재탐색인지 구분 |
+| `recovery_entry_source` | `str` | recovery 진입 시 트리거 원인 (어느 노드/조건에서 recovery로 전환되었는지) |
+| `conflicted_bounce_count` | `int` | CONFLICTED 상태에서 사용자 확인 왕복 횟수 추적 |
+| `is_force_generated` | `bool` | 탐색 불충분 상태에서 강제 SQL 생성 여부 플래그 |
+| `pending_signals` | `list[AmbiguitySignal]` | 아직 사용자에게 전달되지 않은 모호성 시그널 대기열 |
+| `resolved_signals` | `Annotated[list[AmbiguitySignal], operator.add]` | 사용자 답변으로 해소된 모호성 시그널 (append-only) |
+
+### 1.4 노드 리네임 및 W/R 약어 변경 이력 (v2.1)
+
+| 이전 노드명 | 이전 약어 | 현재 노드명 | 현재 약어 | 비고 |
+| --- | --- | --- | --- | --- |
+| `context_explorer` | EXP | `knowledge_fetcher` | FET | 도구 호출·데이터 수집 담당 |
+| — | — | `knowledge_interpreter` | INT | 배치 해석·KI 승격 담당 (EXP에서 분리) |
+| `confidence_evaluator` | EVL | `readiness_gate` | RDG | 준비도 판정 + 라우팅 |
+| `recovery_planner` | RCV | `recovery_agent` | RCV | 약어 동일, 노드명만 변경 |
+| `preprocessor` | — | *(삭제)* | — | sanitize 로직이 runner.py로 이동 |
+| `table_verifier` | — | *(삭제)* | — | 기능이 knowledge_interpreter에 흡수 |
+| `clarify` | — | `clarification_handler` | — | Interpret/Reason 명확화 통합 |
+| `planner` | PLN | `reasoning_preparer` | PRP | 규칙 기반, LLM/프롬프트 미사용 |
 
 ---
 
@@ -72,7 +98,7 @@ class DeadEnd:
 ```
 
 "이 방향은 안 됐다 → 같은 실수를 반복하지 않는다" 패턴을 명시적으로 모델링.
-`recovery_planner`가 dead_ends를 참조하여 새 가설을 생성하는 구조가 이를 뒷받침한다.
+`recovery_agent`가 dead_ends를 참조하여 새 가설을 생성하는 구조가 이를 뒷받침한다.
 
 ### 2.3 루프 가드 (LoopGuard)
 
@@ -113,7 +139,7 @@ class DeadEnd:
 - 무한 재해석 루프 위험
 - 디버깅·재현이 어려워짐
 
-현재 구조에서는 `recovery_planner`가 새 가설을 세우는 것으로 대체하고 있으며,
+현재 구조에서는 `recovery_agent`가 새 가설을 세우는 것으로 대체하고 있으며,
 이것이 "재해석"의 실질적 효과를 내고 있다.
 
 **권장:** 당장 변경하지 않되, Reason 계층이 "원래 해석을 이렇게 보정했다"를 기록하는
@@ -145,7 +171,7 @@ KnowledgeItem(key="glossary:연체율", value="연체금액/대출잔액×100", 
 
 1. `sql_generator`가 "어떤 테이블의 어떤 컬럼이 어떤 요구사항에 매핑되는지" 알려면
    knowledge_items를 순회하며 key 파싱 → 간접 매칭해야 함
-2. `confidence_evaluator`가 "핵심 항목이 모두 해소되었는지" 판단할 때도 동일한 문제
+2. `readiness_gate`가 "핵심 항목이 모두 해소되었는지" 판단할 때도 동일한 문제
 3. `CandidateTable.columns`가 컬럼 목록을 보유하지만,
    "이 컬럼이 요청의 어떤 슬롯에 매핑되는지"는 담지 못함
 
@@ -181,7 +207,7 @@ class Hypothesis:
 
 **영향:**
 
-- `confidence_evaluator`가 "전체 탐색의 준비도"를 산출하지만,
+- `readiness_gate`가 "전체 탐색의 준비도"를 산출하지만,
   이것이 현재 활성 가설의 적합도와 직접 연결되지 않음
 - 탐색 중에 "이 가설은 50% 맞는 것 같은데 다른 가설도 병행해볼까"라는 판단 불가
 - 현재는 하나의 가설이 완전히 실패해야만(`FAILED`) 다음 가설로 넘어감
@@ -193,7 +219,7 @@ class Hypothesis:
 - 소형 LLM이 확신도를 정확히 산출하기 어려움 (숫자 추정 약점)
 - 현재의 순차적 가설 탐색이 단순하면서도 효과적
 
-실제로 현재 `confidence_evaluator`의 3차원 점수(term_resolution, table_coverage, join_path)가
+실제로 현재 `readiness_gate`의 3차원 점수(term_resolution, table_coverage, join_path)가
 간접적으로 활성 가설의 유효성을 평가하고 있다.
 
 **권장:** `Hypothesis`에 `confidence: float = 0.0` 필드를 추가하는 것은 저비용.
@@ -207,13 +233,13 @@ LLM에 의존하지 않으므로 소형 모델에서도 안정적.
 
 **현상:**
 
-planner가 생성한 UNRESOLVED KI(예: `measure:연체율`)가 context_explorer의 탐색으로 사실상 해소되었음에도
-UNRESOLVED 상태로 남는다. context_explorer는 도구 결과에서 **새로운 KI를 추가**하지만(예: `glossary:연체율` → PROBABLE),
+reasoning_preparer가 생성한 UNRESOLVED KI(예: `measure:연체율`)가 `knowledge_fetcher`+`knowledge_interpreter`의 탐색으로 사실상 해소되었음에도
+UNRESOLVED 상태로 남는다. `knowledge_interpreter`는 도구 결과에서 **새로운 KI를 추가**하지만(예: `glossary:연체율` → PROBABLE),
 기존 UNRESOLVED KI와 연결하여 승격하지 않는다.
 
 ```
-planner 생성:      measure:연체율     → UNRESOLVED (0.0)   ← 해소 안됨
-explorer 추가:     glossary:연체율    → PROBABLE (0.6)     ← 새 KI로만 추가
+reasoning_preparer 생성: measure:연체율 → UNRESOLVED (0.0)   ← 해소 안됨
+interpreter 추가:  glossary:연체율    → PROBABLE (0.6)     ← 새 KI로만 추가
 결과: 둘 다 공존, measure:연체율은 여전히 UNRESOLVED
 ```
 
@@ -228,10 +254,10 @@ for ki in knowledge_items:
 
 **영향:**
 
-1. `confidence_evaluator`에서 `all_critical_confirmed()` 체크 시 핵심 KI가 영구 UNRESOLVED
+1. `readiness_gate`에서 `all_critical_confirmed()` 체크 시 핵심 KI가 영구 UNRESOLVED
 2. readiness 점수에서 용어 해소율이 실제보다 낮게 산출
 3. 불필요한 추가 탐색 루프 또는 조기 재계획(REPLAN) 발생
-4. `recovery_planner`에 이미 해소된 항목이 `unresolved_items`로 전달
+4. `recovery_agent`에 이미 해소된 항목이 `unresolved_items`로 전달
 
 **현재 대응 (v2.0):**
 
@@ -243,7 +269,7 @@ LLM이 기존 UNRESOLVED KI의 key를 그대로 사용해 응답하도록 유도
 
 - LLM이 지시를 따르지 않으면 여전히 새 key로 KI를 생성할 수 있음
 - rule-based fallback 경로에서는 UNRESOLVED KI 목록이 전달되지 않음
-- `confidence_evaluator`에서 추가적인 크로스매칭 로직이 있으면 더 안정적
+- `readiness_gate`에서 추가적인 크로스매칭 로직이 있으면 더 안정적
 
 ---
 
@@ -268,7 +294,7 @@ SQL 검증이 실패하면 `failure_type`/`failure_reason`에 실패 정보가 �
 
 **영향:**
 
-- REPLAN 시 recovery_planner가 knowledge_items를 참조하는데,
+- REPLAN 시 recovery_agent가 knowledge_items를 참조하는데,
   검증 실패에서 얻은 교훈이 반영되지 않아 같은 실수를 반복할 수 있음
 
 **반론:**
@@ -280,7 +306,7 @@ LLM이 컨텍스트에서 수정 사항을 이해한다.
 
 **권장:** `sql_validator`에서 검증 실패 시 `knowledge_items`에 부정 지식을 추가하는 로직 구현.
 예: `KnowledgeItem(key="negative:LOAN_STATUS", value="TB_LOAN에 존재하지 않음", status="CONFIRMED")`.
-구현 비용이 낮고 recovery_planner의 판단 품질을 직접 개선할 수 있다.
+구현 비용이 낮고 recovery_agent의 판단 품질을 직접 개선할 수 있다.
 
 ---
 
@@ -296,19 +322,18 @@ PLANNING → EXPLORING → VERIFYING → GENERATING → VALIDATING → REPLANNIN
 
 ```python
 # 실제 phase 전이 (코드에서 추출)
-PLANNING → EXPLORING (일반)
-PLANNING → GENERATING (fast-path)
+PLANNING → EXPLORING (reasoning_preparer → knowledge_fetcher 직행)
 EXPLORING → EXPLORING (반복 탐색)
-EXPLORING → VERIFYING (confidence_evaluator가 설정)
-EXPLORING → GENERATING (confidence_evaluator가 설정)
-EXPLORING → REPLANNING (confidence_evaluator가 설정)
+EXPLORING → VERIFYING (readiness_gate가 설정)
+EXPLORING → GENERATING (readiness_gate가 설정)
+EXPLORING → REPLANNING (readiness_gate가 설정)
 GENERATING → VALIDATING
 VALIDATING → GENERATING (수정 재시도)
 REPLANNING → EXPLORING (새 가설)
 REPLANNING → DONE (가설 소진)
 ```
 
-`VERIFYING`은 `confidence_evaluator`에서 설정되며, 의미가 다소 모호하다.
+`VERIFYING`은 `readiness_gate`에서 설정되며, 의미가 다소 모호하다.
 또한 `REPLANNING → EXPLORING`은 사실상 "다시 처음부터"인데
 Phase는 `REPLANNING`에서 `EXPLORING`으로 **역행**한다.
 
@@ -328,7 +353,7 @@ Phase는 주로 **로깅·진단 용도**이다.
 **현상:**
 
 ```
-normalize_query → ambiguities 발견 → clarify → END → (사용자 답변) → 처음부터 재시작
+normalize_query → ambiguities 발견 → clarification_handler → END → (사용자 답변) → 처음부터 재시작
 ```
 
 명확화 후 사용자가 답변하면 **파이프라인이 처음부터 재실행**된다.
@@ -347,7 +372,7 @@ normalize_query → ambiguities 발견 → clarify → END → (사용자 답변
 **반론:**
 
 파이프라인 재실행 시 이전 턴의 conversation_history가 포함되므로,
-history_resolver → intent_classifier → normalizer가 이전 맥락을 반영한 질의를 생성한다.
+context_classifier → normalizer가 이전 맥락을 반영한 질의를 생성한다.
 "처음부터지만 이전 대화 맥락이 있어서 더 빨리 도달"하는 구조.
 
 **권장:** 현행 유지. Reason 상태를 세션에 캐싱하여 이어가는 구조는 복잡도가 매우 높고,
@@ -375,11 +400,11 @@ history_resolver → intent_classifier → normalizer가 이전 맥락을 반영
 **반론:**
 
 `UNRESOLVED`의 이유를 구분하려면 상태 관리 복잡도가 급증한다.
-현재 `confidence_evaluator`가 "UNRESOLVED 항목이 남아있으면 탐색 계속"이라는
+현재 `readiness_gate`가 "UNRESOLVED 항목이 남아있으면 탐색 계속"이라는
 단순 규칙으로 이를 충분히 대체하고 있다.
 
 **권장:** `KnowledgeItem`에 `unresolved_reason: Literal["not_searched", "not_found", "ambiguous"] = "not_searched"`를
-추가하면 저비용으로 구분 가능. `recovery_planner`가 "검색했는데 못 찾은 것"과
+추가하면 저비용으로 구분 가능. `recovery_agent`가 "검색했는데 못 찾은 것"과
 "아직 검색 안 한 것"을 구분하여 전략을 차별화할 수 있다.
 
 ---
@@ -394,7 +419,7 @@ history_resolver → intent_classifier → normalizer가 이전 맥락을 반영
 | 가설 기반 탐색 | ★★★★☆ | Hypothesis + ExecutionStep + DeadEnd 삼각 구조가 효과적. 가설별 확신도만 부재 |
 | 점진적 지식 축적 | ★★★☆☆ | ConfidenceStatus 전이는 우수하나 승격 경로 불완전, 검증 실패 환류 부재 |
 | 확신 기반 판단 | ★★★★☆ | 3차원 readiness 점수 + LoopGuard 조합이 실용적 |
-| 실패 회복 | ★★★★★ | DeadEnd + recovery_planner + REPLAN 루프가 매우 잘 설계됨 |
+| 실패 회복 | ★★★★★ | DeadEnd + recovery_agent + REPLAN 루프가 매우 잘 설계됨 |
 | 상태 타입 안전성 | ★★☆☆☆ | `Any`, untyped `dict` 다수. 런타임 방어 코드에 의존 |
 
 ### 4.2 전체 판정
@@ -414,22 +439,22 @@ history_resolver → intent_classifier → normalizer가 이전 맥락을 반영
 | # | 권고 | 변경 범위 | 기대 효과 |
 | --- | --- | --- | --- |
 | R1 | `normalized_query: Any` → `Optional[NormalizedQuery]` | state.py + import | 전체 코드베이스의 방어적 `hasattr()` 제거 가능 |
-| R2 | `sql_validator`에서 검증 실패 시 부정 지식을 `knowledge_items`에 추가 | sql_validator.py | recovery_planner 판단 품질 향상 |
+| R2 | `sql_validator`에서 검증 실패 시 부정 지식을 `knowledge_items`에 추가 | sql_validator.py | recovery_agent 판단 품질 향상 |
 
 ### 5.2 중기 개선 (Medium-Effort)
 
 | # | 권고 | 변경 범위 | 기대 효과 |
 | --- | --- | --- | --- |
-| R3 | `Hypothesis`에 `confidence: float` 추가 + rule-based 자동 갱신 | state.py + confidence_evaluator | 가설별 적합도 추적, 병행 탐색 판단 근거 |
-| R4 | `KnowledgeItem`에 `unresolved_reason` 추가 | state.py + planner + explorer | "못 찾음" vs "안 찾음" 구분 → 전략 차별화 |
+| R3 | `Hypothesis`에 `confidence: float` 추가 + rule-based 자동 갱신 | state.py + readiness_gate | 가설별 적합도 추적, 병행 탐색 판단 근거 |
+| R4 | `KnowledgeItem`에 `unresolved_reason` 추가 | state.py + reasoning_preparer + knowledge_fetcher + knowledge_interpreter | "못 찾음" vs "안 찾음" 구분 → 전략 차별화 |
 | R5 | `query_decomposition`, `explored_use_cases`를 TypedDict 또는 Pydantic으로 정형화 | state.py + 관련 노드 | 타입 안전성 + 자동 완성 + 문서화 |
-| R6 | `confidence_evaluator`에 rule-based 크로스매칭 fallback 추가 | confidence_evaluator.py | 배치 LLM이 KI key를 따르지 않는 경우 보완 |
+| R6 | `readiness_gate`에 rule-based 크로스매칭 fallback 추가 | readiness_gate.py | 배치 LLM이 KI key를 따르지 않는 경우 보완 |
 
 ### 5.3 장기 검토 (High-Effort, 신중히 판단)
 
 | # | 권고 | 리스크 | 판단 기준 |
 | --- | --- | --- | --- |
-| R7 | `normalized_query`를 Reason에서 보정 가능하게 변경 | 무한 재해석 루프, 디버깅 복잡도 | 현재 recovery_planner가 충분히 대체하는지 평가 후 결정 |
+| R7 | `normalized_query`를 Reason에서 보정 가능하게 변경 | 무한 재해석 루프, 디버깅 복잡도 | 현재 recovery_agent가 충분히 대체하는지 평가 후 결정 |
 | R8 | Reason 상태 세션 캐싱 (CONFLICTED 명확화 후 이어가기) | 상태 일관성, 캐시 무효화 복잡도 | CONFLICTED 빈도가 전체 질의의 10% 이상일 때 검토 |
 | R9 | knowledge_items 관계형 구조 전환 | LLM 프롬프트 주입 복잡도, 전체 노드 수정 | Neo4j 온톨로지 통합 시점에 함께 검토 |
 
@@ -487,10 +512,10 @@ R2  (검증 실패 부정 지식 추가) ────── 독립, 즉시 실�
 | # | 생성 노드 | 저장 필드 | 저장 형태 | 새 정보? |
 | --- | --- | --- | --- | --- |
 | A1 | `query_normalizer` | `normalized_query.measures[0]` | `{term: "고객 수", agg_function: "COUNT"}` | **원본** |
-| A2 | `planner` | `query_decomposition.measures[0]` | `{term: "고객 수", agg_function: "COUNT"}` | 아니오 — A1의 dict 복사 |
-| A3 | `planner` | `knowledge_items` | `key="measure:고객 수", status=UNRESOLVED` | 부분적 — 탐색 상태 추적 목적 |
-| A4 | `context_explorer` | `knowledge_items` 승격 | `key="measure:고객 수", status=PROBABLE` (배치 LLM이 해소 시) | **예** — 물리 컬럼 매핑 발견 |
-| A5 | `planner` (초기 컨텍스트) | `structural_hints.agg_expressions` | `"COUNT(*)"` | 부분적 — 과거 SQL 패턴 |
+| A2 | `reasoning_preparer` | `query_decomposition.measures[0]` | `{term: "고객 수", agg_function: "COUNT"}` | 아니오 — A1의 dict 복사 |
+| A3 | `reasoning_preparer` | `knowledge_items` | `key="measure:고객 수", status=UNRESOLVED` | 부분적 — 탐색 상태 추적 목적 |
+| A4 | `knowledge_interpreter` | `knowledge_items` 승격 | `key="measure:고객 수", status=PROBABLE` (배치 LLM이 해소 시) | **예** — 물리 컬럼 매핑 발견 |
+| A5 | `reasoning_preparer` (초기 컨텍스트) | `structural_hints.agg_expressions` | `"COUNT(*)"` | 부분적 — 과거 SQL 패턴 |
 
 **sql_generator 프롬프트에 실제로 주입되는 형태:**
 
@@ -507,9 +532,9 @@ LLM은 이 4곳에서 "COUNT"라는 동일 사실을 만나며, **각각의 형�
 
 | # | 생성 노드 | 저장 필드 | 저장 형태 | 새 정보? |
 | --- | --- | --- | --- | --- |
-| B1 | `context_explorer` | `candidate_tables[0]` | `CandidateTable(table_name=..., relevant_columns=[...], sample_rows=[...])` | **원본** |
-| B2 | `context_explorer` | `knowledge_items` | `key="table:TB_ADW_CSC101M", value="고객마스터", status=CONFIRMED` | 아니오 — B1의 요약 |
-| B3 | `planner` (초기 컨텍스트) | `structural_hints.source_tables` | `["TB_ADW_CSC101M"]` | 부분적 — 과거 SQL에서 발견 |
+| B1 | `knowledge_fetcher` | `candidate_tables[0]` | `CandidateTable(table_name=..., relevant_columns=[...], sample_rows=[...])` | **원본** |
+| B2 | `knowledge_interpreter` | `knowledge_items` | `key="table:TB_ADW_CSC101M", value="고객마스터", status=CONFIRMED` | 아니오 — B1의 요약 |
+| B3 | `reasoning_preparer` (초기 컨텍스트) | `structural_hints.source_tables` | `["TB_ADW_CSC101M"]` | 부분적 — 과거 SQL에서 발견 |
 | B4 | `result_finalizer` | `context.table_metas` | `TableMeta(table_name=..., columns=[...])` | 아니오 — B1의 재포맷 |
 
 **같은 테이블명이 4가지 필드에 존재.** B2는 B1의 존재 자체를 key-value로 재기록한 것이고,
@@ -520,9 +545,9 @@ B4는 B1을 Present 계층용으로 다시 변환한 것이다.
 | # | 생성 노드 | 저장 필드 | 저장 형태 | 새 정보? |
 | --- | --- | --- | --- | --- |
 | C1 | `query_normalizer` | `normalized_query.dimensions[0]` | `{term: "지점", role: "GROUP"}` | **원본** (추상 용어) |
-| C2 | `planner` | `query_decomposition.group_by` | `["지점"]` | 아니오 — C1의 term 추출 |
-| C3 | `context_explorer` | `knowledge_items` | `key="column:BLNG_BRCD", value="GROUP BY 대상"` | **예** — 물리 컬럼 발견 |
-| C4 | `planner` (초기 컨텍스트) | `structural_hints.group_by_columns` | `["BR_NM"]` | **주의** — 다른 컬럼! |
+| C2 | `reasoning_preparer` | `query_decomposition.group_by` | `["지점"]` | 아니오 — C1의 term 추출 |
+| C3 | `knowledge_interpreter` | `knowledge_items` | `key="column:BLNG_BRCD", value="GROUP BY 대상"` | **예** — 물리 컬럼 발견 |
+| C4 | `reasoning_preparer` (초기 컨텍스트) | `structural_hints.group_by_columns` | `["BR_NM"]` | **주의** — 다른 컬럼! |
 
 **C4에서 불일치 발생.** 과거 SQL에서는 `BR_NM`(지점명)으로 GROUP BY 했는데,
 현재 탐색에서는 `BLNG_BRCD`(지점코드)를 발견했다. 둘 다 "지점"이지만 다른 컬럼이다.
@@ -545,8 +570,8 @@ sql_generator LLM은 이 불일치를 스스로 해소해야 한다.
 | `candidate_tables` | `knowledge_items (table:*)` | 존재 사실을 key-value로 재기록 |
 | `candidate_tables` | `context.table_metas` (Present) | CandidateTable → TableMeta 변환 |
 
-**`query_decomposition`은 `normalized_query`의 순수 구조 변환이며 planner에서 생성된다.**
-planner 코드(`_build_decomposition_from_normalized`, L170-206)를 보면:
+**`query_decomposition`은 `normalized_query`의 순수 구조 변환이며 reasoning_preparer에서 생성된다.**
+reasoning_preparer 코드(`_build_decomposition_from_normalized`, L170-206)를 보면:
 
 ```python
 # normalized_query에서 추출하는 전부:
@@ -637,11 +662,11 @@ LLM이 실행마다 다른 옵션을 선택할 수 있다 (비결정적 동작).
 ```
 normalized_query (8-Slot, Interpret 계층 산출물)
     │
-    ├─→ planner: query_decomposition으로 재포맷 ─────── 구조 변환 복제
+    ├─→ reasoning_preparer: query_decomposition으로 재포맷 ── 구조 변환 복제
     │       │
     │       └─→ knowledge_items (UNRESOLVED)로 재포맷 ── 정보 보강 복제 (정당)
     │
-    ├─→ context_explorer: knowledge_items 승격 ────────── 정보 보강 (정당)
+    ├─→ knowledge_fetcher + knowledge_interpreter: knowledge_items 승격 ── 정보 보강 (정당)
     │
     └─→ sql_generator: 전체를 프롬프트에 다중 주입 ──── 중복 노출의 최종 지점
 ```
@@ -659,13 +684,13 @@ normalized_query (8-Slot, Interpret 계층 산출물)
 
 **현상:**
 
-`planner._build_decomposition_from_normalized()`이 `normalized_query`의 슬롯을
+`reasoning_preparer._build_decomposition_from_normalized()`이 `normalized_query`의 슬롯을
 dict로 복사하여 `query_decomposition`에 저장. 이후 sql_generator, sql_validator가 사용.
 
 **변환 내용 (새 정보 없음):**
 
 ```python
-# planner.py L170-206 — normalized_query → query_decomposition
+# reasoning_preparer.py L170-206 — normalized_query → query_decomposition
 measures = [{term, agg_function} for m in nq.measures]   # 그대로 복사
 filters = [{term, operator, value} for f in nq.filters]  # 그대로 복사
 group_by = [d.term for d in nq.dimensions if d.role == "GROUP"]  # term만 추출
@@ -684,7 +709,7 @@ sql_generator와 sql_validator가 `state.normalized_query`를 직접 참조.
 **선행 조건:** `normalized_query: Any` → `Optional[NormalizedQuery]` 타입 수정 (R1).
 타입이 `Any`인 상태에서 직접 참조하면 방어 코드가 오히려 늘어난다.
 
-**영향 파일:** `state.py`, `planner.py`, `sql_generator.py`, `sql_validator.py`, `context_explorer.py`
+**영향 파일:** `state.py`, `reasoning_preparer.py`, `sql_generator.py`, `sql_validator.py`, `knowledge_fetcher.py`, `knowledge_interpreter.py`
 
 **비판적 검토:**
 

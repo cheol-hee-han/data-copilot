@@ -11,8 +11,8 @@ Phase1 에서 슬롯을 추출하고, Phase2 에서 검증·보완하여 Normali
 
 위임 구조:
     - 비즈니스 로직: services/query_normalizer.py (run_normalization)
-    - 프롬프트: nodes/prompts/system_prompts.py 에서 QUERY_NORMALIZER_PHASE1/PHASE2 프롬프트를
-      로드하여 서비스에 주입
+    - 프롬프트: nodes/prompts/system_prompts.py 에서
+      QUERY_NORMALIZER_PHASE1/PHASE2 프롬프트를 로드하여 서비스에 주입
 
 폴백:
     - 정규화 실패(예외 발생) 시 original_query 만 담은 기본 NormalizedQuery 를 반환하여
@@ -21,6 +21,7 @@ Phase1 에서 슬롯을 추출하고, Phase2 에서 검증·보완하여 Normali
 
 from __future__ import annotations
 
+from src.agents.models.clarification import AmbiguitySignal
 from src.agents.models.normalization import NormalizedQuery
 from src.agents.nodes.system_prompts import (
     QUERY_NORMALIZER_PHASE1_SYSTEM,
@@ -33,7 +34,6 @@ from src.agents.state.state import (
     QueryStatus,
     add_trace,
 )
-from src.models.enums import IntentType
 from src.services.query_normalizer import run_normalization
 from src.utils.logger import get_logger
 from src.utils.truncate import truncate_log
@@ -45,12 +45,28 @@ async def normalize_query_node(
     state: PipelineState,
 ) -> dict:
     """사용자 질의를 8-Slot NormalizedQuery로 정규화한다."""
+    from src.agents.utils.clarification_context import (
+        build_clarification_context,
+    )
+
     raw_query = state.preprocessed_input
-    logger.info("질의 정규화 시작", input=truncate_log(raw_query))
+
+    # 전략 §2.4: 명확화 Q&A를 구조화된 섹션으로 LLM에 전달
+    clarification_ctx = build_clarification_context(state)
+    query_for_llm = (
+        f"{raw_query}\n\n{clarification_ctx}"
+        if clarification_ctx
+        else raw_query
+    )
+
+    logger.info(
+        "질의 정규화 시작",
+        input=truncate_log(raw_query),
+    )
 
     try:
         normalized = await run_normalization(
-            raw_query,
+            query_for_llm,
             phase1_system=QUERY_NORMALIZER_PHASE1_SYSTEM,
             phase1_user_template=QUERY_NORMALIZER_PHASE1_USER,
             phase2_system=QUERY_NORMALIZER_PHASE2_SYSTEM,
@@ -76,7 +92,7 @@ async def normalize_query_node(
     ambiguity_count = len(normalized.ambiguities)
 
     filter_count = len(normalized.filters)
-    time_range = getattr(normalized, "time_range", None)
+    time_type = normalized.time.type
 
     logger.info(
         "질의 정규화 완료",
@@ -84,7 +100,7 @@ async def normalize_query_node(
         entities=entity_terms,
         measures=measure_terms,
         filters=filter_count,
-        time_range=truncate_log(str(time_range)) if time_range else "(없음)",
+        time_type=time_type if time_type != "NONE" else "(없음)",
         ambiguities=ambiguity_count,
     )
 
@@ -117,7 +133,7 @@ async def normalize_query_node(
     if ambiguity_count > 0:
         trace_detail += f", 모호성 {ambiguity_count}건"
 
-    result = {
+    result: dict = {
         "normalized_query": normalized,
         "status": QueryStatus.QUERY_NORMALIZED,
         "trace_log": add_trace(
@@ -127,8 +143,30 @@ async def normalize_query_node(
         ),
     }
 
-    # ambiguities 감지 시 intent를 return dict로 전달 (state 직접 변이 금지)
+    # ── T3: ambiguities → AmbiguitySignal 생성 (INFER) ──
+    # 전략 §2.3 T3: 정규화 시점에는 메타/SQL이력이 없으므로
+    # 항상 INFER로 처리하여 resolved_signals에 기록.
+    # Reason 계층에서 탐색 우선순위·검증 포인트로 활용된다.
     if ambiguity_count > 0:
-        result["intent"] = IntentType.CLARIFICATION_NEEDED
+        signals = [
+            AmbiguitySignal(
+                source_node="normalize_query",
+                decision="INFER",
+                ambiguity_type=amb.get("ambiguity_type", "CONTEXT"),
+                confidence=amb.get("confidence", "LOW"),
+                question=amb.get("question", ""),
+                question_type=amb.get("question_type", "single_select"),
+                options=amb.get("options", []),
+                inferred_value=amb.get("inferred_value"),
+                reasoning=amb.get("reasoning", ""),
+                turn_id=state.turn_id,
+            )
+            for amb in normalized.ambiguities
+        ]
+        result["resolved_signals"] = signals
+        logger.info(
+            "T3 AmbiguitySignal 생성 (INFER)",
+            count=ambiguity_count,
+        )
 
     return result

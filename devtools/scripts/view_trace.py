@@ -2,7 +2,7 @@
 
 사용법:
     python devtools/scripts/view_trace.py                    # 최신 트레이스
-    python devtools/scripts/view_trace.py evaluation/traces/trace_xxx.json  # 특정 트레이스
+    python devtools/scripts/view_trace.py logs/traces/trace_xxx.json  # 특정 트레이스
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     if args.trace_file:
         p = Path(args.trace_file)
     else:
-        traces_dir = Path("evaluation/traces")
+        traces_dir = Path("logs/traces")
         files = sorted(traces_dir.glob("trace_*.json"))
         if not files:
             print("트레이스 파일 없음")

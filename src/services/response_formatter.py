@@ -95,6 +95,7 @@ async def format_response(
     *,
     system_prompt: str,
     user_template: str,
+    code_mappings: str = "해당 없음",
 ) -> str:
     """LLM을 사용하여 결과를 보고서 형태로 포맷팅한다.
 
@@ -103,13 +104,18 @@ async def format_response(
         sql_result: SQL 실행 결과.
         system_prompt: 포맷팅 시스템 프롬프트.
         user_template: 유저 프롬프트 템플릿.
+        code_mappings: 결과 컬럼과 관련된 코드값 매핑 텍스트.
 
     Returns:
         포맷팅된 응답 문자열.
     """
+    system_prompt = system_prompt.replace(
+        "{code_mappings}", code_mappings,
+    )
+    result_text = format_result_for_prompt(sql_result)
     user_message = user_template.format(
         user_input=user_input,
-        query_result=format_result_for_prompt(sql_result),
+        query_result=result_text,
     )
 
     client = get_llm_client()
@@ -125,7 +131,6 @@ async def format_response(
         ],
     )
 
-    result_text = format_result_for_prompt(sql_result)
     await record_prompt_variables({
         "user_input": user_input,
         "query_result": truncate_log(result_text),

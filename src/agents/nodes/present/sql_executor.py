@@ -5,7 +5,7 @@
 
 이중 방어(Double Defense) 전략:
     상위 파이프라인(sql_validator)에서 이미 안전성 검증을 통과한 SQL이지만,
-    실행 직전에 validate_sql_safety를 한 번 더 호출하여 파이프라인 우회나
+    실행 직전에 check_sql_safety_quick을 한 번 더 호출하여 파이프라인 우회나
     상태 변조로 인한 위험을 방지한다.
 
 실행 후에는 Tracker를 통해 쿼리 소스, 결과 건수, 소요 시간, 절삭 여부 등
@@ -30,7 +30,7 @@ from src.agents.state.state import (
 from src.config import settings
 from src.connectors.manager import get_connector_manager
 from src.utils.logger import get_logger
-from src.utils.security import validate_sql_safety
+from src.utils.security import check_sql_safety_quick
 from src.utils.truncate import format_sql
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
@@ -50,7 +50,7 @@ async def execute_sql_node(
     )
 
     # 이중 방어
-    is_safe, safety_errors = validate_sql_safety(
+    is_safe, safety_errors = check_sql_safety_quick(
         state.reason.validated_sql,
     )
     if not is_safe:

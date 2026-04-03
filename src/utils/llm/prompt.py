@@ -21,7 +21,7 @@ from typing import Any
 def serialize_decomp_slots(
     decomp: dict[str, Any],
 ) -> dict[str, str]:
-    """query_decomposition 4슬롯을 프롬프트 치환용 딕셔너리로 변환.
+    """query_decomposition 슬롯을 프롬프트 치환용 딕셔너리로 변환.
 
     Args:
         decomp: query_decomposition dict.
@@ -29,7 +29,7 @@ def serialize_decomp_slots(
     Returns:
         {"{measures}": "...", "{filters}": "...", ...} 형태.
     """
-    return {
+    result = {
         f"{{{slot}}}": json.dumps(
             decomp.get(slot, []), ensure_ascii=False,
         )
@@ -37,6 +37,10 @@ def serialize_decomp_slots(
             "measures", "filters", "group_by", "order_limit",
         )
     }
+    result["{output_hint}"] = json.dumps(
+        decomp.get("output_hint", {}), ensure_ascii=False,
+    )
+    return result
 
 
 def render_prompt(
@@ -81,26 +85,3 @@ def serialize_synonym_dict(
     return "\n".join(lines)
 
 
-def serialize_template_registry(
-    templates: dict[str, dict],
-) -> str:
-    """출력 템플릿 레지스트리를 LLM 프롬프트 주입 텍스트로 직렬화한다.
-
-    Args:
-        templates: {문서유형: {triggers, format, expected_columns, ...}} 구조.
-
-    Returns:
-        문서유형별 트리거·포맷·기대컬럼 형태 텍스트.
-    """
-    lines: list[str] = []
-    for doc_type, info in templates.items():
-        triggers = ", ".join(info["triggers"])
-        columns = ", ".join(info["expected_columns"])
-        lines.append(f'\n  "{doc_type}":')
-        lines.append(f"    트리거: {triggers}")
-        lines.append(f'    format: {info["format"]}')
-        lines.append(f"    기대컬럼: [{columns}]")
-        lines.append(f'    필요엔티티: {info["required_entities"]}')
-        if info.get("note"):
-            lines.append(f'    참고: {info["note"]}')
-    return "\n".join(lines)

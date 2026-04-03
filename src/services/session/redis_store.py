@@ -1,15 +1,14 @@
 """Redis 세션 스토어 — 운영/프로덕션용.
 
-Redis에 대화 이력과 명확화 상태를 JSON으로 저장한다.
+Redis에 대화 이력을 JSON으로 저장한다.
 서버 재시작, 다중 워커, 수평 확장 환경에서도 세션이 유지된다.
+명확화 상태 관리는 checkpointer + interrupt() 패턴으로 이관됨.
 
 키 구조:
     session:{sid}:history  — JSON 배열 (대화 이력)
-    session:{sid}:clarify  — JSON 객체 (명확화 대기 상태)
 
 TTL 정책:
     - history: 슬라이딩 TTL (매 append 시 갱신, 기본 30분)
-    - clarify: 고정 TTL (저장 시 1회만 설정, 기본 5분)
 """
 
 from __future__ import annotations
@@ -41,7 +40,6 @@ class RedisSessionStore(SessionStore):
     def __init__(self) -> None:
         self._client = None
         self._ttl = settings.session_ttl
-        self._clarify_ttl = settings.session_clarify_ttl
         self._max_history = settings.session_max_history
         self._prefix = "session"
 
@@ -105,32 +103,11 @@ class RedisSessionStore(SessionStore):
             ex=self._ttl,  # 슬라이딩 TTL: 매 append 시 갱신
         )
 
-    async def get_clarification(
-        self, session_id: str,
-    ) -> dict | None:
-        """명확화 상태를 반환하고 삭제(pop)한다."""
-        key = self._key(session_id, "clarify")
-        raw = await self._client.getdel(key)
-        if not raw:
-            return None
-        return json.loads(raw)
-
-    async def set_clarification(
-        self, session_id: str, state: dict,
-    ) -> None:
-        key = self._key(session_id, "clarify")
-        await self._client.set(
-            key,
-            json.dumps(state, ensure_ascii=False),
-            ex=self._clarify_ttl,
-        )
-
     async def ensure_session(self, session_id: str) -> None:
         """세션 존재 확인 (Redis는 TTL로 관리하므로 별도 초기화 불필요)."""
 
     async def clear_session(self, session_id: str) -> None:
-        """세션의 대화 이력과 명확화 상태를 모두 삭제한다."""
+        """세션의 대화 이력을 삭제한다."""
         await self._client.delete(
             self._key(session_id, "history"),
-            self._key(session_id, "clarify"),
         )

@@ -297,7 +297,7 @@ def _check_decisions(data: dict) -> list[Finding]:
         findings.append(Finding(
             severity="INFO",
             category="pipeline",
-            stage="confidence_evaluator",
+            stage="readiness_gate",
             message="readiness 판정 기록 없음 — evaluator 추적 미적용 가능성",
         ))
     else:
@@ -310,7 +310,7 @@ def _check_decisions(data: dict) -> list[Finding]:
                 findings.append(Finding(
                     severity="WARNING",
                     category="accuracy",
-                    stage="confidence_evaluator",
+                    stage="readiness_gate",
                     message=(
                         f"낮은 확신도({r.get('confidence', 0):.2f})로 "
                         f"SQL 생성 진입 — 정확도 위험"

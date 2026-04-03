@@ -65,12 +65,15 @@ class TestImports:
         assert build_pipeline is not None
 
     def test_agentic_nodes_imports(self):
-        from src.agents.nodes.reason.planner import planner_node
-        from src.agents.nodes.reason.context_explorer import (
-            context_explorer_node,
+        from src.agents.nodes.reason.reasoning_preparer import reasoning_preparer_node
+        from src.agents.nodes.reason.knowledge_fetcher import (
+            knowledge_fetcher_node,
         )
-        from src.agents.nodes.reason.confidence_evaluator import (
-            confidence_evaluator_node,
+        from src.agents.nodes.reason.knowledge_interpreter import (
+            knowledge_interpreter_node,
+        )
+        from src.agents.nodes.reason.readiness_gate import (
+            readiness_gate_node,
         )
         from src.agents.nodes.reason.sql_generator import (
             sql_generator_node,
@@ -78,13 +81,13 @@ class TestImports:
         from src.agents.nodes.reason.sql_validator import (
             sql_validator_node,
         )
-        from src.agents.nodes.reason.recovery_planner import (
-            recovery_planner_node,
+        from src.agents.nodes.reason.recovery_agent import (
+            recovery_agent_node,
         )
         from src.agents.nodes.reason.result_finalizer import (
             result_finalizer_node,
         )
-        assert planner_node is not None
+        assert reasoning_preparer_node is not None
 
     def test_pipeline_imports(self):
         from src.agents.graph.pipeline import (
@@ -108,7 +111,7 @@ class TestReasoningState:
         from src.agents.state.state import FinalStatus
         assert state.reason.final_status == FinalStatus.PENDING
         assert state.reason.loop_guard.total_tool_calls == 0
-        assert not state.reason.fast_path_triggered
+        assert state.reason.phase == Phase.PLANNING
 
     def test_knowledge_item_promote(self):
         from src.agents.state.state import KnowledgeItem, ConfidenceStatus
@@ -264,7 +267,13 @@ class TestConfidenceScorer:
             reason=ReasoningState(
                 knowledge_items=[
                     KnowledgeItem(
-                        key="x", status=ConfidenceStatus.CONFLICTED,
+                        key="x",
+                        status=ConfidenceStatus.CONFLICTED,
+                        is_critical=True,
+                        evidence=[
+                            "TB_LOAN_MASTER 확인",
+                            "TB_LOAN_DETAIL 상이",
+                        ],
                     ),
                 ],
                 hypotheses=[
@@ -457,16 +466,21 @@ class TestStateConversion:
         assert "테이블 미발견" in state.reason.exploration_summary
 
     def test_reason_ask_user_state(self):
-        from src.agents.state.state import (
-            PipelineState,
-            ReasoningState,
+        from src.agents.state.state import PipelineState
+        from src.agents.models.clarification import (
+            AmbiguitySignal, AmbiguityType, ConfidenceLevel,
         )
-        state = PipelineState(
-            awaiting_clarification=True,
-            clarification_question="어떤 테이블을 원하시나요?",
+        signal = AmbiguitySignal(
+            source_node="result_finalizer",
+            ambiguity_type=AmbiguityType.TABLE,
+            decision="ASK",
+            confidence=ConfidenceLevel.LOW,
+            question="어떤 테이블을 원하시나요?",
+            reasoning="테이블 선택 불확실",
         )
-        assert state.awaiting_clarification is True
-        assert "테이블" in state.clarification_question
+        state = PipelineState(pending_signals=[signal])
+        assert len(state.pending_signals) == 1
+        assert "테이블" in state.pending_signals[0].question
 
 
 class TestGraphBuilding:
@@ -484,11 +498,11 @@ class TestGraphBuilding:
         compiled = graph.compile()
         assert compiled is not None
 
-    def test_pipeline_has_planner(self):
+    def test_pipeline_has_reasoning_preparer(self):
         from src.agents.graph.pipeline import build_pipeline
         graph = build_pipeline()
         node_names = list(graph.nodes.keys())
-        assert "planner" in node_names
+        assert "reasoning_preparer" in node_names
 
     def test_pipeline_no_legacy_nodes(self):
         from src.agents.graph.pipeline import build_pipeline
@@ -502,38 +516,6 @@ class TestGraphBuilding:
 
 class TestRoutingFunctions:
     """라우팅 함수 검증."""
-
-    def test_route_after_planner_fast_path(self):
-        from src.agents.state.state import (
-            PipelineState,
-            ReasoningState,
-        )
-        from src.agents.graph.pipeline import (
-            _route_after_planner,
-        )
-        state = PipelineState(
-            reason=ReasoningState(fast_path_triggered=True),
-        )
-        assert (
-            _route_after_planner(state)
-            == "sql_generator"
-        )
-
-    def test_route_after_planner_normal(self):
-        from src.agents.state.state import (
-            PipelineState,
-            ReasoningState,
-        )
-        from src.agents.graph.pipeline import (
-            _route_after_planner,
-        )
-        state = PipelineState(
-            reason=ReasoningState(fast_path_triggered=False),
-        )
-        assert (
-            _route_after_planner(state)
-            == "context_explorer"
-        )
 
     def test_route_from_validator_success(self):
         from src.agents.state.state import (
@@ -553,7 +535,7 @@ class TestRoutingFunctions:
             == "conclude_success"
         )
 
-    def test_route_from_validator_fast_path_fail(self):
+    def test_route_from_validator_syntax_fail(self):
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
@@ -564,13 +546,11 @@ class TestRoutingFunctions:
         )
         state = PipelineState(
             reason=ReasoningState(
-                fast_path_triggered=True,
                 failure_type=FailureType.SQL_SYNTAX,
             ),
         )
-        assert _route_after_sql_validator(state) == (
-            "explore_after_fast_path"
-        )
+        result = _route_after_sql_validator(state)
+        assert result in ("fix_syntax", "conclude_failure")
 
     def test_route_from_validator_structural(self):
         from src.agents.state.state import (
@@ -598,13 +578,14 @@ class TestRoutingFunctions:
             Phase,
         )
         from src.agents.graph.pipeline import (
-            _route_after_recovery_planner,
+            _route_after_recovery_agent,
         )
         state = PipelineState(
             reason=ReasoningState(phase=Phase.DONE),
         )
         assert (
-            _route_after_recovery_planner(state) == "conclude"
+            _route_after_recovery_agent(state)
+            == "result_finalizer"
         )
 
     def test_route_from_replan_continue(self):
@@ -614,13 +595,14 @@ class TestRoutingFunctions:
             Phase,
         )
         from src.agents.graph.pipeline import (
-            _route_after_recovery_planner,
+            _route_after_recovery_agent,
         )
         state = PipelineState(
-            reason=ReasoningState(phase=Phase.EXPLORING),
+            reason=ReasoningState(phase=Phase.GENERATING),
         )
         assert (
-            _route_after_recovery_planner(state) == "explore"
+            _route_after_recovery_agent(state)
+            == "sql_generator"
         )
 
 
@@ -628,22 +610,22 @@ class TestNodeLogic:
     """개별 노드 로직 검증."""
 
     @pytest.mark.asyncio
-    async def test_confidence_evaluator_node(self):
+    async def test_readiness_gate_node(self):
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
             LoopGuard,
             Phase,
         )
-        from src.agents.nodes.reason.confidence_evaluator import (
-            confidence_evaluator_node,
+        from src.agents.nodes.reason.readiness_gate import (
+            readiness_gate_node,
         )
         state = PipelineState(
             reason=ReasoningState(
                 loop_guard=LoopGuard(total_tool_calls=20),
             ),
         )
-        result = await confidence_evaluator_node(state)
+        result = await readiness_gate_node(state)
         assert result["reason"].phase == Phase.DONE
 
     @pytest.mark.asyncio
@@ -707,40 +689,51 @@ class TestNodeLogic:
             ),
         )
         result = await result_finalizer_node(state)
-        assert result["awaiting_clarification"] is True
+        signals = result.get("pending_signals", [])
+        assert len(signals) >= 1
         from src.agents.state.state import FinalStatus
         assert result["reason"].final_status == FinalStatus.PENDING
 
-    @pytest.mark.asyncio
-    async def test_recovery_planner_with_fallback(self):
-        """recovery_planner: 가설 소진 시 rule-based fallback 가설 생성."""
+    def test_recovery_agent_hypothesis_transition(self):
+        """recovery_agent: ACTIVE 가설 FAILED 전환 + PENDING 소비."""
         from src.agents.state.state import (
-            PipelineState,
             ReasoningState,
             Hypothesis,
             HypothesisStatus,
-            Phase,
+            FailureType,
         )
-        from src.agents.nodes.reason.recovery_planner import (
-            recovery_planner_node,
+        from src.agents.nodes.reason.recovery_agent import (
+            _handle_hypothesis_transition,
         )
-        state = PipelineState(
-            preprocessed_input="고객 수",
-            reason=ReasoningState(
-                hypotheses=[
-                    Hypothesis(
-                        hypothesis_id="H1",
-                        description="t",
-                        status=HypothesisStatus.FAILED,
-                    ),
-                ],
-                current_hypothesis=None,
+        reason = ReasoningState(
+            hypotheses=[
+                Hypothesis(
+                    hypothesis_id="H1",
+                    description="t",
+                    status=HypothesisStatus.ACTIVE,
+                ),
+                Hypothesis(
+                    hypothesis_id="H2",
+                    description="대안",
+                    status=HypothesisStatus.PENDING,
+                ),
+            ],
+            current_hypothesis=Hypothesis(
+                hypothesis_id="H1",
+                description="t",
+                status=HypothesisStatus.ACTIVE,
             ),
+            failure_type=FailureType.SQL_STRUCTURAL,
+            failure_reason="구조 불일치",
         )
-        result = await recovery_planner_node(state)
-        # rule-based fallback으로 새 가설 생성됨
-        assert result["reason"].phase == Phase.EXPLORING
-        assert result["reason"].current_hypothesis is not None
+        _handle_hypothesis_transition(reason)
+        # H1 → FAILED, H2 → ACTIVE
+        assert reason.current_hypothesis is not None
+        assert reason.current_hypothesis.hypothesis_id == "H2"
+        assert reason.current_hypothesis.status == HypothesisStatus.ACTIVE
+        assert len(reason.dead_ends) == 1
+        h1 = [h for h in reason.hypotheses if h.hypothesis_id == "H1"][0]
+        assert h1.status == HypothesisStatus.FAILED
 
     @pytest.mark.asyncio
     async def test_sql_validator_empty_sql(self):
@@ -758,22 +751,10 @@ class TestNodeLogic:
         result = await sql_validator_node(state)
         assert result["reason"].failure_type == FailureType.SQL_SYNTAX
 
-    def test_planner_decomposition(self):
-        from src.agents.nodes.reason.planner import (
+    def test_reasoning_preparer_decomposition(self):
+        from src.agents.nodes.reason.reasoning_preparer import (
             _build_decomposition_from_normalized,
         )
         result = _build_decomposition_from_normalized(None)
         assert "measures" in result
         assert "filters" in result
-
-    def test_planner_fast_path_empty_hints(self):
-        from src.agents.state.state import (
-            StructuralHints,
-        )
-        from src.agents.nodes.reason.planner import (
-            _should_fast_path,
-        )
-        result = _should_fast_path(
-            [], StructuralHints(), [], None,
-        )
-        assert result is False

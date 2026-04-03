@@ -6,10 +6,8 @@
 [오늘 날짜]
 {today}
 
-[동의어 사전]
-{synonym_dict}
-
-위 동의어 사전에 해당하는 용어가 질의에 있으면 normalized_term에 표준 용어를 기재하세요.
-사전에 없는 용어는 normalized_term을 null로 두세요.
+질의에 은행 업무 동의어·약어가 있으면 normalized_term에 표준 용어를 기재하세요.
+(예: 여신→대출, 수신→예금, 영업점→지점, YoY→전년동기대비)
+해당 없으면 normalized_term은 null로 두세요.
 
 JSON만 출력하세요.

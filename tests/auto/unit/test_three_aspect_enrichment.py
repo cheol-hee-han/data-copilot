@@ -21,16 +21,18 @@ from src.agents.state.state import (
     KeyDateColumn,
     ObservedDateColumn,
 )
-from src.agents.nodes.reason.context_explorer import (
+from src.agents.nodes.reason.knowledge_fetcher import (
     _identify_key_date_columns,
     _identify_key_date_by_alt_name,
     _parse_meta_columns,
     _resolve_key_date_columns,
+    _extract_tables,
+)
+from src.agents.nodes.reason.knowledge_interpreter import (
     _find_comparison_groups,
     _merge_llm_inferred_fields,
     _build_table_block,
     _build_comparison_block,
-    _extract_tables,
 )
 from src.agents.nodes.reason.tools import (
     detect_date_pattern,

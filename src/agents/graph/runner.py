@@ -1,9 +1,10 @@
-"""파이프라인 실행 엔트리포인트 — LangGraph 그래프의 최상위 호출 인터페이스.
+"""파이프라인 실행 엔트리포인트 — sanitize + interrupt 감지 + ainvoke.
 
-API 서버(server.py)나 CLI 에서 호출되어 LangGraph 파이프라인을 초기화·실행하고
-최종 PipelineResult 를 반환하는 진입점이다.
-커넥터 매니저를 통해 데이터 소스를 연결하고, ``DataCopilotCallbackHandler`` 로
-노드·LLM·의사결정을 자동 추적하며, WebSocket 진행률을 전파한다.
+계층 구조:
+    main.py (서버) → run_pipeline() → graph (비즈니스 로직)
+
+main.py는 그래프 내부(interrupt, checkpointer)를 모른다.
+interrupt 감지와 Command(resume=) 분기는 이 모듈에서 처리한다.
 
 핵심 함수:
     - run_pipeline: 사용자 입력을 받아 파이프라인을 실행하고 PipelineResult 를 반환
@@ -20,11 +21,14 @@ import sys
 import uuid
 from typing import Any, Awaitable, Callable
 
+from langgraph.types import Command
+
 from src.agents.graph.pipeline import get_compiled_app
 from src.agents.models.response import PipelineResult
 from src.agents.state.state import PipelineState
 from src.connectors.manager import get_connector_manager
 from src.models.result import SQLResult, VisualizationData
+from src.services.input_sanitizer import sanitize
 from src.services.insight_builder import build_insight
 from src.tools.langsmith import setup_langsmith
 from src.utils.logger import (
@@ -49,16 +53,18 @@ async def run_pipeline(
     session_id: str | None = None,
     conversation_history: list[dict[str, str]] | None = None,
     *,
-    clarification_state: dict[str, Any] | None = None,
     on_event: OnEventCallback | None = None,
 ) -> PipelineResult:
     """파이프라인을 실행하고 최종 결과를 반환한다.
 
+    모든 입력(첫 턴 + 명확화 응답)에 대해 sanitize를 1회 실행한다.
+    interrupt 대기 중이면 Command(resume=)로 재개하고,
+    아니면 새 PipelineState로 ainvoke한다.
+
     Args:
-        user_input: 사용자 자연어 입력.
+        user_input: 사용자 자연어 입력 (첫 턴 또는 명확화 응답).
         session_id: 세션 식별자. 미지정 시 자동 생성.
         conversation_history: 이전 대화 이력.
-        clarification_state: 명확화 상태 (turns 등).
         on_event: WebSocket 등으로 실시간 이벤트를 전송하는
             async 콜백. None이면 이벤트를 전송하지 않는다.
 
@@ -67,6 +73,13 @@ async def run_pipeline(
     """
     if not session_id:
         session_id = str(uuid.uuid4())
+
+    # ── 1. sanitize: 모든 입력에 1회 적용 ──
+    sanitized = sanitize(user_input)
+    if sanitized.is_error:
+        return PipelineResult(
+            response=sanitized.error_message,
+        )
 
     query_id = session_id[-8:]
     bind_query_context(query_id)
@@ -91,26 +104,93 @@ async def run_pipeline(
     manager = get_connector_manager()
     await manager.connect_all()
 
-    # 싱글턴 컴파일 앱 + 요청별 콜백 주입
     app = get_compiled_app()
 
-    cs = clarification_state or {}
-    initial_state = PipelineState(
-        user_input=user_input,
-        session_id=session_id,
-        conversation_history=conversation_history or [],
-        awaiting_clarification=False,
-        clarification_response="",
-        clarification_question="",
-        preprocessed_input="",
-        clarification_turns=cs.get("turns", 0),
-    )
+    # 체크포인터 config 구성 — thread_id = session_id
+    run_config: dict[str, Any] = {
+        "callbacks": [handler],
+    }
+    if session_id:
+        run_config["configurable"] = {"thread_id": session_id}
 
-    result = await app.ainvoke(
-        initial_state,
-        config={"callbacks": [handler]},
-    )
+    # ── 2. interrupt 대기 중 감지 ──
+    is_interrupt_pending = False
+    try:
+        state_snapshot = await app.aget_state(run_config)
+        is_interrupt_pending = bool(
+            state_snapshot is not None
+            and state_snapshot.next
+        )
+    except Exception as e:
+        # 체크포인터 미사용 또는 새 세션 → 새 턴으로 진행
+        logger.debug("aget_state 조회 실패 (새 세션)", error=str(e))
 
+    if is_interrupt_pending:
+        # ── 3a. interrupt 재개: Command(resume=sanitized_text) ──
+        logger.info(
+            "interrupt 재개",
+            session_id=session_id,
+        )
+        result = await app.ainvoke(
+            Command(resume=sanitized.text),
+            config=run_config,
+        )
+    else:
+        # ── 3b. 새 턴: 초기 state 생성 + ainvoke ──
+        initial_state = PipelineState(
+            user_input=user_input,
+            original_query=user_input,
+            preprocessed_input=sanitized.text,
+            session_id=session_id,
+            conversation_history=conversation_history or [],
+            turn_id=str(uuid.uuid4()),
+        )
+
+        result = await app.ainvoke(
+            initial_state,
+            config=run_config,
+        )
+
+    # ── 4. interrupt 발생 여부 확인 (ainvoke 후 상태 재조회) ──
+    clarification_data = None
+    try:
+        after_state = await app.aget_state(run_config)
+        if after_state and after_state.next:
+            # interrupt 발생 → 명확화 대기 중
+            for task in after_state.tasks:
+                if hasattr(task, "interrupts") and task.interrupts:
+                    for intr in task.interrupts:
+                        clarification_data = intr.value
+                        break
+    except Exception as e:
+        logger.debug("ainvoke 후 상태 조회 실패", error=str(e))
+
+    if clarification_data is not None:
+        # interrupt 페이로드에서 AmbiguitySignal 데이터 추출
+        _record_run_end_safe(handler, result or {}, "")
+        handler.save()
+        clear_query_context()
+
+        question = (
+            clarification_data.get("question", "")
+            if isinstance(clarification_data, dict)
+            else ""
+        )
+        return PipelineResult(
+            response=question,
+            awaiting_clarification=True,
+            clarification_request=clarification_data,
+        )
+
+    # ── 5. 정상 완료 결과 구성 ──
+    return _build_result(handler, result)
+
+
+def _build_result(
+    handler: DataCopilotCallbackHandler,
+    result: dict[str, Any],
+) -> PipelineResult:
+    """그래프 실행 결과에서 PipelineResult를 구성한다."""
     response = result.get(
         "formatted_response",
         "응답을 생성할 수 없습니다.",
@@ -119,15 +199,13 @@ async def run_pipeline(
     viz = result.get("visualization") or VisualizationData()
     sql_result = result.get("sql_result") or SQLResult()
 
-    # 통찰 데이터 구성 (State 접근 가능 시점)
     insight = _build_safe_insight(result)
 
-    # 핸들러 종료 및 SQL 기록 (그래프 외부이므로 직접 호출)
     _record_sql_metrics(handler, result)
     _record_run_end(handler, result, response)
     handler.save()
 
-    logger.info("파이프라인 실행 완료", session_id=session_id)
+    logger.info("파이프라인 실행 완료")
     clear_query_context()
 
     return PipelineResult(
@@ -136,17 +214,8 @@ async def run_pipeline(
         visualization=viz,
         insight=insight,
         sql_result=sql_result,
-        awaiting_clarification=result.get(
-            "awaiting_clarification", False,
-        ),
-        clarification_question=result.get(
-            "clarification_question", "",
-        ),
         preprocessed_input=result.get(
             "preprocessed_input", "",
-        ),
-        clarification_turns=result.get(
-            "clarification_turns", 0,
         ),
     )
 
@@ -215,6 +284,18 @@ def _record_run_end(
         final_response_summary=truncate_trace(response),
         error_message=result.get("error_message", ""),
     )
+
+
+def _record_run_end_safe(
+    handler: DataCopilotCallbackHandler,
+    result: dict[str, Any],
+    response: str,
+) -> None:
+    """핸들러 종료를 안전하게 기록한다."""
+    try:
+        _record_run_end(handler, result, response)
+    except Exception:
+        logger.debug("핸들러 종료 기록 실패")
 
 
 def main() -> None:

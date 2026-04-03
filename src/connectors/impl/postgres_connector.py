@@ -22,7 +22,7 @@ import re
 from typing import Any
 
 from src.config import settings
-from src.connectors.interfaces import DatabaseConnector
+from src.connectors.interfaces import DatabaseConnector, sanitize_row
 from src.connectors.dummy_data import (
     generate_dummy_data,
 )
@@ -124,7 +124,7 @@ class InfoDBConnector(DatabaseConnector):
             )
             columns = list(result.keys())
             rows = [
-                dict(zip(columns, row))
+                sanitize_row(dict(zip(columns, row)))
                 for row in result.fetchall()
             ]
         _elapsed = (_time.perf_counter() - _start) * 1000
@@ -214,7 +214,7 @@ class HistoryDBConnector(DatabaseConnector):
             )
             columns = list(result.keys())
             return [
-                dict(zip(columns, row))
+                sanitize_row(dict(zip(columns, row)))
                 for row in result.fetchall()
             ]
 

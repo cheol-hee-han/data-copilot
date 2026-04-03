@@ -92,9 +92,11 @@ def test_no_inline_onclick_with_user_data():
 
 
 def test_marked_version_pinned():
-    """marked CDN이 특정 버전으로 고정되어 있는지 검증."""
+    """marked 라이브러리가 로컬 벤더 번들로 로드되는지 검증."""
     html = _load()
-    assert "marked@" in html, "marked는 특정 버전으로 고정해야 합니다"
+    assert "/vendor/marked.min.js" in html, (
+        "marked는 로컬 벤더 번들(/vendor/marked.min.js)로 로드해야 합니다"
+    )
 
 
 def test_clipboard_error_handling():

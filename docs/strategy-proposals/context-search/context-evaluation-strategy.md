@@ -2,7 +2,7 @@
 
 > **작성일**: 2026-03-21
 >
-> **근거 문서**: `docs/design-reviews/graph-flow-evaluation.md` 3.1절 "컨텍스트 수집의 적합성 판단 부재"
+> **근거 문서**: `docs/reviews/design/20260321-graph-flow-evaluation.md` 3.1절 "컨텍스트 수집의 적합성 판단 부재"
 >
 > **목적**: `collect_context → generate_sql` 사이에 수집된 컨텍스트의 품질을 평가하고,
 > 부족한 경우 재검색 또는 사용자 확인으로 분기하는 `context_evaluator` 전략을 구체화한다.

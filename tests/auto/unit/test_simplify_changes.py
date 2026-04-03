@@ -325,7 +325,7 @@ class TestRenderPrompt:
 # 8. _build_decomposition_from_normalized (W-15)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-from src.agents.nodes.reason.planner import (
+from src.agents.nodes.reason.reasoning_preparer import (
     _build_decomposition_from_normalized,
 )
 from src.agents.models.normalization import (
@@ -400,8 +400,8 @@ from src.agents.state.state import (
     Phase,
     PipelineState,
 )
-from src.agents.nodes.reason.confidence_evaluator import (
-    confidence_evaluator_node,
+from src.agents.nodes.reason.readiness_gate import (
+    readiness_gate_node,
 )
 
 
@@ -418,7 +418,7 @@ class TestConfidenceEvaluatorFailurePreservation:
                 knowledge_items=[],
             ),
         )
-        result = await confidence_evaluator_node(state)
+        result = await readiness_gate_node(state)
         reason = result["reason"]
 
         # REPLANNING으로 전환되더라도 기존 failure_type 보존
@@ -436,7 +436,7 @@ class TestConfidenceEvaluatorFailurePreservation:
                 knowledge_items=[],
             ),
         )
-        result = await confidence_evaluator_node(state)
+        result = await readiness_gate_node(state)
         reason = result["reason"]
 
         if reason.phase == Phase.REPLANNING:

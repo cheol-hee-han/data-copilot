@@ -1,5 +1,7 @@
 # SQL 수행이력 유사도 검색 향상 — 통합 아키텍처
 
+> **버전**: 1.2
+> **최종 수정**: 2026-04-01
 > **기반 전략**: `docs/strategy-proposals/embedding-search-strategy.md`
 > **통합 대상**: data-copilot LangGraph 파이프라인
 > **작성일**: 2026-03-21
@@ -12,9 +14,8 @@
 
 ```
 [사용자 질의]
-  → QueryNormalizer (8-Slot 정규화)
-  → SearchQueryBuilder (소스별 쿼리 최적화)
-  → Context Service (병렬 수집)
+  → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
+  → knowledge_fetcher 노드 (reason 계층, 도구 기반 병렬 수집)
      ├── ES table_meta     ← es_table_query
      ├── ES report_sql     ← es_report_query
      ├── History DB (ILIKE) ← history_db_query (키워드 기반)
@@ -41,11 +42,9 @@
 
 ```
 [사용자 질의]
-  → QueryNormalizer (8-Slot 정규화)
-  → SearchQueryBuilder (소스별 쿼리 최적화)
-     ├── 기존 4개 소스 쿼리 생성
-     └── ★ sql_history 벡터 쿼리 합성 (NormalizedQuery 슬롯 기반)
-  → Context Service (병렬 수집)
+  → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
+  → reasoning_preparer 노드 (규칙 기반 가설 생성·탐색 계획)
+  → knowledge_fetcher 노드 (도구 기반 병렬 수집)
      ├── ES table_meta
      ├── ES report_sql
      ├── History DB (ILIKE)        ← 기존 유지 (키워드 매칭 보완)
@@ -54,18 +53,18 @@
      └── ★ Qdrant sql_history     ← BGE-M3 Hybrid (Dense 0.6 + Sparse 0.4)
            → Top-50 후보
            → ★ BGE-Reranker-v2-m3 → Top-5~10
-  → SQL Generator (보강된 컨텍스트로 SQL 생성)
+  → sql_generator 노드 (보강된 컨텍스트로 SQL 생성)
 ```
 
 ### 2.2 레이어 구성
 
 | 레이어 | 컴포넌트 | 역할 | 파일 |
 |--------|---------|------|------|
-| **L-1: 오프라인** | Document Enrichment | LLM 기반 동의어·다국어 보강 | `enrich_sql_history.py` |
-| **L0: 쿼리 합성** | NormalizedQuery → 벡터 쿼리 | 구조화된 슬롯에서 비즈니스 목적 문장 합성 | `search_query_builder.py` |
-| **L1: 임베딩** | SearchQueryEmbedder (BGE-M3) | Dense(1024-dim) + Sparse 동시 생성 | `search_query_embedder.py` |
-| **L2: 하이브리드 검색** | QdrantConnector | Dense(0.6) + Sparse(0.4) → RRF | `qdrant_connector.py` |
-| **L3: 재순위** | Reranker (BGE-Reranker-v2-m3) | Cross-Encoder Top-50 → Top-5~10 | `reranker.py` |
+| **L-1: 오프라인** | Document Enrichment | LLM 기반 동의어·다국어 보강 | `devtools/scripts/enrich_sql_history.py` |
+| **L0: 쿼리 합성** | NormalizedQuery → 벡터 쿼리 | 구조화된 슬롯에서 비즈니스 목적 문장 합성 | `src/services/query_normalizer.py` (합성 로직 포함 예정) |
+| **L1: 임베딩** | QdrantConnector 내장 (BGE-M3) | Dense(1024-dim) + Sparse 동시 생성 | `src/connectors/impl/qdrant_connector.py` |
+| **L2: 하이브리드 검색** | QdrantConnector | Dense(0.6) + Sparse(0.4) → RRF | `src/connectors/impl/qdrant_connector.py` |
+| **L3: 재순위** | Reranker (BGE-Reranker-v2-m3) | Cross-Encoder Top-50 → Top-5~10 | `src/connectors/impl/reranker.py` |
 
 ### 2.3 모델 스택
 
@@ -202,7 +201,7 @@ reranked = reranker.rerank(
 **결론**: 두 소스 모두 유지하며 결과를 병합한다.
 - History DB: 테이블명·컬럼명이 직접 언급된 경우 강점
 - Qdrant: 비즈니스 의도가 유사한 경우 강점
-- 중복 SQL은 `search_context_assembler`에서 dedup 처리
+- 중복 SQL은 `knowledge_fetcher` 노드에서 dedup 처리
 
 ---
 
@@ -242,15 +241,16 @@ reranked = reranker.rerank(
 ```
 QdrantConnector.search_sql_history()   → Top-50 후보 (Raw)
          ↓
-search_context_assembler._fetch_sql_history()
+knowledge_fetcher 노드 (reason/knowledge_fetcher.py)
          ↓
 Reranker.rerank(query, candidates)     → Top-5~10 (Precise)
          ↓
 ContextInfo.vector_past_sqls
 ```
 
-Reranker는 커넥터가 아닌 **knowledge 레이어**에 배치한다.
-커넥터는 Qdrant 통신만 담당하고, 재순위 로직은 비즈니스 레이어의 책임이다.
+Reranker(`src/connectors/impl/reranker.py`)는 커넥터 계층에 배치되며,
+`knowledge_fetcher` 노드에서 Qdrant 검색 후 재순위를 호출한다.
+임베딩·재순위 기능은 QdrantConnector에 통합되었다(`src/services/__init__.py` 참조).
 
 ### 7.2 폴백
 
@@ -263,25 +263,30 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 
 ### 신규 생성
 
-| 파일 | 역할 |
-|------|------|
-| `src/connectors/search_query_embedder.py` | BGE-M3 임베딩 서비스 (Dense + Sparse 동시 생성) |
-| `src/services/reranker.py` | BGE-Reranker-v2-m3 래퍼 (폴백 포함) |
-| `devtools/scripts/enrich_sql_history.py` | LLM 기반 오프라인 문서 보강 배치 |
+| 파일 | 역할 | 상태 |
+|------|------|------|
+| `src/connectors/impl/reranker.py` | BGE-Reranker-v2-m3 래퍼 (폴백 포함) | 구현 완료 |
+| `devtools/scripts/enrich_sql_history.py` | LLM 기반 오프라인 문서 보강 배치 | 구현 완료 |
+
+> **Note:** 초기 설계의 독립 임베딩 서비스(`search_query_embedder.py`)는
+> `src/connectors/impl/qdrant_connector.py`에 통합되었다.
+> 검색 쿼리 빌더와 컨텍스트 조립 기능은 독립 서비스 대신
+> `SearchKeywords` 모델(`src/agents/models/normalization.py`)과
+> `query_normalizer` 서비스, `knowledge_fetcher` 노드에 분산 통합되었다.
 
 ### 수정
 
-| 파일 | 변경 내용 |
-|------|----------|
-| `src/config.py` | BGE-M3 모델 경로, Reranker 설정, sql_history 컬렉션명, 하이브리드 가중치 |
-| `src/agents/models/normalization.py` | `SearchKeywords`에 `sql_history_search: str` 필드 추가 |
-| `src/agents/state/state.py` | `ContextInfo`에 `vector_past_sqls: list[str]` 필드 추가 |
-| `src/connectors/qdrant_connector.py` | `search_sql_history()` + 하이브리드 검색 + BGE-M3 임베딩 전환 |
-| `src/services/search_query_builder.py` | `_build_sql_history_vector_query()` — NormalizedQuery 슬롯 기반 합성 |
-| `src/services/search_context_assembler.py` | `_fetch_sql_history_vectors()` 추가, 병렬 수집에 포함 |
-| `src/agents/nodes/interpret/query_normalizer.py` | `sql_history_search` 생성 로직 (후처리 단계) |
-| `devtools/scripts/seed_qdrant.py` | BGE-M3 하이브리드 임베딩, Named Vectors 스키마 |
-| `pyproject.toml` | `FlagEmbedding` 의존성 추가, `fastembed` 제거 |
+| 파일 | 변경 내용 | 상태 |
+|------|----------|------|
+| `src/config.py` | BGE-M3 모델 경로, Reranker 설정, sql_history 컬렉션명, 하이브리드 가중치 | 구현 완료 |
+| `src/agents/models/normalization.py` | `SearchKeywords`에 `sql_history_search: str` 필드 추가 | 구현 완료 |
+| `src/models/context.py` | `ContextInfo`에 `vector_past_sqls: list[str]` 필드 추가 | 구현 완료 |
+| `src/connectors/impl/qdrant_connector.py` | `search_sql_history()` + 하이브리드 검색 + BGE-M3 임베딩 전환 | 구현 완료 |
+| `src/services/query_normalizer.py` | `sql_history_search` 벡터 쿼리 합성 로직 (슬롯 기반) | 통합 예정 |
+| `src/agents/nodes/reason/knowledge_fetcher.py` | sql_history 벡터 검색 호출, 병렬 수집에 포함 | 통합 예정 |
+| `src/agents/nodes/interpret/query_normalizer.py` | `sql_history_search` 생성 로직 (후처리 단계) | 통합 예정 |
+| `devtools/scripts/seed_qdrant.py` | BGE-M3 하이브리드 임베딩, Named Vectors 스키마 | 구현 완료 |
+| `pyproject.toml` | `FlagEmbedding` 의존성 추가, `fastembed` 제거 | 구현 완료 |
 
 ---
 
@@ -304,3 +309,13 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 ---
 
 *이 문서는 구현과 함께 갱신됩니다.*
+
+---
+
+## 변경 이력
+
+| 버전 | 날짜 | 변경 내용 |
+|------|------|----------|
+| 1.0 | 2026-03-21 | 초안 작성 |
+| 1.1 | 2026-04-01 | v3 파이프라인 리팩터링 반영: Context Service → knowledge_fetcher 노드, SQL Generator → sql_generator 노드, SearchQueryBuilder → query_normalizer 서비스 통합, 임베딩·재순위 QdrantConnector 통합, 파일 경로 현행화 (reranker.py 위치 변경, ContextInfo → models/context.py), 구현 상태 칼럼 추가 |
+| 1.2 | 2026-04-02 | planner → reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용) |

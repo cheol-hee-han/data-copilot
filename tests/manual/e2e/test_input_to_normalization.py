@@ -41,7 +41,7 @@ async def run_pipeline_front(
 ) -> dict:
     """전처리 → 이력 해소 → 의도 분류 → 질의 정규화를 순차 실행한다."""
     from src.agents.state.state import PipelineState, QueryStatus
-    from src.agents.nodes.interpret.preprocessor import preprocess_node
+    from src.services.input_sanitizer import sanitize
     from src.agents.nodes.interpret.history_resolver import resolve_history_node
     from src.agents.nodes.interpret.intent_classifier import classify_intent_node
     from src.agents.nodes.interpret.query_normalizer import normalize_query_node
@@ -63,17 +63,20 @@ async def run_pipeline_front(
         conversation_history=history,
         awaiting_clarification=awaiting_clarification,
     )
-    prep_result = await preprocess_node(state)
+    san = sanitize(state.user_input)
 
-    if prep_result.get("status") == QueryStatus.ERROR:
-        print(f"  ERROR: {prep_result.get('error_message')}")
-        result_info["error"] = prep_result.get("error_message")
+    if san.is_error:
+        print(f"  ERROR: {san.error_message}")
+        result_info["error"] = san.error_message
         return result_info
 
-    preprocessed = prep_result["preprocessed_input"]
+    preprocessed = san.text
     print(f"  입력: {query}")
     print(f"  출력: {preprocessed}")
-    state = state.model_copy(update=prep_result)
+    state = state.model_copy(update={
+        "preprocessed_input": san.text,
+        "status": QueryStatus.PREPROCESSING,
+    })
 
     # ── Step 2: 이력 해소 ──
     print("\n[2/4] 이력 해소 (resolve_history)")

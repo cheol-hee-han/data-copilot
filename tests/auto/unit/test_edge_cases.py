@@ -280,9 +280,9 @@ class TestSecurityEdgeCases:
 
     def test_sql_safety_trailing_semicolon(self):
         """마지막 세미콜론만 있는 SELECT (합법적)."""
-        from src.utils.security import validate_sql_safety
+        from src.utils.security import check_sql_safety_quick
 
-        is_safe, errors = validate_sql_safety("SELECT 1;")
+        is_safe, errors = check_sql_safety_quick("SELECT 1;")
         # 세미콜론 뒤에 추가 토큰이 없으므로 통과해야 함
         assert is_safe is True
         log_test_case(logger, "test_trailing_semicolon", "SELECT 1;", (True, []),
@@ -290,18 +290,18 @@ class TestSecurityEdgeCases:
 
     def test_sql_safety_empty_string(self):
         """빈 SQL 문자열."""
-        from src.utils.security import validate_sql_safety
+        from src.utils.security import check_sql_safety_quick
 
-        is_safe, errors = validate_sql_safety("")
+        is_safe, errors = check_sql_safety_quick("")
         assert is_safe is False
         log_test_case(logger, "test_empty_sql", "", (False, "errors"),
                       (is_safe, errors), True)
 
     def test_sql_safety_whitespace_only(self):
         """공백만 있는 SQL 문자열."""
-        from src.utils.security import validate_sql_safety
+        from src.utils.security import check_sql_safety_quick
 
-        is_safe, errors = validate_sql_safety("   ")
+        is_safe, errors = check_sql_safety_quick("   ")
         assert is_safe is False
         log_test_case(logger, "test_whitespace_sql", "(공백)", (False, "errors"),
                       (is_safe, errors), True)
