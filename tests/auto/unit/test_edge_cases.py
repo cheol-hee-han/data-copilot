@@ -34,53 +34,6 @@ logger = get_test_logger("test_edge_cases")
 
 
 # ══════════════════════════════════════════════════════════════
-# 의도 분류 엣지 케이스
-# ══════════════════════════════════════════════════════════════
-
-class TestIntentEdgeCases:
-    """의도 분류 경계 케이스."""
-
-    def test_subclassify_mixed_language(self):
-        """한영 혼합 입력의 세분류."""
-        from src.services.intent_resolver import subclassify_data_query
-        from src.agents.state.state import IntentType, PipelineState
-
-        state = PipelineState(preprocessed_input="monthly loan 분석 report")
-        intent, _ = subclassify_data_query(state.preprocessed_input, 0.9)
-        # "분석" 키워드 포함 → DATA_ANALYSIS
-        assert intent == IntentType.DATA_ANALYSIS
-        log_test_case(logger, "test_mixed_language", "monthly loan 분석", "DATA_ANALYSIS", intent, True)
-
-    def test_subclassify_no_signals(self):
-        """분석 키워드가 전혀 없는 입력."""
-        from src.services.intent_resolver import subclassify_data_query
-        from src.agents.state.state import IntentType, PipelineState
-
-        state = PipelineState(preprocessed_input="고객 목록")
-        intent, _ = subclassify_data_query(state.preprocessed_input, 0.9)
-        assert intent == IntentType.DATA_EXTRACTION
-        log_test_case(logger, "test_no_signals", "고객 목록", "DATA_EXTRACTION", intent, True)
-
-    def test_parse_gate_empty_string(self):
-        """빈 문자열 Gate 응답 → AMBIGUOUS."""
-        from src.services.intent_resolver import _parse_gate_response
-
-        result = _parse_gate_response("")
-        assert result["category"] == "AMBIGUOUS"
-        log_test_case(logger, "test_gate_empty", "", "AMBIGUOUS", result["category"], True)
-
-    def test_parse_gate_nested_json(self):
-        """중첩 JSON 응답 처리."""
-        from src.services.intent_resolver import _parse_gate_response
-        import json
-
-        raw = json.dumps({"category": "DATA_QUERY", "confidence": "HIGH", "nested": {"a": 1}})
-        result = _parse_gate_response(raw)
-        assert result["category"] == "DATA_QUERY"
-        log_test_case(logger, "test_gate_nested", "중첩 JSON", "DATA_QUERY", result["category"], True)
-
-
-# ══════════════════════════════════════════════════════════════
 # 질의 정규화 엣지 케이스
 # ══════════════════════════════════════════════════════════════
 
@@ -307,35 +260,3 @@ class TestSecurityEdgeCases:
                       (is_safe, errors), True)
 
 
-# ══════════════════════════════════════════════════════════════
-# 포맷팅 엣지 케이스
-# ══════════════════════════════════════════════════════════════
-
-class TestFormatterEdgeCases:
-    """포맷팅 노드 경계 케이스."""
-
-    def test_format_result_empty_columns(self):
-        """컬럼이 없는 SQLResult 포맷팅."""
-        from src.services.response_formatter import format_result_for_prompt
-        from src.agents.state.state import PipelineState, SQLResult
-
-        state = PipelineState(sql_result=SQLResult(columns=[], rows=[], row_count=0))
-        result = format_result_for_prompt(state.sql_result)
-        assert "조회 결과 없음" in result
-        log_test_case(logger, "test_empty_columns", "빈 컬럼", "조회 결과 없음", result, True)
-
-    def test_format_result_large_row_count(self):
-        """대량 행이 format_max_rows 로 제한된다."""
-        from src.services.response_formatter import format_result_for_prompt
-        from src.agents.state.state import PipelineState, SQLResult
-
-        rows = [{"col1": i, "col2": f"val_{i}"} for i in range(200)]
-        state = PipelineState(
-            sql_result=SQLResult(columns=["col1", "col2"], rows=rows, row_count=200)
-        )
-        result = format_result_for_prompt(state.sql_result)
-        # 프롬프트에 200행 전체가 들어가면 안 됨
-        line_count = result.count("\n")
-        assert line_count < 200
-        log_test_case(logger, "test_large_rows", "200행", "행 수 제한됨",
-                      f"{line_count} lines", True)

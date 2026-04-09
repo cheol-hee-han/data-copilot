@@ -1,5 +1,7 @@
 """템플릿 기반 SVG 차트 생성기.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 LLM이 직접 SVG를 생성하지 못하는 환경(소형 로컬 LLM, 폐쇄망 배포 등)에서
 데이터와 차트 유형만으로 SVG를 서버사이드에서 생성하는 폴백 모듈이다.
 data_analyzer의 시각화 파이프라인에서 LLM SVG 생성 실패 시 호출된다.
@@ -78,8 +80,8 @@ def _esc(text: Any) -> str:
 
 
 def _format_number(value: float | int) -> str:
-    """숫자를 읽기 쉬운 형태로 포맷팅한다."""
-    # 3순위: 한국 금융 고정 단위, 바뀔 일 없음
+    """숫자를 한국 금융 단위(만원/억원)로 포맷팅한다."""
+    # 한국 금융 고정 단위 기준값 (settings에서 로드)
     eok = settings.krw_eok_threshold
     man = settings.krw_man_threshold
     if isinstance(value, float):

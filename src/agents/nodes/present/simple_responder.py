@@ -1,10 +1,23 @@
 """비데이터 의도 경량 응답 노드.
 
-CASUAL_TALK, META_QUESTION 등 데이터 추출/분석이 필요 없는
-의도에 대해 간단한 정형 응답을 생성한다.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
 
-CASUAL_TALK → 정형 응답 (LLM 호출 없음)
-META_QUESTION → 시스템 안내 메시지
+CASUAL_TALK, META_QUESTION 등 데이터 추출/분석이 필요 없는
+의도에 대해 LLM 호출 없이 정형 응답을 생성한다.
+
+파이프라인에서 intent_classifier가 비데이터 의도로 분류하면
+이 노드로 직접 라우팅되어 SQL 생성/실행 경로를 완전히 우회한다.
+LLM 호출이 없으므로 응답 지연이 거의 없고, 토큰 비용이 0이다.
+
+응답 전략:
+    - CASUAL_TALK: _CASUAL_RESPONSES 딕셔너리에서 키워드 매칭으로
+      적절한 인사/감사 응답을 선택한다. 매칭 실패 시 기본 인사 메시지.
+    - META_QUESTION: 시스템 기능 안내 메시지(_META_RESPONSE)를 반환한다.
+    - 기타: 기본 안내 메시지로 폴백한다.
+
+핵심 함수:
+    - simple_responder_node: 파이프라인 노드 진입점
+    - _match_casual_response: 키워드 기반 정형 응답 매칭
 """
 
 from __future__ import annotations

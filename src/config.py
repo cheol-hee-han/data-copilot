@@ -1,5 +1,7 @@
 """애플리케이션 설정 모듈.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 pydantic-settings 기반으로 .env 파일 및 환경 변수에서
 설정을 로드한다. 환경별로 달라지는 값(접속 정보, API 키 등)은
 .env에서, 파이프라인 상수·레이아웃·단위 기준값 등 고정값은
@@ -32,22 +34,14 @@ class DbConnectionInfo(BaseModel):
         )
 
 
-class CheckpointerConfig(BaseModel):
-    """Checkpointer 설정 — 별도 DB는 선택적."""
-
-    backend: str = "memory"  # "memory" | "postgres"
-    dedicated_db: DbConnectionInfo | None = None  # None이면 history_db 공유
-    pool_min: int = 2
-    pool_max: int = 10
-    thread_ttl_days: int = 30  # 0=무제한
-
-    def resolve_db(self, history_db: DbConnectionInfo) -> DbConnectionInfo:
-        """dedicated_db가 없으면 history_db를 그대로 사용한다."""
-        return self.dedicated_db or history_db
-
 
 class Settings(BaseSettings):
-    """환경 변수 기반 애플리케이션 설정."""
+    """환경 변수 기반 애플리케이션 설정.
+
+    pydantic-settings를 사용하여 .env 파일 및 환경 변수에서 설정을 로드한다.
+    폐쇄망 배포 시 .env 파일만 교체하면 LLM·DB·벡터DB 등 전체 인프라를
+    전환할 수 있도록 모든 외부 시스템 접속 정보를 환경 변수로 관리한다.
+    """
 
     # LLM Provider: "anthropic" 또는 "openai_compatible" (Groq, OpenRouter 등)
     llm_provider: str = "anthropic"
@@ -68,6 +62,7 @@ class Settings(BaseSettings):
     info_db_name: str = "info_db"
     info_db_user: str = "readonly_user"
     info_db_password: str = ""
+    info_db_default_schema: str = "ADWOWN"
 
     # SQL 이력 DB
     history_db_host: str = "localhost"
@@ -77,19 +72,22 @@ class Settings(BaseSettings):
     history_db_password: str = ""
 
     # ── Checkpointer ──
-    checkpointer: CheckpointerConfig = CheckpointerConfig()
+    checkpointer_backend: str = "memory"  # "memory" | "postgres"
+    checkpointer_pool_min: int = 2
+    checkpointer_pool_max: int = 10
+    checkpointer_thread_ttl_days: int = 30  # 0=무제한
 
-    # ElasticSearch
-    es_host: str = "localhost"
-    es_port: int = 9200
-    es_user: str = "elastic"
-    es_password: str = ""
-    es_table_meta_index: str = "table_meta"
-    es_report_sql_index: str = "report_sql"
-    es_code_meta_index: str = "code_meta"
-    es_table_meta_size: int = 10
-    es_report_sql_size: int = 5
-    es_code_meta_size: int = 20
+    # --- ElasticSearch (미사용, 향후 재사용 가능성 있어 주석 보존) ---
+    # es_host: str = "localhost"
+    # es_port: int = 9200
+    # es_user: str = "elastic"
+    # es_password: str = ""
+    # es_table_meta_index: str = "table_meta"
+    # es_report_sql_index: str = "report_sql"
+    # es_code_meta_index: str = "code_meta"
+    # es_table_meta_size: int = 10
+    # es_report_sql_size: int = 5
+    # es_code_meta_size: int = 20
 
     # Qdrant
     qdrant_host: str = "localhost"
@@ -100,6 +98,8 @@ class Settings(BaseSettings):
     qdrant_sql_history_collection: str = "sql_history"
     qdrant_sql_history_top_k: int = 5  # Reranker 후 최종 반환 건수
     qdrant_sql_history_prefetch_limit: int = 20  # 하이브리드 검색 후보 수
+    qdrant_max_prefetch: int = 100  # exclude_ids 누적 시 prefetch 상한
+    qdrant_manual_max_limit: int = 30  # search_manual exclude_ids 누적 시 limit 상한
 
     # MongoDB (테이블 메타 + 코드 메타 + 비즈 메타)
     mongo_host: str = "localhost"
@@ -111,10 +111,11 @@ class Settings(BaseSettings):
     mongo_column_meta_collection: str = "dpasset_column"
     mongo_code_meta_collection: str = "standard_code"
     mongo_code_value_collection: str = "standard_code_value"
-    mongo_glossary_collection: str = "glossary"
+    mongo_biz_term_collection: str = "biz_term"
     mongo_biz_meta_collection: str = "biz_meta"
     mongo_table_meta_size: int = 10   # 테이블 메타 최대 반환 건수
     mongo_code_meta_size: int = 10    # 코드 메타 최대 반환 건수
+    mongo_biz_term_size: int = 20     # 비즈니스 용어 기본 limit (기존에는 limit 없었음)
     mongo_request_timeout: int = 10   # MongoDB 요청 타임아웃 (초)
 
     # Neo4j (온톨로지 그래프)
@@ -200,20 +201,36 @@ class Settings(BaseSettings):
     sybase_charset: str = "UTF-8"
     sybase_query_timeout: int = 60
 
-    # DB 타임아웃
+    # DB 커넥션 풀 (멀티워커 시 workers × pool_size ≤ DB max_connections 확인)
     db_pool_timeout: int = 30            # 커넥션 풀 대기 타임아웃 (초)
+    db_pool_size: int = 5                # 기본 커넥션 풀 크기
+    db_pool_max_overflow: int = 10       # 풀 초과 시 최대 추가 커넥션
+    db_pool_recycle: int = 1800          # 커넥션 재활용 주기 (초, DB idle timeout 방어)
     # 쿼리 실행 타임아웃 (초, asyncpg command_timeout)
     db_query_timeout: int = 60
 
     # ES / Qdrant 타임아웃
-    es_request_timeout: int = 10         # ES 검색 요청 타임아웃 (초)
+    # es_request_timeout: int = 10       # ES 미사용
     qdrant_request_timeout: int = 10     # Qdrant 검색 요청 타임아웃 (초)
+    health_check_timeout: float = 5.0    # 커넥터별 health_check 타임아웃 (초)
 
     # Dummy 모드: True 면 외부 시스템 없이 내장 샘플 데이터로 동작
     use_dummy: bool = True
 
     # 배포 모드: "external" (외부망, PostgreSQL) | "internal" (내부망, ADW+BDP)
     deployment_mode: str = "external"
+
+    # 활성 커넥터 — 여기 포함된 커넥터만 connect/disconnect/health_check 수행.
+    # 미포함 커넥터는 dummy 모드 인스턴스로 유지되어 빈 결과를 반환한다.
+    # .env 에서 쉼표 구분 문자열로 지정: ENABLED_CONNECTORS=mongodb,qdrant,info_db,history_db
+    enabled_connectors: set[str] = {
+        "mongodb",
+        "qdrant",
+        "info_db",
+        "history_db",
+        # "elasticsearch",   # 보고서 SQL 검색 (현재 미사용)
+        # "neo4j",           # 온톨로지 그래프 (현재 미사용)
+    }
 
     # ── 파이프라인 제어 ──
     sql_max_retry: int = 2              # SQL 재생성 최대 재시도 횟수
@@ -227,16 +244,18 @@ class Settings(BaseSettings):
     agentic_tool_timeout: float = 10.0  # 개별 도구 호출 타임아웃 (C-12)
     agentic_total_timeout: float = 120.0  # 서브그래프 전체 타임아웃
     # 에이전틱 루프 제어 상수
-    max_tool_calls: int = 20            # 도구 호출 총량 한도
-    max_replans: int = 5                # 재계획 최대 횟수
-    max_generates: int = 4              # SQL 생성 시도 최대 횟수
-    max_local_fixes: int = 2            # 로컬 문법 교정 최대 횟수
+    max_tool_calls: int = 40            # 도구 호출 총량 한도
+    max_replans: int = 10               # 재계획 최대 횟수
+    max_generates: int = 5              # SQL 생성 시도 최대 횟수
+    max_local_fixes: int = 5            # 로컬 문법 교정 최대 횟수
+    force_generate_after_replans: int = 3  # N회 replan 후 강제 SQL 생성 진입
 
     # ── Recovery Agent ──
     max_conflicted_bounces: int = 2         # CONFLICTED 왕복 가드
+    max_same_failure_repeats: int = 3       # 동일 failure_type 연속 반복 시 강제 give_up
 
     # ── LLM 호출 ──
-    llm_transport_max_retry: int = 3    # SDK 레벨 전송 재시도 (429/500/503/네트워크)
+    llm_transport_max_retry: int = 5    # SDK 레벨 전송 재시도 (429/500/503/네트워크)
     llm_parse_max_retry: int = 2        # 포맷 불일치 시 최대 재시도 횟수
     llm_default_max_tokens: int = 1000  # LLM 기본 max_tokens
     llm_default_timeout: float = 15.0   # LLM 기본 타임아웃 (초)
@@ -258,6 +277,7 @@ class Settings(BaseSettings):
     min_rows_for_visualization: int = 3  # 시각화 판단 최소 행 수
     format_max_rows: int = 50           # 포맷팅 프롬프트에 포함할 최대 행 수
     analysis_max_rows: int = 100        # 분석/시각화 프롬프트에 포함할 최대 행 수
+    ui_result_max_rows: int = 500       # stream.end result_data에 포함할 최대 행 수
 
     # LangSmith (외부망 개발 환경 전용, 폐쇄망에서는 False)
     langsmith_enabled: bool = False
@@ -266,12 +286,17 @@ class Settings(BaseSettings):
     langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     # Evaluation Tracker (자체 트래킹, 폐쇄망 호환)
-    eval_tracker_enabled: bool = True
+    eval_trace_json_enabled: bool = True        # 기계 분석용 JSON
+    eval_trace_report_enabled: bool = True      # 기존 5섹션 보고서
+    eval_trace_reasoning_enabled: bool = True   # 신규 reasoning flow
     eval_tracker_output_dir: str = "logs/traces"
 
     # Application
     log_level: str = "INFO"
     log_format: str = "console"  # "console" or "json"
+    log_backup_count: int = 15  # 롤링 보관 일수 (0=무제한)
+    # PII 마스킹 (False: 로그/트레이스/응답에서 비활성화)
+    pii_masking_enabled: bool = True
     max_query_rows: int = 10000
 
     # ── 3순위: SVG 차트 레이아웃 (프론트엔드에서 조절하는 게 맞아 변경 빈도 낮음) ──
@@ -305,7 +330,23 @@ class Settings(BaseSettings):
             password=self.history_db_password,
         )
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # 민감 필드 키워드 — logger.py의 _SENSITIVE_KEY_PARTS와 동일 기준
+    _MASK_KEYWORDS: tuple[str, ...] = (
+        "password", "api_key", "secret", "token", "credential",
+    )
+
+    def __repr__(self) -> str:
+        """민감 필드를 마스킹하여 로깅 안전하게 출력한다."""
+        safe: dict[str, object] = {}
+        for key in self.model_fields:
+            val = getattr(self, key)
+            if any(s in key for s in self._MASK_KEYWORDS):
+                safe[key] = "****" if val else ""
+            else:
+                safe[key] = val
+        return f"Settings({safe})"
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

@@ -96,7 +96,9 @@ if __name__ == "__main__":
     if args.trace_file:
         p = Path(args.trace_file)
     else:
-        traces_dir = Path("logs/traces")
+        from src.config import settings
+
+        traces_dir = Path(settings.eval_tracker_output_dir)
         files = sorted(traces_dir.glob("trace_*.json"))
         if not files:
             print("트레이스 파일 없음")

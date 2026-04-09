@@ -1,5 +1,7 @@
 """LLM 클라이언트 통합 래퍼 — 프로바이더 무관 통합 인터페이스.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 UnifiedLLMClient를 통해 Anthropic Claude API와 OpenAI 호환 API(Groq, OpenRouter 등)를
 단일 인터페이스(client.messages.create)로 추상화한다.
 Anthropic 호출은 AsyncAnthropic을 그대로 위임하고, OpenAI 호환 호출은

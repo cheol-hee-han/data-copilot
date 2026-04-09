@@ -1,5 +1,7 @@
 """세션 스토어 인터페이스 및 팩토리.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 대화 이력(history)을 추상화하여, memory(dict)와 redis 구현체를
 동일한 인터페이스로 사용할 수 있게 한다.
 settings.session_backend 값에 따라 팩토리가 적절한 구현체를 반환한다.
@@ -103,6 +105,15 @@ class SessionStore(ABC):
         """스토어 상태를 확인한다."""
 
 
+def _replace_store() -> SessionStore:
+    """싱글턴을 MemorySessionStore로 교체한다 (Redis fallback용)."""
+    global _store
+    from src.services.session.memory_store import MemorySessionStore
+    _store = MemorySessionStore()
+    logger.warning("세션 백엔드: Memory fallback (Redis 연결 실패)")
+    return _store
+
+
 def get_session_store() -> SessionStore:
     """설정에 따라 세션 스토어 싱글턴을 반환한다."""
     global _store
@@ -111,11 +122,20 @@ def get_session_store() -> SessionStore:
 
     backend = settings.session_backend.lower()
     if backend == "redis":
-        from src.services.session.redis_store import (
-            RedisSessionStore,
-        )
-        _store = RedisSessionStore()
-        logger.info("세션 백엔드: Redis")
+        try:
+            from src.services.session.redis_store import (
+                RedisSessionStore,
+            )
+            _store = RedisSessionStore()
+            logger.info("세션 백엔드: Redis")
+        except Exception:
+            logger.warning(
+                "Redis 세션 스토어 생성 실패 — Memory fallback",
+            )
+            from src.services.session.memory_store import (
+                MemorySessionStore,
+            )
+            _store = MemorySessionStore()
     else:
         from src.services.session.memory_store import (
             MemorySessionStore,

@@ -1,14 +1,21 @@
 """Redis 세션 스토어 — 운영/프로덕션용.
 
-Redis에 대화 이력을 JSON으로 저장한다.
-서버 재시작, 다중 워커, 수평 확장 환경에서도 세션이 유지된다.
-명확화 상태 관리는 checkpointer + interrupt() 패턴으로 이관됨.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+Redis에 대화 이력을 JSON 문자열로 저장하여
+서버 재시작, 다중 워커, 수평 확장 환경에서도 세션을 유지한다.
+redis.asyncio를 지연 임포트하여 redis 패키지 미설치 환경에서도
+모듈 로드가 가능하도록 설계되었다.
+
+명확화 상태 관리는 checkpointer + interrupt() 패턴으로 이관되어
+이 스토어는 대화 이력 관리에만 집중한다.
 
 키 구조:
     session:{sid}:history  — JSON 배열 (대화 이력)
 
 TTL 정책:
-    - history: 슬라이딩 TTL (매 append 시 갱신, 기본 30분)
+    - history: 슬라이딩 TTL (매 append_history 시 갱신, 기본 30분)
+      활발한 대화는 TTL이 계속 연장되고, 비활성 세션은 자동 만료된다.
 """
 
 from __future__ import annotations
@@ -21,7 +28,7 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Redis 임포트를 지연하여 redis 미설치 환경에서도 모듈 로드 가능
+# redis 미설치 환경(memory 백엔드만 사용)에서도 모듈 로드 가능하도록 지연 임포트
 _redis_module = None
 
 
@@ -76,7 +83,8 @@ class RedisSessionStore(SessionStore):
             return False
         try:
             return await self._client.ping()
-        except Exception:
+        except Exception as e:
+            logger.debug("Redis health_check 실패", error=str(e))
             return False
 
     async def get_history(

@@ -52,15 +52,15 @@ v2.0에서 **3계층 16노드 에이전틱 파이프라인**으로 전면 재설
 │          LangGraph 파이프라인 (pipeline.py) — 16노드         │
 │                                                             │
 │  ┌─────────── Interpret 계층 ─────────────────────┐         │
-│  │ context_classifier → normalize_query           │         │
+│  │ intent_classifier → normalize_query           │         │
 │  └──────────────────────┬────────────────────────┘         │
 │                         │                                   │
 │          ┌──────────────┴──────────────┐                    │
 │          ▼                             ▼                    │
 │  ┌─ clarification_handler ──┐   ┌─── Reason 계층 (에이전틱) ──┐  │
 │  │ 통합 명확화 노드    │   │ reasoning_preparer            │  │
-│  │                     │   │ → knowledge_fetcher            │  │
-│  │ T1~T5 트리거        │   │ → knowledge_interpreter       │  │
+│  │                     │   │ → context_retriever            │  │
+│  │ T1~T5 트리거        │   │ → context_interpreter       │  │
 │  │ AmbiguitySignal     │   │ → readiness_gate            │  │
 │  │ source_node 복귀    │←──│ → sql_generator             │  │
 │  └────────────────────┘   │ → sql_validator              │  │
@@ -113,7 +113,7 @@ v2.0에서 **3계층 16노드 에이전틱 파이프라인**으로 전면 재설
 workflow = StateGraph(PipelineState)
 
 # ── Interpret 계층 (2노드) ──
-workflow.add_node("context_classifier",  context_classifier_node)  # 이력 해소 + 의도 분류 통합
+workflow.add_node("intent_classifier",  intent_classifier_node)  # 이력 해소 + 의도 분류 통합
 workflow.add_node("normalize_query",     normalize_query_node)     # 8-Slot 정규화
 
 # ── 통합 명확화 (1노드) ──
@@ -121,8 +121,8 @@ workflow.add_node("clarification_handler",     clarification_handler_node)     #
 
 # ── Reason 계층 (8노드, 에이전틱 루프) ──
 workflow.add_node("reasoning_preparer",  reasoning_preparer_node)  # 규칙 기반 실행 계획 수립 (LLM 미사용)
-workflow.add_node("knowledge_fetcher",     knowledge_fetcher_node)     # 도구 기반 검색 실행
-workflow.add_node("knowledge_interpreter", knowledge_interpreter_node) # 검색 결과 해석, 지식 승격
+workflow.add_node("context_retriever",     context_retriever_node)     # 도구 기반 검색 실행
+workflow.add_node("context_interpreter", context_interpreter_node) # 검색 결과 해석, 지식 승격
 workflow.add_node("readiness_gate",      readiness_gate_node)      # 준비도 판정 (SSOT)
 workflow.add_node("sql_generator",       sql_generator_node)       # SQL 생성 (dialect 라우팅)
 workflow.add_node("sql_validator",       sql_validator_node)       # 3-레이어 검증
@@ -136,25 +136,25 @@ workflow.add_node("format_response",     format_response_node)     # 보고서 �
 workflow.add_node("simple_responder",    simple_responder_node)    # 비데이터 의도 경량 응답
 workflow.add_node("error_end",           _handle_error)            # 에러 메시지 생성
 
-workflow.set_entry_point("context_classifier")
+workflow.set_entry_point("intent_classifier")
 ```
 
 **노드 명명 규칙**: 그래프 노드 이름 = 파일명 = 함수명(`_node` 접미사 제외).
-예: `"knowledge_fetcher"` → `knowledge_fetcher.py` → `knowledge_fetcher_node()`
+예: `"context_retriever"` → `context_retriever.py` → `context_retriever_node()`
 
 **노드 디렉토리 구조:**
 
 ```
 src/agents/nodes/
 ├── interpret/
-│   ├── context_classifier.py    # context_classifier (이력 해소 + 의도 분류 통합)
+│   ├── intent_classifier.py    # intent_classifier (이력 해소 + 의도 분류 통합)
 │   ├── query_normalizer.py      # normalize_query
 │   ├── clarification_handler.py # clarification_handler (통합 명확화)
-│   └── 미사용_intent_classifier.py # (미사용) context_classifier로 통합
+│   └── 미사용_intent_classifier.py # (미사용) intent_classifier로 통합
 ├── reason/
 │   ├── reasoning_preparer.py    # reasoning_preparer
-│   ├── knowledge_fetcher.py       # knowledge_fetcher
-│   ├── knowledge_interpreter.py   # knowledge_interpreter
+│   ├── context_retriever.py       # context_retriever
+│   ├── context_interpreter.py   # context_interpreter
 │   ├── readiness_gate.py        # readiness_gate
 │   ├── sql_generator.py         # sql_generator
 │   ├── sql_validator.py         # sql_validator
@@ -181,22 +181,22 @@ config:
     fontSize: 14px
 ---
 graph TD
-    START((시작)) --> context_classifier
-    context_classifier -->|pending_signals| clarification_handler
-    context_classifier -->|비데이터 의도| simple_responder
-    context_classifier -->|ERROR| error_end
-    context_classifier -->|normalization ON| normalize_query
-    context_classifier -->|normalization OFF| reasoning_preparer
+    START((시작)) --> intent_classifier
+    intent_classifier -->|pending_signals| clarification_handler
+    intent_classifier -->|비데이터 의도| simple_responder
+    intent_classifier -->|ERROR| error_end
+    intent_classifier -->|normalization ON| normalize_query
+    intent_classifier -->|normalization OFF| reasoning_preparer
 
     normalize_query -->|pending_signals| clarification_handler
     normalize_query -->|else| reasoning_preparer
 
-    reasoning_preparer --> knowledge_fetcher
+    reasoning_preparer --> context_retriever
 
-    knowledge_fetcher --> knowledge_interpreter
-    knowledge_interpreter --> readiness_gate
+    context_retriever --> context_interpreter
+    context_interpreter --> readiness_gate
 
-    readiness_gate -->|explore + PENDING steps| knowledge_fetcher
+    readiness_gate -->|explore + PENDING steps| context_retriever
     readiness_gate -->|explore + steps exhausted| recovery_agent
     readiness_gate -->|generate_sql| sql_generator
     readiness_gate -->|replan| recovery_agent
@@ -232,7 +232,7 @@ graph TD
 
     simple_responder --> format_response
 
-    clarification_handler -->|source_node| context_classifier
+    clarification_handler -->|source_node| intent_classifier
     clarification_handler -->|source_node| normalize_query
     clarification_handler -->|source_node| sql_generator
     clarification_handler -->|source_node| readiness_gate
@@ -241,7 +241,7 @@ graph TD
 
 **라우팅 함수 상세:**
 
-#### (1) `_route_after_context_classifier` — 이력 해소 + 의도 분류 후
+#### (1) `_route_after_intent_classifier` — 이력 해소 + 의도 분류 후
 
 | 조건 | 분기 대상 |
 |------|-----------|
@@ -264,7 +264,7 @@ graph TD
 
 | Verdict | 조건 | 분기 대상 |
 |---------|------|-----------|
-| `explore` | PENDING 스텝 잔존 | `knowledge_fetcher` (추가 탐색) |
+| `explore` | PENDING 스텝 잔존 | `context_retriever` (추가 탐색) |
 | `explore` | PENDING 소진 | `recovery_agent` (recovery 전환) |
 | `replan` | — | `recovery_agent` |
 | `generate_sql` | — | `sql_generator` |
@@ -290,7 +290,7 @@ graph TD
 | `SQL_SYNTAX` | 한도 초과 | `result_finalizer` (conclude_failure) |
 | `SQL_SEMANTIC_LOCAL` | `should_escalate_to_structural()` | `recovery_agent` (replan) |
 | `SQL_SEMANTIC_LOCAL` | `generate_attempts < MAX_GENERATES` | `sql_generator` (fix_local) |
-| `SQL_STRUCTURAL`, `EMPTY_RESULT`, `DB_ERROR`, `NO_USE_CASE`, `NO_TABLE`, `TERM_UNRESOLVABLE` | — | `recovery_agent` (replan) |
+| `SQL_STRUCTURAL`, `EMPTY_RESULT`, `DB_ERROR`, `NO_KNOWLEDGE`, `NO_TABLE`, `TERM_UNRESOLVABLE`, `GENERATION_FAILED` | — | `recovery_agent` (replan) |
 | 기타 | — | `result_finalizer` (conclude_failure) |
 
 #### (6) `_route_after_recovery_agent` — 복구 에이전트 후
@@ -324,7 +324,7 @@ graph TD
 #### `_route_after_clarify` — 통합 명확화 후 (source_node 복귀)
 
 마지막 `resolved_signals[-1].source_node`로 복귀한다.
-유효한 복귀 대상: `context_classifier`, `normalize_query`,
+유효한 복귀 대상: `intent_classifier`, `normalize_query`,
 `sql_generator`, `readiness_gate`, `result_finalizer`.
 
 **통합 명확화 (Unified Clarification) 상세:**
@@ -333,8 +333,8 @@ graph TD
 
 | 트리거 | 발생 노드 | 사유 예시 |
 |--------|-----------|-----------|
-| T1 | `context_classifier` | 대화 이력 UNSURE |
-| T2 | `context_classifier` | 의도 불분명 (AMBIGUOUS) |
+| T1 | `intent_classifier` | 대화 이력 UNSURE |
+| T2 | `intent_classifier` | 의도 불분명 (AMBIGUOUS) |
 | T3 | `normalize_query` | 8-Slot 파싱 불확실 |
 | T4 | `sql_generator` | Cross-DB dialect INFER |
 | T5 | `result_finalizer` | 사용자 확인 필요 |
@@ -484,9 +484,9 @@ class ReasoningState(BaseModel):
 - 보고서 SQL은 **복잡한 계수산출식**(연체율, BIS비율 등)의 정확한 산출 방법을 제공한다
 - 업무 매뉴얼은 **업무 규정**(연체 분류 기준 등)을 제공하여 조건식 정확도를 높인다
 
-v2.0에서는 이 수집이 `knowledge_fetcher` + `knowledge_interpreter` 2단계로 분리되었다.
-`knowledge_fetcher`가 도구 기반으로 ES/Qdrant/DB 검색을 실행하고,
-`knowledge_interpreter`가 결과를 해석하여 `KnowledgeItem`으로 승격한다.
+v2.0에서는 이 수집이 `context_retriever` + `context_interpreter` 2단계로 분리되었다.
+`context_retriever`가 도구 기반으로 ES/Qdrant/DB 검색을 실행하고,
+`context_interpreter`가 결과를 해석하여 `KnowledgeItem`으로 승격한다.
 `readiness_gate`가 준비도를 판정하여 추가 탐색 또는 SQL 생성으로 분기한다.
 
 ### 3.1.1 검색 쿼리 전략 (SearchKeywords) — 2026-03-20 추가
@@ -628,7 +628,7 @@ SQL 생성 시 테이블의 용도와 특성을 정확히 파악하기 어렵다
 **보강 흐름:**
 
 ```
- 컨텍스트 수집 (knowledge_fetcher → knowledge_interpreter)
+ 컨텍스트 수집 (context_retriever → context_interpreter)
      │
      ├─ [1] ES/MongoDB에서 테이블 메타 수집
      │
@@ -917,11 +917,11 @@ class TraceEntry(BaseModel):
 
 | 노드 | 기록 내용 | 예시 |
 |------|----------|------|
-| context_classifier | 이력 해소 + 분류 결과 | CONTINUE + DATA_EXTRACTION (97%) |
+| intent_classifier | 이력 해소 + 분류 결과 | CONTINUE + DATA_EXTRACTION (97%) |
 | normalize_query | 8-Slot 정규화 결과 | 대상: 고객, 기간: 이번 달, ... |
 | reasoning_preparer | 실행 계획 수립 | 가설 2건, 실행 계획 3스텝 |
-| knowledge_fetcher | 도구 실행 결과 | ES 테이블 3건, SQL 이력 2건 |
-| knowledge_interpreter | 지식 승격 결과 | KnowledgeItem 5건 CONFIRMED |
+| context_retriever | 도구 실행 결과 | ES 테이블 3건, SQL 이력 2건 |
+| context_interpreter | 지식 승격 결과 | KnowledgeItem 5건 CONFIRMED |
 | readiness_gate | 준비도 판정 | generate_sql (score: 0.82) |
 | sql_generator | 사용 테이블 + dialect | 사용 테이블: TB_CUST_INFO (PostgreSQL) |
 | sql_validator | 검증 결과 | 3-레이어 검증 통과 |
@@ -941,16 +941,16 @@ class TraceEntry(BaseModel):
 
 ## 5. 노드별 상세 설계
 
-### 5.1 통합 이력 해소 + 의도 분류 노드 (context_classifier)
+### 5.1 통합 이력 해소 + 의도 분류 노드 (intent_classifier)
 
 **책임**: 대화 이력 해소와 의도 분류를 단일 LLM 호출로 수행한다. 비데이터 의도는 `simple_responder`로 라우팅한다.
 
-> **v3.2 변경:** 기존 `resolve_history` + `classify_intent` 2개 노드를 `context_classifier` 단일 노드로 통합.
-> 내부적으로 `services/context_classifier.py`를 호출한다.
+> **v3.2 변경:** 기존 `resolve_history` + `classify_intent` 2개 노드를 `intent_classifier` 단일 노드로 통합.
+> 내부적으로 `services/intent_classifier.py`를 호출한다.
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/interpret/context_classifier.py` |
+| 파일 | `src/agents/nodes/interpret/intent_classifier.py` |
 | 입력 | `user_input`, `conversation_history` |
 | 출력 | `preprocessed_input` (이력 반영), `intent`, `intent_confidence`, `query_category`, `pending_signals` |
 | 이력 판정 | CONTINUE(이전 대화 연속) / NEW(신규 질의) / UNSURE(모호 → T1 트리거) |
@@ -993,27 +993,27 @@ class TraceEntry(BaseModel):
 | 입력 | `preprocessed_input`, `normalized_query`, `intent` |
 | 출력 | `reason.query_decomposition`, `reason.hypotheses`, `reason.execution_plan`, `reason.knowledge_items` (초기) |
 | 특성 | 규칙 기반 (no LLM, no tools) — normalized_query에서 execution_plan을 결정적으로 생성한다 |
-| 분기 | 항상 `knowledge_fetcher`로 직행한다 (직접 에지) |
+| 분기 | 항상 `context_retriever`로 직행한다 (직접 에지) |
 
-### 5.6 검색 실행 노드 (knowledge_fetcher)
+### 5.6 검색 실행 노드 (context_retriever)
 
 **책임**: reasoning_preparer의 `execution_plan`에 따라 도구(ES, Qdrant, DB)를 호출하여 검색을 수행한다.
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/reason/knowledge_fetcher.py` |
+| 파일 | `src/agents/nodes/reason/context_retriever.py` |
 | 입력 | `reason.execution_plan`, `reason.searched_queries` |
 | 출력 | `reason.candidate_tables`, `reason.explored_use_cases`, `reason.code_map`, `reason.discovered_facts`, `reason.loop_guard` (tool_calls 증가) |
 | 도구 | `search_table_meta`, `search_use_cases`, `search_code_meta`, `sample_data`, `search_manual` 등 (`tools.py`) |
-| 후속 | 항상 `knowledge_interpreter`로 이동한다 |
+| 후속 | 항상 `context_interpreter`로 이동한다 |
 
-### 5.7 컨텍스트 해석 노드 (knowledge_interpreter)
+### 5.7 컨텍스트 해석 노드 (context_interpreter)
 
 **책임**: 검색 결과를 해석하여 `KnowledgeItem`의 상태를 승격(promote)한다.
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/reason/knowledge_interpreter.py` |
+| 파일 | `src/agents/nodes/reason/context_interpreter.py` |
 | 입력 | `reason.knowledge_items`, `reason.candidate_tables`, `reason.explored_use_cases` |
 | 출력 | `reason.knowledge_items` (상태 승격), `reason.discovered_facts` |
 | 승격 | UNRESOLVED → INFERRED / CONFIRMED (증거 기반) |
@@ -1055,7 +1055,7 @@ class TraceEntry(BaseModel):
 | 입력 | `reason.generated_sql` |
 | 출력 | `reason.validated_sql` 또는 `reason.failure_type` + `reason.failure_reason` |
 | 검증 항목 | 금지패턴(17개), 구문파싱(sqlglot), PII 컬럼(27개), LIMIT 강제, 시스템 카탈로그 차단 |
-| FailureType | `None`(통과), `SQL_SYNTAX`, `SQL_SEMANTIC_LOCAL`, `SQL_STRUCTURAL`, `EMPTY_RESULT`, `DB_ERROR`, `NO_USE_CASE`, `NO_TABLE`, `TERM_UNRESOLVABLE` |
+| FailureType | `None`(통과), `SQL_SYNTAX`, `SQL_SEMANTIC_LOCAL`, `SQL_STRUCTURAL`, `EMPTY_RESULT`, `DB_ERROR`, `NO_KNOWLEDGE`, `NO_TABLE`, `TERM_UNRESOLVABLE`, `GENERATION_FAILED` |
 | 분기 | FailureType에 따라 6가지 경로로 라우팅된다 (2.3절 참고) |
 
 ### 5.11 복구 에이전트 노드 (recovery_agent)
@@ -1295,10 +1295,10 @@ devtools/docker/docker-compose.dev.yml
 |------|----------|------------|
 | 에이전틱 추론 루프 | **v2.0 구현 완료** — 8노드 Reason 계층 (reasoning_preparer→fetcher→interpreter→gate→generator→validator→recovery→finalizer) | 멀티에이전트 분산 추론, 병렬 가설 탐색 |
 | 통합 명확화 | **v2.0 구현 완료** — AmbiguitySignal + pending/resolved 패턴, T1~T5 트리거, source_node 복귀 | 컨텍스트 기반 자동 추론 비율 향상 (ASK 감소) |
-| 이력 해소 | **v2.0 구현 완료** — context_classifier 노드 (CONTINUE/NEW/UNSURE + 의도 분류 통합) | 장기 세션 대화 문맥 요약 |
+| 이력 해소 | **v2.0 구현 완료** — intent_classifier 노드 (CONTINUE/NEW/UNSURE + 의도 분류 통합) | 장기 세션 대화 문맥 요약 |
 | 8-Slot 정규화 | **v2.0 구현 완료** — normalize_query 노드 | Slot 정확도 개선, 복합 질의 분리 |
 | SQL 재생성 | **v2.0 구현 완료** — FailureType 기반 분기 (6가지), recovery_agent ReAct 복구 | 자동 수정 전략 다양화 (부분 AST 수정) |
-| 벡터 검색 (SQL 이력) | **v2.0 구현 완료** — Qdrant sql_history 컬렉션 (10,000건+), knowledge_fetcher에서 활용 | 임베딩 모델 고도화, 하이브리드 검색 |
+| 벡터 검색 (SQL 이력) | **v2.0 구현 완료** — Qdrant sql_history 컬렉션 (10,000건+), context_retriever에서 활용 | 임베딩 모델 고도화, 하이브리드 검색 |
 | 유사 테이블 구분 | **구현 완료** — 5개 그룹, 신호어 기반 점수 + CandidateTable.selection_status | 임베딩 유사도 기반 테이블 추천으로 고도화 |
 | 테이블 설명 보강 | **구현 완료** — 3관점 충분성 판단 + LLM 보강 + Semaphore 병렬 | 보강 결과 캐싱(Redis), 사용자 피드백으로 품질 개선 |
 | LLM 포맷 재시도 | **구현 완료** — `llm_call_with_parse_retry` 공용 유틸리티 | 프로바이더별 최적 포맷 힌트 자동 선택 |
@@ -1306,7 +1306,7 @@ devtools/docker/docker-compose.dev.yml
 | 분석결과 시각화 | **구현 완료** — LLM 판단 + SVG 생성 + 템플릿 폴백 | 인터랙티브 차트, 추가 차트 유형, PNG/PDF 내보내기 |
 | 모델 교체 | Anthropic + OpenAI 호환 (설정으로 변경 가능) | 폐쇄망 로컬 LLM 대응 프롬프트 최적화 |
 | 프로그램 저장소 | 미구현 | 프로그램 코드에서 SQL 패턴 추출 |
-| Fast-Path | **v2.1에서 제거됨** — reasoning_preparer는 항상 knowledge_fetcher로 직행. 향후 캐시 기반 즉시 응답 계층으로 대체 검토 | 캐시 기반 즉시 응답 계층 추가 |
+| Fast-Path | **v2.1에서 제거됨** — reasoning_preparer는 항상 context_retriever로 직행. 향후 캐시 기반 즉시 응답 계층으로 대체 검토 | 캐시 기반 즉시 응답 계층 추가 |
 | planner → reasoning_preparer 리네임 | **v2.1 완료** — LLM 미사용 규칙 기반 노드로 전환, 노드명을 역할에 맞게 변경 | — |
 | Dialect 라우팅 | **v2.0 구현 완료** — PostgreSQL/Sybase IQ/Impala 지원 | 폐쇄망 타겟 DB별 프롬프트 최적화 |
 

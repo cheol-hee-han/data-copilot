@@ -1,5 +1,7 @@
 """LangSmith 트레이싱 설정 모듈 — LangGraph 파이프라인 관측성 관리.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 LangSmith 트레이싱의 활성화/비활성화를 환경변수 기반으로 제어한다.
 settings.langsmith_enabled=True이고 API 키가 설정된 경우에만 LANGCHAIN_TRACING_V2,
 LANGCHAIN_API_KEY, LANGCHAIN_PROJECT, LANGCHAIN_ENDPOINT 환경변수를 설정하여

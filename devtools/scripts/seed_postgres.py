@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import psycopg2  # type: ignore[import-untyped]
+from psycopg2.extras import execute_values  # type: ignore[import-untyped]
 
 # ══════════════════════════════════════════════════════════════
 # 연결 정보
@@ -45,6 +46,7 @@ HISTORY_DB_CONNINFO = (
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _REQUIREMENTS_DOC = _REPO_ROOT / "docs" / \
     "agent-guides" / "test-data-requirements.md"
+RESOURCES_DIR = _REPO_ROOT / "resources"
 
 
 def _connect(conninfo: str):
@@ -254,6 +256,361 @@ _TYPE_EXTRA_COLS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+
+# ══════════════════════════════════════════════════════════════
+# 도메인별 업무 컬럼 (비-★ DDL에 사용)
+# ══════════════════════════════════════════════════════════════
+
+def _extract_domain(table_name: str) -> str:
+    """TB_ADW_CSC101M → 'CSC', TB_ADW_LNCL305M → 'LNCL'."""
+    suffix = table_name[7:]  # TB_ADW_ 이후
+    for i, c in enumerate(suffix):
+        if c.isdigit():
+            return suffix[:i]
+    return suffix[:-1]
+
+
+# 3~4글자 도메인 코드 → 그룹 키
+_DOMAIN_GROUP: dict[str, str] = {
+    "COM": "COM",
+    "CSC": "CUS", "CSP": "CUS", "CUS": "CUS",
+    "DEP": "DEP", "DEA": "DEP", "DEPS": "DEP",
+    "LNB": "LN", "LNR": "LN", "LNA": "LN",
+    "LNC": "LN", "LNCL": "LN",
+    "CRD": "CRD", "CRU": "CRD", "CRDB": "CRD",
+    "FXD": "FX", "FXB": "FX", "TRD": "FX",
+    "FND": "FND", "TRS": "FND", "ELS": "FND", "BND": "FND",
+    "TRX": "TRX", "TXP": "TRX",
+    "INS": "INS", "INSP": "INS",
+    "PNB": "PN", "PNI": "PN",
+    "DGB": "DG", "DGA": "DG", "MYDT": "DG",
+    "RSK": "RSK", "AML": "AML", "FDS": "RSK", "CMP": "RSK",
+    "MKT": "MKT", "CRM": "MKT",
+    "FIN": "FIN", "GLB": "FIN", "BUDG": "FIN",
+    "WMB": "WM", "WMR": "WM",
+}
+
+# 도메인 그룹 → 업무 컬럼 (★ 테이블 DDL 기반 + 은행 도메인 지식)
+_DOMAIN_BIZ_COLS: dict[str, list[tuple[str, str]]] = {
+
+    # ── COM (공통: 부점, 코드, 캘린더, 파라미터) ──
+    "COM": [
+        ("NM", "VARCHAR(100)"),
+        ("DESC_CONT", "VARCHAR(500)"),
+        ("USE_YN", "VARCHAR(1) DEFAULT 'Y'"),
+        ("SORT_ORD", "INTEGER"),
+        ("RGST_DT", "DATE"),
+        ("RGST_USR_ID", "VARCHAR(20)"),
+    ],
+
+    # ── CUS (고객: 기본정보, 프로필, KYC, VIP, 세그먼트) ──
+    "CUS": [
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("CSM", "VARCHAR(100)"),
+        ("CUS_DCD", "VARCHAR(10)"),
+        ("CUS_GRD_CD", "VARCHAR(10)"),
+        ("GNDR_DCD", "VARCHAR(5)"),
+        ("AGE_GRP_CD", "VARCHAR(10)"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+        ("JOIN_DT", "DATE"),
+        ("TEL_NO", "VARCHAR(20)"),
+        ("STS_DCD", "VARCHAR(10)"),
+    ],
+
+    # ── DEP (수신: 계좌, 상품, 이자, 자동이체, 예금잔고) ──
+    "DEP": [
+        ("ACN", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("ACT_DCD", "VARCHAR(10)"),
+        ("ACT_STCD", "VARCHAR(10)"),
+        ("PD_NM", "VARCHAR(100)"),
+        ("BAL_AMT", "NUMERIC(18,2)"),
+        ("INT_RT", "NUMERIC(10,4)"),
+        ("OPEN_DT", "DATE"),
+        ("MAT_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── LN (여신: 대출잔고, 담보, 심사, 상환, 구조조정) ──
+    "LN": [
+        ("LN_NO", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("LN_DCD", "VARCHAR(10)"),
+        ("LN_STCD", "VARCHAR(10)"),
+        ("LN_BAL_AMT", "NUMERIC(18,2)"),
+        ("INT_RT", "NUMERIC(10,4)"),
+        ("OVDU_GRD_CD", "VARCHAR(10)"),
+        ("CLTR_DCD", "VARCHAR(10)"),
+        ("LN_PUSE_CD", "VARCHAR(10)"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── CRD (카드: 카드마스터, 이용내역, 청구, 포인트, 한도) ──
+    "CRD": [
+        ("CRD_NO", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("CRD_DCD", "VARCHAR(10)"),
+        ("CRD_LIMIT_AMT", "NUMERIC(18,2)"),
+        ("USE_AMT", "NUMERIC(18,2)"),
+        ("ISSUE_DT", "DATE"),
+        ("STS_DCD", "VARCHAR(10)"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── FX (외환: 외환딜, 환율, 선물환, 스왑, 무역금융) ──
+    "FX": [
+        ("DL_NO", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("CCY_CD", "VARCHAR(10)"),
+        ("FX_DL_DCD", "VARCHAR(10)"),
+        ("DL_AMT", "NUMERIC(18,2)"),
+        ("EXC_RT", "NUMERIC(18,6)"),
+        ("DL_DT", "DATE"),
+        ("SETL_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── FND (펀드/신탁/ELS/채권) ──
+    "FND": [
+        ("FND_ACN", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("FUND_CD", "VARCHAR(20)"),
+        ("FND_DCD", "VARCHAR(10)"),
+        ("RSK_GRD_CD", "VARCHAR(10)"),
+        ("INV_AMT", "NUMERIC(18,2)"),
+        ("EVAL_AMT", "NUMERIC(18,2)"),
+        ("QTY", "NUMERIC(18,4)"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── TRX (거래: 거래내역, 결제채널, 이체) ──
+    "TRX": [
+        ("ACN", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("TR_DCD", "VARCHAR(10)"),
+        ("TR_AMT", "NUMERIC(18,2)"),
+        ("BAL_AFT_TR", "NUMERIC(18,2)"),
+        ("CHN_CD", "VARCHAR(10)"),
+        ("TR_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── INS (보험: 보험마스터, 보험금청구, 납입, 심사) ──
+    "INS": [
+        ("INS_NO", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("INS_DCD", "VARCHAR(10)"),
+        ("INS_PD_CD", "VARCHAR(20)"),
+        ("PREM_AMT", "NUMERIC(18,2)"),
+        ("COV_AMT", "NUMERIC(18,2)"),
+        ("PAY_STCD", "VARCHAR(10)"),
+        ("INS_ST_DT", "DATE"),
+        ("INS_END_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── PN (연금: 퇴직연금마스터, 납입, 운용) ──
+    "PN": [
+        ("PLAN_NO", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("PN_DCD", "VARCHAR(10)"),
+        ("CONTR_AMT", "NUMERIC(18,2)"),
+        ("BAL_AMT", "NUMERIC(18,2)"),
+        ("RETURN_RT", "NUMERIC(10,4)"),
+        ("EMPLOYER_NM", "VARCHAR(100)"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── DG (디지털뱅킹: 앱로그인, 인증, 푸시, 마이데이터) ──
+    "DG": [
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("APP_CD", "VARCHAR(20)"),
+        ("CHN_CD", "VARCHAR(10)"),
+        ("DEVICE_ID", "VARCHAR(50)"),
+        ("STS_DCD", "VARCHAR(10)"),
+        ("LOGIN_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── RSK (리스크: 리스크지표, Basel III, IFRS9) ──
+    "RSK": [
+        ("IND_CD", "VARCHAR(20)"),
+        ("IND_NM", "VARCHAR(100)"),
+        ("IND_VAL", "NUMERIC(18,6)"),
+        ("PREV_VAL", "NUMERIC(18,6)"),
+        ("CHG_RT", "NUMERIC(10,4)"),
+        ("EVAL_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── AML (자금세탁방지: 의심거래보고, 제재, 모니터링) ──
+    "AML": [
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("ALERT_LVL_CD", "VARCHAR(10)"),
+        ("TR_AMT", "NUMERIC(18,2)"),
+        ("RSK_GRD_CD", "VARCHAR(10)"),
+        ("STS_DCD", "VARCHAR(10)"),
+        ("DETECT_DT", "DATE"),
+        ("REVIEW_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── MKT (마케팅: 캠페인, CRM, NPS) ──
+    "MKT": [
+        ("CAMP_CD", "VARCHAR(20)"),
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("CAMP_STCD", "VARCHAR(10)"),
+        ("CHN_CD", "VARCHAR(10)"),
+        ("RESP_YN", "VARCHAR(1)"),
+        ("OFFER_AMT", "NUMERIC(18,2)"),
+        ("CONTACT_DT", "DATE"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+
+    # ── FIN (재무: 손익, GL, 분개, KPI, 예산) ──
+    "FIN": [
+        ("BLNG_BRCD", "VARCHAR(10)"),
+        ("PL_ITEM_CD", "VARCHAR(20)"),
+        ("PL_ITEM_NM", "VARCHAR(100)"),
+        ("AMT", "NUMERIC(18,2)"),
+        ("PREV_AMT", "NUMERIC(18,2)"),
+        ("YOY_RT", "NUMERIC(10,4)"),
+        ("BUDGET_AMT", "NUMERIC(18,2)"),
+    ],
+
+    # ── WM (자산관리: WM고객, 포트폴리오, 자문) ──
+    "WM": [
+        ("EDPS_CSN", "VARCHAR(20)"),
+        ("WM_GRD_CD", "VARCHAR(10)"),
+        ("INVEST_PRFL_CD", "VARCHAR(10)"),
+        ("TOT_ASSET_AMT", "NUMERIC(18,2)"),
+        ("PB_EMN", "VARCHAR(20)"),
+        ("BLNG_BRCD", "VARCHAR(10)"),
+    ],
+}
+
+# C, G 타입은 도메인 무관하게 구조적 컬럼만 사용
+_TYPE_STRUCTURAL: dict[str, list[tuple[str, str]]] = {
+    "H": [
+        ("CHG_RSN_DCD", "VARCHAR(10)"),
+        ("BEF_VAL", "VARCHAR(200)"),
+        ("AFT_VAL", "VARCHAR(200)"),
+        ("CHG_USR_ID", "VARCHAR(20)"),
+    ],
+    "S": [  # 집계 타입은 도메인 컬럼 + 이 컬럼 추가
+        ("CNT", "INTEGER DEFAULT 0"),
+        ("AVG_AMT", "NUMERIC(18,2)"),
+    ],
+}
+
+# CODE_META 미등록 코드의 보충 유효값
+_EXTRA_CODES: dict[str, list[str]] = {
+    "GNDR_DCD": ["M", "F"],
+    "AGE_GRP_CD": ["20", "30", "40", "50", "60"],
+    "STS_DCD": ["01", "02", "03"],
+    "WM_GRD_CD": ["WM_VIP", "WM_PREMIUM", "WM_GOLD", "WM_STANDARD"],
+    "INVEST_PRFL_CD": ["1", "2", "3", "4", "5"],
+    "ALERT_LVL_CD": ["H", "M", "L"],
+    "CHG_RSN_DCD": ["01", "02", "03", "04"],
+    "SORT_ORD": [],  # INTEGER, 별도 처리
+}
+
+# 도메인별 상품명 풀
+_DOMAIN_PRODUCT_NAMES: dict[str, list[str]] = {
+    "DEP": [
+        "자유입출금통장", "정기예금 1년", "정기예금 2년", "정기적금 12개월",
+        "정기적금 24개월", "MMF통장", "CMA통장", "급여이체통장",
+        "주거래우대통장", "청년희망적금", "내집마련적금",
+    ],
+    "LN": [
+        "주택담보대출", "신용대출", "전세자금대출", "사업자대출",
+        "중소기업대출", "자동차대출", "학자금대출", "마이너스통장",
+        "아파트담보대출", "상가담보대출", "정책자금대출",
+    ],
+    "CRD": [
+        "신용카드 플래티넘", "신용카드 골드", "신용카드 클래식",
+        "체크카드 기본", "체크카드 캐시백", "법인카드 일반",
+        "하이브리드카드", "포인트적립카드", "항공마일리지카드",
+    ],
+    "FX": [
+        "외환송금", "외화예금", "선물환계약", "통화스왑",
+        "수출입신용장", "외화대출", "환전서비스",
+    ],
+    "FND": [
+        "글로벌성장펀드", "국공채안정형", "혼합자산운용", "인덱스코스피200",
+        "신탁금전형", "ELS원금보장형", "ELS수익추구형", "채권형펀드",
+        "하이일드펀드", "리츠부동산펀드", "해외주식펀드",
+    ],
+    "INS": [
+        "종합보험", "건강보험", "저축보험", "변액보험",
+        "연금보험", "화재보험", "자동차보험", "여행자보험",
+        "상해보험", "실손의료보험",
+    ],
+    "PN": [
+        "퇴직연금DB", "퇴직연금DC", "개인형IRP", "연금저축신탁",
+        "연금저축보험", "퇴직연금원리금보장",
+    ],
+    "WM": [
+        "WM종합자산관리", "PB전용포트폴리오", "VIP자산배분형",
+        "글로벌자산배분", "안정성장형포트폴리오", "고수익추구형",
+    ],
+}
+# 범용 상품명 (도메인 미매칭 시)
+_PRODUCT_NAMES = [
+    "자유입출금통장", "정기예금 1년", "정기적금 12개월", "MMF통장",
+    "주택담보대출", "신용대출", "전세자금대출", "사업자대출",
+    "신용카드 플래티넘", "체크카드 기본", "글로벌성장펀드",
+    "국공채안정형", "혼합자산운용", "인덱스코스피200",
+    "종합보험", "건강보험", "저축보험", "퇴직연금DB",
+]
+
+
+def _get_extra_cols(
+    table_name: str, pk_cols_used: set[str],
+) -> list[tuple[str, str]]:
+    """비-★ 테이블의 도메인+타입 기반 추가 컬럼 결정.
+
+    PK와 중복되는 컬럼은 자동 제외.
+    C, G 타입은 도메인 무관 구조적 컬럼만 반환.
+    """
+    tbl_type = table_name[-1]
+    domain_raw = _extract_domain(table_name)
+    group = _DOMAIN_GROUP.get(domain_raw, "COM")
+
+    result: list[tuple[str, str]] = []
+    used = set(pk_cols_used)
+
+    # C(코드), G(로그) 타입: 도메인 무관
+    if tbl_type == "C":
+        for col, typ in _TYPE_EXTRA_COLS["C"]:
+            if col not in used:
+                result.append((col, typ))
+                used.add(col)
+        return result
+
+    if tbl_type == "G":
+        for col, typ in _TYPE_EXTRA_COLS["G"]:
+            if col not in used:
+                result.append((col, typ))
+                used.add(col)
+        return result
+
+    # 도메인 업무 컬럼
+    biz = _DOMAIN_BIZ_COLS.get(group, _DOMAIN_BIZ_COLS["COM"])
+    for col, typ in biz:
+        if col not in used:
+            result.append((col, typ))
+            used.add(col)
+
+    # 타입별 구조적 추가 컬럼 (H: 변경이력, S: 집계)
+    for col, typ in _TYPE_STRUCTURAL.get(tbl_type, []):
+        if col not in used:
+            result.append((col, typ))
+            used.add(col)
+
+    return result
+
+
 # ══════════════════════════════════════════════════════════════
 # 데이터 생성용 상수
 # ══════════════════════════════════════════════════════════════
@@ -456,48 +813,46 @@ def _pk_col_type(col: str) -> str:
 
 
 def _build_ddl(table_name: str, pk_cols: list[str]) -> str:
-    """비-★ 테이블용 DDL 자동 생성.
+    """비-★ 테이블용 DDL 자동 생성 (도메인 인식).
 
-    PK 컬럼 + 유형별 표준 추가 컬럼으로 구성.
-    BIGSERIAL PK는 PRIMARY KEY 인라인 선언, 복합 PK는 테이블 레벨 선언.
+    PK 컬럼 + 도메인별 업무 컬럼 + 타입별 구조 컬럼으로 구성.
+    기존 테이블이 있으면 DROP 후 재생성 (컬럼 변경 반영).
     """
-    tbl_type = _infer_table_type(table_name)
     col_defs: list[str] = []
     pk_col_names: list[str] = []
-
     used_names: set[str] = set()
 
     for col in pk_cols:
         col_type = _pk_col_type(col)
         if col_type == "BIGSERIAL":
             col_defs.append(f"    {col} BIGSERIAL PRIMARY KEY")
-            # BIGSERIAL은 단일 PK이므로 테이블 레벨 PK 불필요
-            pk_col_names = []  # 인라인 처리됨
+            pk_col_names = []
         else:
             col_defs.append(f"    {col} {col_type} NOT NULL")
             pk_col_names.append(col)
         used_names.add(col)
 
-    # 유형별 표준 추가 컬럼 (중복 제거)
-    extra_cols = _TYPE_EXTRA_COLS.get(tbl_type, _TYPE_EXTRA_COLS["M"])
+    # 도메인 + 타입 기반 추가 컬럼
+    extra_cols = _get_extra_cols(table_name, used_names)
     for extra_name, extra_type in extra_cols:
-        if extra_name not in used_names:
-            col_defs.append(f"    {extra_name} {extra_type}")
-            used_names.add(extra_name)
+        col_defs.append(f"    {extra_name} {extra_type}")
+        used_names.add(extra_name)
 
     # 공통 메타 컬럼
     for meta_col, meta_type in [
-            ("INS_DTM", "TIMESTAMP DEFAULT NOW()"), ("UPD_DTM", "TIMESTAMP")]:
+            ("INS_DTM", "TIMESTAMP DEFAULT NOW()"),
+            ("UPD_DTM", "TIMESTAMP")]:
         if meta_col not in used_names:
             col_defs.append(f"    {meta_col} {meta_type}")
 
-    # 복합 PK
     if pk_col_names:
-        col_defs.append(f"    PRIMARY KEY ({', '.join(pk_col_names)})")
+        col_defs.append(
+            f"    PRIMARY KEY ({', '.join(pk_col_names)})")
 
     col_block = ",\n".join(col_defs)
     return (
-        f"CREATE TABLE IF NOT EXISTS ADWOWN.{table_name} (\n"
+        f"DROP TABLE IF EXISTS ADWOWN.{table_name} CASCADE;\n"
+        f"CREATE TABLE ADWOWN.{table_name} (\n"
         f"{col_block}\n"
         f");"
     )
@@ -903,6 +1258,19 @@ def seed_info_db() -> None:
         # 스키마 생성
         cur.execute("CREATE SCHEMA IF NOT EXISTS ADWOWN;")
 
+        # stale biz_schema TB_ADW_* 테이블 정리 (구버전 잔재)
+        cur.execute("""
+            DO $$ DECLARE r RECORD;
+            BEGIN
+                FOR r IN SELECT tablename FROM pg_tables
+                    WHERE schemaname = 'biz_schema' AND tablename LIKE 'tb\\_adw\\_%'
+                LOOP
+                    EXECUTE 'DROP TABLE IF EXISTS biz_schema.' || r.tablename || ' CASCADE';
+                END LOOP;
+            END $$;
+        """)
+        conn.commit()
+
         # ── 1단계: 모든 테이블 DDL 생성 ──────────────────────
         catalog = parse_table_catalog()
         star_names = {t["name"] for t in catalog if t["star"]}
@@ -982,6 +1350,10 @@ def seed_info_db() -> None:
         conn.commit()
 
         _insert_wm_customers(cur, edps_csn_list)
+        conn.commit()
+
+        # ── 4단계: 비-★ 테이블 자동 시딩 ─────────────────
+        seed_non_star_tables(cur, catalog)
         conn.commit()
 
         # ── 권한 부여: readonly_user ────────────────────────
@@ -1668,8 +2040,616 @@ def _insert_wm_customers(cur, edps_csn_list: list[str]) -> None:
 
 
 # ══════════════════════════════════════════════════════════════
+# 비-★ 테이블 자동 시딩 (메타데이터 기반)
+# ══════════════════════════════════════════════════════════════
+
+try:
+    from seed_elasticsearch import CODE_META_DOCS as _CODE_META
+except ImportError:
+    _CODE_META: list[dict] = []  # type: ignore[no-redef]
+
+# code_field → [유효값] 빠른 검색
+_CODE_LOOKUP: dict[str, list[str]] = {
+    doc["code_field"]: list(doc["codes"].keys()) for doc in _CODE_META
+}
+
+# 도메인 접두사(테이블명 7~10자) → (최소금액, 최대금액)
+_DOMAIN_AMT: dict[str, tuple[int, int]] = {
+    "COM": (1_000, 100_000_000),
+    "CSC": (100_000, 5_000_000_000),
+    "CSP": (100_000, 5_000_000_000),
+    "CUS": (100_000, 5_000_000_000),
+    "DEP": (100_000, 5_000_000_000),
+    "DEA": (100_000, 5_000_000_000),
+    "DEP": (100_000, 5_000_000_000),
+    "LNB": (1_000_000, 10_000_000_000),
+    "LNR": (1_000_000, 10_000_000_000),
+    "LNA": (1_000_000, 10_000_000_000),
+    "LNC": (1_000_000, 10_000_000_000),
+    "CRD": (10_000, 50_000_000),
+    "CRU": (10_000, 50_000_000),
+    "CRD": (10_000, 50_000_000),
+    "FXD": (1_000, 100_000_000),
+    "FXB": (1_000, 100_000_000),
+    "TRD": (1_000, 100_000_000),
+    "FND": (100_000, 10_000_000_000),
+    "TRS": (100_000, 10_000_000_000),
+    "ELS": (100_000, 10_000_000_000),
+    "BND": (100_000, 10_000_000_000),
+    "TRX": (1_000, 100_000_000),
+    "TXP": (1_000, 100_000_000),
+    "INS": (100_000, 1_000_000_000),
+    "PNB": (100_000, 1_000_000_000),
+    "PNI": (100_000, 1_000_000_000),
+    "DGB": (1_000, 10_000_000),
+    "DGA": (1_000, 10_000_000),
+    "MYD": (1_000, 10_000_000),
+    "RSK": (0, 100),
+    "AML": (100_000, 10_000_000_000),
+    "FDS": (100_000, 10_000_000_000),
+    "CMP": (100_000, 10_000_000_000),
+    "MKT": (10_000, 100_000_000),
+    "CRM": (10_000, 100_000_000),
+    "FIN": (1_000_000, 500_000_000_000),
+    "GLB": (1_000_000, 500_000_000_000),
+    "BUD": (1_000_000, 500_000_000_000),
+    "WMB": (1_000_000, 50_000_000_000),
+    "WMR": (1_000_000, 50_000_000_000),
+}
+
+# 처리 순서: 코드 → 마스터 → 상세 → 스냅샷 → 집계 → 이력 → 내역 → 로그
+_TYPE_ORDER = {
+    "C": 0, "M": 1, "D": 2, "P": 3,
+    "S": 4, "H": 5, "L": 6, "G": 7,
+}
+
+# 유형별 목표 행 수 (min, max)
+_TYPE_ROWS: dict[str, tuple[int, int]] = {
+    "C": (5, 30),       # 코드: 유효값 수만큼
+    "M": (100, 150),    # 마스터: 100+
+    "D": (200, 500),    # 상세: 마스터 × 2~5
+    "L": (500, 1000),   # 내역: 최대 1000
+    "H": (300, 800),    # 이력: 3개월~1년
+    "S": (36, 60),      # 집계: 월별 3~5년
+    "P": (100, 300),    # 스냅샷: 일별 3개월
+    "G": (200, 500),    # 로그: 시스템 로그
+}
+
+# FK-like 컬럼의 별칭 → 값 풀 키 매핑
+_POOL_ALIAS: dict[str, str] = {
+    "BRCD": "BLNG_BRCD",
+    "REL_CSN": "EDPS_CSN",
+    "AUTH_CSN": "EDPS_CSN",
+    "LINKED_ACN": "ACN",
+    "NOSTRO_ACN": "ACN",
+    "MAIN_CRD_NO": "CRD_NO",
+    "FAMILY_CRD_NO": "CRD_NO",
+    "ELS_ACN": "ACN",
+    "ISA_ACN": "ACN",
+    "IRP_ACN": "ACN",
+    "PB_EMN": "EDPS_CSN",
+}
+
+
+def _collect_star_values(cur) -> dict[str, list]:
+    """★ 테이블에서 주요 PK 값을 수집."""
+    pools: dict[str, list] = {}
+    qs = [
+        ("EDPS_CSN",
+         "SELECT DISTINCT EDPS_CSN FROM ADWOWN.TB_ADW_CSC101M"),
+        ("ACN",
+         "SELECT DISTINCT ACN FROM ADWOWN.TB_ADW_DEP201P"),
+        ("LN_NO",
+         "SELECT DISTINCT LN_NO FROM ADWOWN.TB_ADW_LNB301M"),
+        ("CRD_NO",
+         "SELECT DISTINCT CRD_NO FROM ADWOWN.TB_ADW_CRD401M"),
+        ("BLNG_BRCD",
+         "SELECT DISTINCT BLNG_BRCD FROM ADWOWN.TB_ADW_COM001M"),
+        ("GRD_CD",
+         "SELECT DISTINCT GRD_CD FROM ADWOWN.TB_ADW_COM002M"),
+        ("DL_NO",
+         "SELECT DISTINCT DL_NO FROM ADWOWN.TB_ADW_FXD501L"),
+        ("FND_ACN",
+         "SELECT DISTINCT FND_ACN FROM ADWOWN.TB_ADW_FND601P"),
+        ("INS_NO",
+         "SELECT DISTINCT INS_NO FROM ADWOWN.TB_ADW_INS803M"),
+        ("PLAN_NO",
+         "SELECT DISTINCT PLAN_NO FROM ADWOWN.TB_ADW_PNB904P"),
+        ("CAMP_CD",
+         "SELECT DISTINCT CAMP_CD FROM ADWOWN.TB_ADW_MKT1201M"),
+        ("IND_CD",
+         "SELECT DISTINCT IND_CD FROM ADWOWN.TB_ADW_RSK1101M"),
+        ("CCY_CD",
+         "SELECT DISTINCT CCY_CD FROM ADWOWN.TB_ADW_FXB502M"),
+    ]
+    for col, sql in qs:
+        cur.execute(sql)
+        pools[col] = [r[0] for r in cur.fetchall()]
+    # BRCD는 BLNG_BRCD의 별칭
+    pools["BRCD"] = list(pools["BLNG_BRCD"])
+    return pools
+
+
+def _resolve_cols(
+    table_info: dict,
+) -> tuple[list[tuple[str, str]], bool]:
+    """비-★ 테이블의 (컬럼명, 타입) 리스트를 재구성.
+
+    _build_ddl()의 _get_extra_cols()와 동일 로직 사용.
+    BIGSERIAL·TIMESTAMP 컬럼 제외.
+    Returns: (columns, has_bigserial)
+    """
+    cols: list[tuple[str, str]] = []
+    used: set[str] = set()
+    has_bs = False
+
+    for col in table_info["pk_cols"]:
+        ctype = _pk_col_type(col)
+        if ctype == "BIGSERIAL":
+            has_bs = True
+            continue
+        cols.append((col, ctype))
+        used.add(col)
+
+    extras = _get_extra_cols(table_info["name"], used)
+    for name, typ in extras:
+        if "TIMESTAMP" in typ.upper():
+            continue
+        base = typ.split(" DEFAULT")[0].strip()
+        cols.append((name, base))
+        used.add(name)
+
+    return cols, has_bs
+
+
+def _gen_col_value(
+    col: str, ctype: str, domain: str,
+    pools: dict[str, list], idx: int,
+) -> object:
+    """컬럼 이름·타입 패턴에 따른 값 생성."""
+    # FK 별칭 해소 후 값 풀 참조
+    pool_key = _POOL_ALIAS.get(col, col)
+    if pool_key in pools and pools[pool_key]:
+        return random.choice(pools[pool_key])
+
+    # 코드 메타에 정의된 코드 컬럼 (24개)
+    if col in _CODE_LOOKUP:
+        if random.random() < IMPERFECTION_RATE:
+            return "99"
+        return random.choice(_CODE_LOOKUP[col])
+
+    # 보충 코드값 (_EXTRA_CODES)
+    if col in _EXTRA_CODES and _EXTRA_CODES[col]:
+        return random.choice(_EXTRA_CODES[col])
+
+    # _YN 플래그
+    if col.endswith("_YN") or col == "RESP_YN":
+        return random.choice(["Y", "N"])
+
+    # 코드 계열 (code_meta/extra 미등록)
+    if col.endswith(("_DCD", "_STCD")):
+        return f"{random.randint(1, 5):02d}"
+    if col.endswith("_CD") and "VARCHAR" in ctype:
+        return f"{random.randint(1, 10):02d}"
+
+    # 고객명 (CSM 컬럼)
+    if col == "CSM":
+        return (
+            f"{random.choice(SURNAMES)}"
+            f"{random.choice(GIVEN_NAMES)}")
+
+    # 상품명 (PD_NM) — 도메인별 상품명
+    if col == "PD_NM":
+        group = _DOMAIN_GROUP.get(domain, "COM")
+        names = _DOMAIN_PRODUCT_NAMES.get(group, _PRODUCT_NAMES)
+        return random.choice(names)
+
+    # 고용사명 (EMPLOYER_NM)
+    if col == "EMPLOYER_NM":
+        return random.choice(COMPANY_NAMES)
+
+    # 지표명 (IND_NM)
+    if col == "IND_NM":
+        return random.choice(RISK_IND_CODES)[1]
+
+    # 손익항목명 (PL_ITEM_NM)
+    if col == "PL_ITEM_NM":
+        items = [
+            "이자이익", "수수료이익", "외환이익", "펀드이익",
+            "영업비용", "충당금전입", "세전이익", "당기순이익",
+        ]
+        return random.choice(items)
+
+    # 금액
+    if col.endswith("_AMT") or col == "AMT":
+        lo, hi = _DOMAIN_AMT.get(domain, (10_000, 1_000_000_000))
+        return random.randint(lo, hi)
+
+    # 비율 — 도메인별 범위
+    if col.endswith("_RT"):
+        group = _DOMAIN_GROUP.get(domain, "COM")
+        if col == "INT_RT":
+            if group == "DEP":
+                return round(random.uniform(1.0, 5.0), 4)
+            if group == "LN":
+                return round(random.uniform(2.5, 12.0), 4)
+        if col == "RETURN_RT":
+            return round(random.uniform(-10.0, 25.0), 4)
+        if col == "YOY_RT":
+            return round(random.uniform(-30.0, 50.0), 4)
+        if col == "CHG_RT":
+            return round(random.uniform(-20.0, 20.0), 4)
+        return round(random.uniform(0.01, 15.0), 2)
+
+    # 수량
+    if col == "QTY":
+        return round(random.uniform(1, 10000), 4)
+
+    # 건수
+    if col.endswith("_CNT") or col == "CNT":
+        return random.randint(0, 9999)
+
+    # 이름
+    if col.endswith("_NM") or col == "NM":
+        return (
+            f"{random.choice(SURNAMES)}"
+            f"{random.choice(GIVEN_NAMES)}")
+
+    # 설명/내용
+    if col.endswith("_CONT") or col == "CONT":
+        return f"내용_{idx:05d}"
+    if col == "DESC_CONT":
+        return f"설명_{idx:05d}"
+
+    # IP 주소
+    if col == "IP_ADR":
+        return (
+            f"10.{random.randint(0, 255)}"
+            f".{random.randint(0, 255)}"
+            f".{random.randint(1, 254)}")
+
+    # 사용자 ID
+    if col.endswith("_USR_ID") or col == "USR_ID":
+        return f"user{random.randint(1, 50):02d}"
+
+    # 전화번호
+    if col == "TEL_NO":
+        return _gen_tel()
+
+    # 환율 (6자리 소수)
+    if col == "EXC_RT":
+        return round(random.uniform(900, 1400), 6)
+
+    # DATE
+    if ctype == "DATE":
+        return TODAY - timedelta(days=random.randint(0, 365))
+
+    # VARCHAR (기본)
+    if "VARCHAR" in ctype:
+        m = re.match(r"VARCHAR\((\d+)\)", ctype)
+        maxl = int(m.group(1)) if m else 20
+        val = f"V{idx:06d}"
+        return val[:maxl]
+
+    # NUMERIC
+    if "NUMERIC" in ctype:
+        lo, hi = _DOMAIN_AMT.get(domain, (10_000, 1_000_000_000))
+        return random.randint(lo, hi)
+
+    # INTEGER
+    if ctype == "INTEGER":
+        return random.randint(1, 1000)
+
+    # TEXT
+    if ctype == "TEXT":
+        return f"텍스트_{idx:05d}"
+
+    return None
+
+
+def _fix_row_constraints(
+    row: dict[str, object],
+    col_names: list[str],
+    domain_group: str,
+) -> None:
+    """행 내 크로스-컬럼 논리적 정합성 보정 (in-place).
+
+    - 날짜 순서: MAT_DT > OPEN_DT, INS_END_DT > INS_ST_DT, REVIEW_DT >= DETECT_DT
+    - 금액 관계: CRD_LIMIT_AMT >= USE_AMT, COV_AMT >= PREM_AMT, BAL_AFT_TR 계산
+    - 투자 평가: EVAL_AMT ≈ INV_AMT (±30%)
+    - 재무 전기대비: PREV_AMT과 AMT/YOY_RT 연동
+    - 리스크: PREV_VAL과 IND_VAL/CHG_RT 연동
+    """
+    cols_set = set(col_names)
+
+    # ── 날짜 순서 보정 ──────────────────────────────────
+    _date_pairs = [
+        ("OPEN_DT", "MAT_DT", 30, 730),       # 만기: 개시 후 1개월~2년
+        ("INS_ST_DT", "INS_END_DT", 365, 7300),  # 보험: 1~20년
+        ("DL_DT", "SETL_DT", 1, 180),          # FX: 결제까지 1일~6개월
+        ("DETECT_DT", "REVIEW_DT", 1, 30),      # AML: 탐지 후 1~30일
+        ("JOIN_DT", "LOGIN_DT", 1, 1825),        # 가입~로그인
+    ]
+    for start_col, end_col, min_gap, max_gap in _date_pairs:
+        if start_col in cols_set and end_col in cols_set:
+            s = row.get(start_col)
+            e = row.get(end_col)
+            if isinstance(s, date) and isinstance(e, date):
+                if e <= s:
+                    gap = timedelta(days=random.randint(min_gap, max_gap))
+                    row[end_col] = s + gap
+
+    # ── 카드: 한도 >= 사용금액 ──────────────────────────
+    if "CRD_LIMIT_AMT" in cols_set and "USE_AMT" in cols_set:
+        limit_v = row.get("CRD_LIMIT_AMT")
+        use_v = row.get("USE_AMT")
+        if (isinstance(limit_v, (int, float))
+                and isinstance(use_v, (int, float))
+                and use_v > limit_v):
+            row["USE_AMT"] = int(limit_v * random.uniform(0.1, 0.95))
+
+    # ── 보험: 보장금액 >= 보험료 ────────────────────────
+    if "COV_AMT" in cols_set and "PREM_AMT" in cols_set:
+        cov = row.get("COV_AMT")
+        prem = row.get("PREM_AMT")
+        if (isinstance(cov, (int, float))
+                and isinstance(prem, (int, float))
+                and prem > cov):
+            row["COV_AMT"] = int(prem * random.randint(10, 50))
+
+    # ── 거래: 거래 후 잔액 계산 ─────────────────────────
+    if "BAL_AFT_TR" in cols_set and "TR_AMT" in cols_set:
+        tr = row.get("TR_AMT")
+        if isinstance(tr, (int, float)):
+            base_bal = random.randint(100_000, 100_000_000)
+            row["BAL_AFT_TR"] = base_bal + int(tr * random.choice([-1, 1]))
+
+    # ── 펀드/신탁: 평가금액 ≈ 투자금액 (±30%) ──────────
+    if "INV_AMT" in cols_set and "EVAL_AMT" in cols_set:
+        inv = row.get("INV_AMT")
+        if isinstance(inv, (int, float)) and inv > 0:
+            row["EVAL_AMT"] = int(inv * random.uniform(0.7, 1.3))
+
+    # ── 재무: PREV_AMT → YOY_RT 연동 ──────────────────
+    if "AMT" in cols_set and "PREV_AMT" in cols_set and "YOY_RT" in cols_set:
+        amt = row.get("AMT")
+        prev = row.get("PREV_AMT")
+        if (isinstance(amt, (int, float)) and isinstance(prev, (int, float))
+                and prev != 0):
+            yoy = (amt - prev) / prev * 100
+            row["YOY_RT"] = round(max(-999999, min(999999, yoy)), 4)
+
+    # ── 리스크: PREV_VAL → CHG_RT 연동 ────────────────
+    if "IND_VAL" in cols_set and "PREV_VAL" in cols_set and "CHG_RT" in cols_set:
+        val = row.get("IND_VAL")
+        prev = row.get("PREV_VAL")
+        if (isinstance(val, (int, float)) and isinstance(prev, (int, float))
+                and prev != 0):
+            chg = (val - prev) / prev * 100
+            row["CHG_RT"] = round(max(-999999, min(999999, chg)), 4)
+
+    # ── 대출: 연체등급에 따른 잔액 조정 (연체 없으면 정상) ─
+    if "OVDU_GRD_CD" in cols_set and "LN_STCD" in cols_set:
+        ovdu = row.get("OVDU_GRD_CD")
+        if ovdu in ("01", "정상", None):
+            row["LN_STCD"] = "01"  # 정상
+        elif ovdu in ("04", "05"):
+            row["LN_STCD"] = "03"  # 연체
+
+    # ── SORT_ORD (정렬순서): INTEGER 값 부여 ─────────────
+    if "SORT_ORD" in cols_set:
+        row["SORT_ORD"] = random.randint(1, 999)
+
+
+def seed_non_star_tables(cur, catalog: list[dict]) -> None:
+    """비-★ 테이블 전체에 메타데이터 기반 데이터 자동 생성.
+
+    1. ★ 테이블에서 PK 값 풀 수집
+    2. 유형별 순서(코드→마스터→상세→이력)로 처리
+    3. 각 테이블: 컬럼 재구성 → PK 조합 생성 → 벌크 INSERT
+    """
+    rng_state = random.getstate()
+    random.seed(42)  # 재현성 보장
+
+    pools = _collect_star_values(cur)
+    pool_total = sum(len(v) for v in pools.values())
+    print(f"\n  [값풀] ★ 테이블에서 {pool_total}개 PK값 수집")
+
+    non_star = [t for t in catalog if not t["star"]]
+    non_star.sort(key=lambda t: (
+        _TYPE_ORDER.get(t["name"][-1], 9), t["name"],
+    ))
+
+    total_rows = 0
+    seeded = 0
+    skipped = 0
+
+    for tbl_info in non_star:
+        tbl_name = tbl_info["name"]
+        domain = tbl_name[7:10]  # TB_ADW_XXX
+        domain_group = _DOMAIN_GROUP.get(
+            _extract_domain(tbl_name), "COM")
+
+        cols, has_bs = _resolve_cols(tbl_info)
+        if not cols and not has_bs:
+            skipped += 1
+            continue
+
+        col_names = [c[0] for c in cols]
+        col_types = {c[0]: c[1] for c in cols}
+        n_rows = random.randint(*_TYPE_ROWS.get(
+            tbl_name[-1], (100, 150)))
+
+        # ── PK 컬럼 분류 ──────────────────────────────────
+        pk_set = set(tbl_info["pk_cols"])
+        pk_in = [c for c in col_names if c in pk_set]
+        non_pk = [c for c in col_names if c not in pk_set]
+
+        date_pks = [
+            c for c in pk_in if col_types[c] == "DATE"]
+        ym_pks = [
+            c for c in pk_in
+            if c.endswith(("_YM", "YM"))
+            and "VARCHAR" in col_types[c]]
+        yr_pks = [
+            c for c in pk_in
+            if (c.endswith(("_YR", "YR")) or c == "FY")
+            and "VARCHAR" in col_types[c]
+            and c not in ym_pks]
+        entity_pks = [
+            c for c in pk_in
+            if c not in date_pks
+            and c not in ym_pks
+            and c not in yr_pks]
+
+        # ── 엔티티 PK 값 준비 ──────────────────────────────
+        for col in entity_pks:
+            alias = _POOL_ALIAS.get(col, col)
+            if alias in pools and pools[alias]:
+                if col not in pools:
+                    pools[col] = pools[alias]
+                continue
+            if col in pools and pools[col]:
+                continue
+            # 신규 엔티티 — 값 풀에 새 ID 추가
+            col_type = _pk_col_type(col)
+            if col_type == "INTEGER":
+                new_ids = list(
+                    range(1, max(n_rows, 150) + 1))
+            else:
+                prefix = col.replace("_", "")[:5].upper()
+                new_ids = [
+                    f"{prefix}{i:05d}"
+                    for i in range(1, max(n_rows, 150) + 1)
+                ]
+            pools[col] = new_ids
+
+        # ── 날짜 범위 결정 ──────────────────────────────────
+        ttype = tbl_name[-1]
+        if ttype in ("L", "H"):
+            max_days = 365
+        elif ttype in ("P", "S"):
+            max_days = 90
+        else:
+            max_days = 365
+
+        # ── 행 생성 ────────────────────────────────────────
+        rows: list[tuple] = []
+        seen: set[tuple] = set()
+        max_att = n_rows * 20
+
+        for _ in range(max_att):
+            if len(rows) >= n_rows:
+                break
+
+            row: dict[str, object] = {}
+
+            for col in entity_pks:
+                alias = _POOL_ALIAS.get(col, col)
+                src = pools.get(col) or pools.get(alias, [])
+                row[col] = random.choice(src) if src else (
+                    f"X{len(rows):06d}")
+            for col in date_pks:
+                row[col] = TODAY - timedelta(
+                    days=random.randint(0, max_days))
+            for col in ym_pks:
+                m_back = random.randint(0, 11)
+                d = TODAY.replace(day=1) - timedelta(
+                    days=30 * m_back)
+                row[col] = d.strftime("%Y%m")
+            for col in yr_pks:
+                row[col] = str(random.randint(2023, 2026))
+
+            # 유니크 체크
+            pk_key = tuple(
+                str(row.get(c, "")) for c in pk_in)
+            if pk_in and pk_key in seen:
+                continue
+            seen.add(pk_key)
+
+            # 비-PK 값 생성
+            idx = len(rows)
+            for col in non_pk:
+                row[col] = _gen_col_value(
+                    col, col_types[col], domain, pools, idx)
+
+            # 크로스-컬럼 논리 정합성 보정
+            _fix_row_constraints(row, col_names, domain_group)
+
+            rows.append(
+                tuple(row.get(c) for c in col_names))
+
+        if not rows:
+            skipped += 1
+            continue
+
+        # ── TRUNCATE + 벌크 INSERT (SAVEPOINT로 실패 격리) ─
+        sp = f"sp_{tbl_name}"
+        try:
+            cur.execute(f"SAVEPOINT {sp}")
+            cur.execute(
+                f"TRUNCATE TABLE ADWOWN.{tbl_name} CASCADE")
+            insert_sql = (
+                f"INSERT INTO ADWOWN.{tbl_name} "
+                f"({', '.join(col_names)}) VALUES %s"
+            )
+            execute_values(cur, insert_sql, rows,
+                           page_size=500)
+            cur.execute(f"RELEASE SAVEPOINT {sp}")
+            total_rows += len(rows)
+            seeded += 1
+            if seeded % 50 == 0:
+                print(
+                    f"  ... {seeded}개 테이블 "
+                    f"({total_rows:,}건)")
+        except Exception as e:
+            cur.execute(
+                f"ROLLBACK TO SAVEPOINT {sp}")
+            skipped += 1
+            # 첫 10개 실패만 출력
+            if skipped <= 10:
+                print(f"  [SKIP] {tbl_name}: {e}")
+
+    random.setstate(rng_state)  # 랜덤 상태 복원
+
+    print(
+        f"\n  비-★ 테이블 시딩 완료: "
+        f"{seeded}개 테이블, 총 {total_rows:,}건"
+        f" (스킵 {skipped}개)")
+
+
+# ══════════════════════════════════════════════════════════════
 # 이력 DB 시딩
 # ══════════════════════════════════════════════════════════════
+
+def setup_checkpoint_dc_tables(conn) -> None:  # type: ignore[type-arg]
+    """Data Copilot 커스텀 테이블을 초기화한다.
+
+    checkpoint_dc_turn_texts (파티션), checkpoint_dc_session_index,
+    mask_pii() 함수를 생성한다.
+    """
+    ddl_path = (
+        RESOURCES_DIR / "connectors" / "postgres" / "checkpoint" / "03_dc_custom_tables.sql"
+    )
+    if not ddl_path.exists():
+        print(f"  [WARN] DDL 파일 미존재: {ddl_path}")
+        return
+
+    cur = conn.cursor()
+    try:
+        cur.execute("SET search_path TO bdptbl, public")
+        cur.execute(ddl_path.read_text(encoding="utf-8"))
+        conn.commit()
+        print(
+            "  checkpoint_dc_turn_texts, checkpoint_dc_session_index,"
+            " mask_pii() 초기화 완료"
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+
 
 def seed_history_db() -> None:
     """sys_schema.sql_exec_log에 SQL 실행 이력 적재 (신규 테이블명 반영)."""
@@ -1860,7 +2840,7 @@ def seed_history_db() -> None:
             "최근 거래 내역 보여줘",
             "SELECT * FROM ADWOWN.TB_ADW_TRX701L",
             False, "TIMEOUT", "user08", None,
-            "기간 조건 누락으로 전체 파티션 스캔 — 타임아웃 발생",
+            "기간 조건 누락으로 전체 파티션 스캔 - 타임아웃 발생",
         ),
         (
             "이번 달 연체 고객",
@@ -1904,10 +2884,16 @@ if __name__ == "__main__":
     print("=" * 60)
     print("PostgreSQL 테스트 데이터 시딩 (신규 명명규칙)")
     print("=" * 60)
-    print("\n[정보계 DB — ADWOWN]")
+    print("\n[정보계 DB - ADWOWN]")
     seed_info_db()
-    print("\n[이력 DB — sys_schema]")
+    print("\n[이력 DB - sys_schema]")
     seed_history_db()
+    print("\n[이력 DB - Data Copilot 커스텀 테이블]")
+    _dc_conn = _connect(HISTORY_DB_CONNINFO)
+    try:
+        setup_checkpoint_dc_tables(_dc_conn)
+    finally:
+        _dc_conn.close()
     print("\n" + "=" * 60)
     print("전체 PostgreSQL 시딩 완료!")
     print("=" * 60)

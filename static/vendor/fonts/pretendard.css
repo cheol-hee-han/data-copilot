@@ -1,0 +1,6 @@
+/* Pretendard — 로컬 서빙용 (폐쇄망 호환).
+   사용 weight: 400(Regular), 500(Medium), 600(SemiBold), 700(Bold). */
+@font-face{font-family:Pretendard;font-weight:400;font-display:swap;src:local('Pretendard Regular'),url(woff2/Pretendard-Regular.woff2) format('woff2')}
+@font-face{font-family:Pretendard;font-weight:500;font-display:swap;src:local('Pretendard Medium'),url(woff2/Pretendard-Medium.woff2) format('woff2')}
+@font-face{font-family:Pretendard;font-weight:600;font-display:swap;src:local('Pretendard SemiBold'),url(woff2/Pretendard-SemiBold.woff2) format('woff2')}
+@font-face{font-family:Pretendard;font-weight:700;font-display:swap;src:local('Pretendard Bold'),url(woff2/Pretendard-Bold.woff2) format('woff2')}

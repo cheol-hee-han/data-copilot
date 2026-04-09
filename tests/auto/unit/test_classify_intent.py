@@ -1,27 +1,24 @@
-"""의도 분류 노드 단위 테스트.
+"""의도 분류 서비스 단위 테스트.
 
 === 개념 설명 ===
 사용자 질의를 DATA_EXTRACTION, DATA_ANALYSIS, CASUAL_TALK, META_QUESTION,
-CLARIFICATION_NEEDED 등으로 분류하는 노드이다.
-Intent Gate(5-카테고리)와 Legacy(2-카테고리) 두 가지 경로가 있으며,
-잘못된 분류는 전체 파이프라인 경로를 틀리게 하여 답변 품질에 치명적 영향을 준다.
+CLARIFICATION_NEEDED 등으로 분류하는 서비스를 검증한다.
+
+두 모듈을 함께 검증한다:
+  - src/services/intent_classifier.py  (순수 함수: _parse_response, _map_category_to_intent, _format_history)
+  - src/agents/nodes/interpret/intent_classifier.py  (노드: _build_clarification_history, _build_trace)
+
+LLM 없이 검증 가능한 순수 함수 경계만 단위 테스트로 분리하며,
+실제 LLM 호출이 필요한 테스트는 live_llm 마커로 구분한다.
 
 === 단독 실행 ===
-    python -m pytest tests/unit/intent_classifier/test_classify_intent.py -v -s
-
-    # 순수 함수 테스트만 실행 (LLM 불필요):
-    python -m pytest tests/unit/intent_classifier/test_classify_intent.py -v -k "not live_llm"
-
-=== 테스트 데이터 예시 ===
-    데이터 추출: "이번 달 신규 고객 수 알려줘" → DATA_EXTRACTION
-    데이터 분석: "분기별 대출 추이를 분석해줘" → DATA_ANALYSIS
-    일반 대화:   "안녕하세요" → CASUAL_TALK
-    메타 질의:   "고객 테이블 컬럼 목록" → META_QUESTION
+    python -m pytest tests/auto/unit/test_classify_intent.py -v -s
+    python -m pytest tests/auto/unit/test_classify_intent.py -v -k "not live_llm"
 
 === 정상 결과 ===
-    intent: IntentType 값, intent_confidence: 0.0~1.0, status: INTENT_CLASSIFIED
-=== 오류 결과 ===
-    LLM 오류 시 → intent=UNKNOWN, status=ERROR
+    _map_category_to_intent: (IntentType, float) 반환
+    _parse_response: 평탄화된 dict 반환 (resolution, category, confidence 포함)
+    _format_history: 멀티턴 이력을 프롬프트 텍스트로 변환
 """
 
 from __future__ import annotations
@@ -33,18 +30,8 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from src.agents.nodes.interpret.context_classifier import (
-    context_classifier_node,
-)
-from src.services.intent_resolver import (
-    _map_category_to_intent,
-    _parse_gate_response,
-    _parse_intent_response,
-    subclassify_data_query,
-)
-from src.agents.state.state import IntentType, PipelineState, QueryStatus
 from tests.conftest import get_test_logger, log_test_case
 
 logger = get_test_logger("test_classify_intent")
@@ -52,208 +39,525 @@ logger = get_test_logger("test_classify_intent")
 _HAS_API_KEY = bool(os.getenv("ANTHROPIC_API_KEY"))
 
 
-# ══════════════════════════════════════════════════════════════
-# 순수 함수 테스트 (LLM 불필요)
-# ══════════════════════════════════════════════════════════════
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 헬퍼 팩토리
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestParseGateResponse:
-    """Intent Gate LLM 응답 파싱 테스트."""
+def _make_continuity_json(
+    label: str = "NEW",
+    confidence: str = "HIGH",
+    reason: str = "독립 질의",
+    context: str = "",
+    intent_label: str = "DATA_EXTRACTION",
+    intent_confidence: str = "HIGH",
+    intent_reason: str = "데이터 추출 요청",
+) -> str:
+    """_parse_response 테스트용 LLM 응답 JSON 문자열을 생성한다."""
+    data: dict = {
+        "continuity": {
+            "label": label,
+            "confidence": confidence,
+            "reason": reason,
+        },
+        "intent": {
+            "label": intent_label,
+            "confidence": intent_confidence,
+            "reason": intent_reason,
+        },
+    }
+    if context:
+        data["continuity"]["context"] = context
+    return json.dumps(data, ensure_ascii=False)
 
-    def test_valid_json(self):
-        """유효한 JSON 응답을 파싱한다."""
-        raw = '{"category": "DATA_QUERY", "confidence": "HIGH", "reason": "데이터 추출 요청"}'
-        result = _parse_gate_response(raw)
 
-        assert result["category"] == "DATA_QUERY"
-        assert result["confidence"] == "HIGH"
-        log_test_case(logger, "test_parse_gate_valid_json", raw, "DATA_QUERY", result["category"], True)
-
-    def test_json_with_code_fence(self):
-        """코드 펜스로 감싼 JSON 을 파싱한다."""
-        raw = '```json\n{"category": "CASUAL_TALK", "confidence": "HIGH"}\n```'
-        result = _parse_gate_response(raw)
-
-        assert result["category"] == "CASUAL_TALK"
-        log_test_case(logger, "test_parse_gate_code_fence", raw, "CASUAL_TALK", result["category"], True)
-
-    def test_invalid_json(self):
-        """잘못된 JSON → AMBIGUOUS 로 폴백한다."""
-        raw = "이것은 JSON이 아닙니다"
-        result = _parse_gate_response(raw)
-
-        assert result["category"] == "AMBIGUOUS"
-        log_test_case(logger, "test_parse_gate_invalid_json", raw, "AMBIGUOUS", result["category"], True)
-
-    def test_unknown_category(self):
-        """미인식 카테고리 → AMBIGUOUS 로 보정된다."""
-        raw = '{"category": "UNKNOWN_CAT", "confidence": "HIGH"}'
-        result = _parse_gate_response(raw)
-
-        assert result["category"] == "AMBIGUOUS"
-        log_test_case(logger, "test_parse_gate_unknown_category", raw, "AMBIGUOUS", result["category"], True)
-
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# _map_category_to_intent 테스트
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TestMapCategoryToIntent:
-    """카테고리 → IntentType 매핑 테스트."""
+    """카테고리 → IntentType 매핑 및 신뢰도 변환 테스트."""
 
-    @pytest.mark.parametrize("category,expected_intent", [
-        ("DATA_QUERY", IntentType.DATA_EXTRACTION),
-        ("CASUAL_TALK", IntentType.CASUAL_TALK),
-        ("META_QUESTION", IntentType.META_QUESTION),
-        ("CLARIFICATION", IntentType.CLARIFICATION_NEEDED),
-        ("AMBIGUOUS", IntentType.CLARIFICATION_NEEDED),
+    @pytest.mark.parametrize("category,expected_value", [
+        ("DATA_EXTRACTION", "data_extraction"),
+        ("DATA_ANALYSIS", "data_analysis"),
+        ("DATA_QUERY", "data_extraction"),      # 하위 호환 별칭
+        ("CASUAL_TALK", "casual_talk"),
+        ("META_QUESTION", "meta_question"),
+        ("CLARIFICATION", "clarification_needed"),
+        ("AMBIGUOUS", "clarification_needed"),
+        ("UNKNOWN_XYZ", "clarification_needed"),  # 미인식 → 폴백
     ])
-    def test_category_mapping(self, category: str, expected_intent: IntentType):
-        """각 카테고리가 올바른 IntentType 으로 매핑된다."""
-        intent, confidence = _map_category_to_intent(category, "HIGH")
+    def test_category_to_intent_value(self, category: str, expected_value: str):
+        """각 카테고리가 올바른 IntentType 값으로 변환된다."""
+        from src.services.intent_classifier import _map_category_to_intent
 
-        passed = intent == expected_intent
-        log_test_case(logger, f"test_map_{category}", category, expected_intent, intent, passed)
-        assert intent == expected_intent
+        intent, _ = _map_category_to_intent(category, "HIGH")
+        passed = intent.value == expected_value
+        log_test_case(logger, f"test_map_{category}", category, expected_value, intent.value, passed)
+        assert intent.value == expected_value
 
-    @pytest.mark.parametrize("conf_str,expected_range", [
-        ("HIGH", (0.9, 1.0)),
-        ("MEDIUM", (0.6, 0.8)),
-        ("LOW", (0.3, 0.5)),
+    @pytest.mark.parametrize("conf_str,expected_value", [
+        ("HIGH", 0.95),
+        ("MEDIUM", 0.7),
+        ("LOW", 0.4),
+        ("UNKNOWN_CONF", 0.5),  # 미인식 → 기본값 0.5
     ])
-    def test_confidence_mapping(self, conf_str: str, expected_range: tuple):
-        """신뢰도 문자열이 올바른 float 범위로 변환된다."""
-        _, confidence = _map_category_to_intent("DATA_QUERY", conf_str)
+    def test_confidence_string_to_float(self, conf_str: str, expected_value: float):
+        """신뢰도 문자열이 올바른 float로 변환된다."""
+        from src.services.intent_classifier import _map_category_to_intent
 
-        low, high = expected_range
-        passed = low <= confidence <= high
-        log_test_case(logger, f"test_confidence_{conf_str}", conf_str, expected_range, confidence, passed)
-        assert low <= confidence <= high
-
-
-class TestSubclassifyDataQuery:
-    """DATA_QUERY 세분류 테스트."""
-
-    @pytest.mark.parametrize("text,expected", [
-        ("분기별 대출 추이를 분석해줘", IntentType.DATA_ANALYSIS),
-        ("연체율 비교 분석", IntentType.DATA_ANALYSIS),
-        ("매출 트렌드 보여줘", IntentType.DATA_ANALYSIS),
-        ("증감 추이 확인", IntentType.DATA_ANALYSIS),
-    ])
-    def test_analysis_keywords(self, text: str, expected: IntentType):
-        """분석 키워드가 포함되면 DATA_ANALYSIS 로 분류된다."""
-        state = PipelineState(preprocessed_input=text)
-        intent, _ = subclassify_data_query(state.preprocessed_input, 0.9)
-
-        passed = intent == expected
-        log_test_case(logger, "test_analysis_keywords", text, expected, intent, passed)
-        assert intent == expected
-
-    @pytest.mark.parametrize("text", [
-        "이번달 신규 고객 수 알려줘",
-        "부서별 대출 잔액 뽑아줘",
-        "고객 목록 조회해줘",
-    ])
-    def test_extraction_default(self, text: str):
-        """분석 키워드가 없으면 DATA_EXTRACTION 으로 분류된다."""
-        state = PipelineState(preprocessed_input=text)
-        intent, _ = subclassify_data_query(state.preprocessed_input, 0.9)
-
-        passed = intent == IntentType.DATA_EXTRACTION
-        log_test_case(logger, "test_extraction_default", text, "DATA_EXTRACTION", intent, passed)
-        assert intent == IntentType.DATA_EXTRACTION
+        _, confidence = _map_category_to_intent("DATA_EXTRACTION", conf_str)
+        passed = confidence == expected_value
+        log_test_case(logger, f"test_confidence_{conf_str}", conf_str, expected_value, confidence, passed)
+        assert confidence == expected_value
 
 
-class TestParseLegacyResponse:
-    """레거시 의도 분류 응답 파싱 테스트."""
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# _parse_response 테스트
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    def test_valid_response(self):
-        """정상 형식 응답을 파싱한다."""
-        text = "INTENT: data_extraction\nCONFIDENCE: 0.9"
-        intent, confidence = _parse_intent_response(text)
+class TestParseResponse:
+    """LLM 중첩 JSON 응답 파싱 테스트."""
 
-        assert intent == IntentType.DATA_EXTRACTION
-        assert confidence == 0.9
-        log_test_case(logger, "test_parse_legacy_valid", text, "data_extraction/0.9",
-                      f"{intent}/{confidence}", True)
+    def test_new_resolution_parsed(self):
+        """NEW resolution의 JSON이 올바르게 평탄화된다."""
+        from src.services.intent_classifier import _parse_response
+        from src.models.enums import HistoryDecision
 
-    def test_missing_intent(self):
-        """INTENT 행이 없으면 ValueError 를 발생시킨다."""
-        text = "CONFIDENCE: 0.9"
-        with pytest.raises(ValueError):
-            _parse_intent_response(text)
-        log_test_case(logger, "test_parse_legacy_missing_intent", text, "ValueError", "ValueError", True)
+        raw = _make_continuity_json(label="NEW", intent_label="DATA_EXTRACTION")
+        result = _parse_response(raw)
 
-    def test_missing_confidence_defaults(self):
-        """CONFIDENCE 행이 없으면 0.5 로 기본값을 사용한다."""
-        text = "INTENT: data_analysis"
-        intent, confidence = _parse_intent_response(text)
+        passed = result["resolution"] == HistoryDecision.NEW
+        log_test_case(logger, "test_new_resolution", "NEW", HistoryDecision.NEW, result["resolution"], passed)
+        assert result["resolution"] == HistoryDecision.NEW
+        assert result["category"] == "DATA_EXTRACTION"
 
-        assert intent == IntentType.DATA_ANALYSIS
-        assert confidence == 0.5
-        log_test_case(logger, "test_parse_legacy_default_confidence", text, "0.5", confidence, True)
+    def test_continue_resolution_includes_context(self):
+        """CONTINUE resolution에서 continue_reason과 continue_context가 추출된다."""
+        from src.services.intent_classifier import _parse_response
+        from src.models.enums import HistoryDecision
 
-    def test_confidence_clamped(self):
-        """신뢰도가 0~1 범위로 클램핑된다."""
-        text = "INTENT: data_extraction\nCONFIDENCE: 1.5"
-        _, confidence = _parse_intent_response(text)
+        raw = _make_continuity_json(
+            label="CONTINUE",
+            reason="이전 대화 이어짐",
+            context="이번 달 신규 고객의 평균 나이를 알려줘",
+            intent_label="DATA_EXTRACTION",
+        )
+        result = _parse_response(raw)
 
-        assert confidence == 1.0
-        log_test_case(logger, "test_confidence_clamped", "1.5", "1.0", confidence, True)
+        passed = result["resolution"] == HistoryDecision.CONTINUE
+        log_test_case(logger, "test_continue_resolution", "CONTINUE", HistoryDecision.CONTINUE,
+                      result["resolution"], passed)
+        assert result["resolution"] == HistoryDecision.CONTINUE
+        assert result.get("continue_reason") == "이전 대화 이어짐"
+        assert result.get("continue_context") == "이번 달 신규 고객의 평균 나이를 알려줘"
+
+    def test_unsure_resolution_allows_empty_intent(self):
+        """UNSURE resolution에서 intent label이 없으면 AMBIGUOUS로 폴백된다."""
+        from src.services.intent_classifier import _parse_response
+        from src.models.enums import HistoryDecision
+
+        raw = json.dumps({
+            "continuity": {"label": "UNSURE", "confidence": "LOW", "reason": "불확실"},
+            "intent": {"label": "", "confidence": "LOW", "reason": ""},
+        })
+        result = _parse_response(raw)
+
+        passed = result["resolution"] == HistoryDecision.UNSURE
+        log_test_case(logger, "test_unsure_empty_intent", "UNSURE+no_intent",
+                      "UNSURE+AMBIGUOUS", f"{result['resolution']}+{result['category']}", passed)
+        assert result["resolution"] == HistoryDecision.UNSURE
+        assert result["category"] == "AMBIGUOUS"
+
+    def test_invalid_json_raises(self):
+        """유효하지 않은 JSON은 json.JSONDecodeError를 발생시킨다."""
+        from src.services.intent_classifier import _parse_response
+
+        with pytest.raises((json.JSONDecodeError, ValueError, KeyError)):
+            _parse_response("이것은 JSON이 아닙니다")
+
+        log_test_case(logger, "test_invalid_json", "not-json", "예외 발생", "예외 발생", True)
+
+    def test_invalid_continuity_label_raises(self):
+        """허용되지 않는 continuity.label은 ValueError를 발생시킨다."""
+        from src.services.intent_classifier import _parse_response
+
+        raw = json.dumps({
+            "continuity": {"label": "INVALID_LABEL", "confidence": "HIGH", "reason": ""},
+            "intent": {"label": "DATA_EXTRACTION", "confidence": "HIGH", "reason": ""},
+        })
+        with pytest.raises(ValueError, match="허용되지 않는"):
+            _parse_response(raw)
+
+        log_test_case(logger, "test_invalid_label", "INVALID_LABEL", "ValueError", "ValueError", True)
+
+    def test_code_fence_stripped(self):
+        """코드 펜스로 감싼 JSON도 파싱된다."""
+        from src.services.intent_classifier import _parse_response
+        from src.models.enums import HistoryDecision
+
+        inner = _make_continuity_json(label="NEW", intent_label="CASUAL_TALK")
+        raw = f"```json\n{inner}\n```"
+        result = _parse_response(raw)
+
+        passed = result["resolution"] == HistoryDecision.NEW
+        log_test_case(logger, "test_code_fence", "```json...```", HistoryDecision.NEW,
+                      result["resolution"], passed)
+        assert result["resolution"] == HistoryDecision.NEW
+        assert result["category"] == "CASUAL_TALK"
+
+    def test_clarification_category_normalized_to_ambiguous(self):
+        """intent.label='CLARIFICATION'은 'AMBIGUOUS'로 정규화된다."""
+        from src.services.intent_classifier import _parse_response
+
+        raw = _make_continuity_json(label="NEW", intent_label="CLARIFICATION")
+        result = _parse_response(raw)
+
+        passed = result["category"] == "AMBIGUOUS"
+        log_test_case(logger, "test_clarification_to_ambiguous", "CLARIFICATION",
+                      "AMBIGUOUS", result["category"], passed)
+        assert result["category"] == "AMBIGUOUS"
+
+    def test_ambiguities_extracted(self):
+        """최상위 ambiguities 배열이 파싱 결과에 포함된다."""
+        from src.services.intent_classifier import _parse_response
+
+        amb = [{"ambiguity_type": "INTENT", "question": "추출인가요 분석인가요?"}]
+        data = json.loads(_make_continuity_json(label="NEW", intent_label="AMBIGUOUS"))
+        data["ambiguities"] = amb
+        raw = json.dumps(data)
+        result = _parse_response(raw)
+
+        passed = result.get("ambiguities") == amb
+        log_test_case(logger, "test_ambiguities", amb, amb, result.get("ambiguities"), passed)
+        assert result.get("ambiguities") == amb
+
+    def test_data_analysis_category(self):
+        """DATA_ANALYSIS 카테고리가 그대로 보존된다."""
+        from src.services.intent_classifier import _parse_response
+
+        raw = _make_continuity_json(label="NEW", intent_label="DATA_ANALYSIS")
+        result = _parse_response(raw)
+
+        passed = result["category"] == "DATA_ANALYSIS"
+        log_test_case(logger, "test_data_analysis_category", "DATA_ANALYSIS",
+                      "DATA_ANALYSIS", result["category"], passed)
+        assert result["category"] == "DATA_ANALYSIS"
 
 
-# ══════════════════════════════════════════════════════════════
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# _format_history 테스트
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestFormatHistory:
+    """대화 이력 포맷팅 테스트."""
+
+    def test_empty_history_returns_empty_string(self):
+        """빈 이력은 빈 문자열을 반환한다."""
+        from src.services.intent_classifier import _format_history
+
+        result = _format_history([])
+        passed = result == ""
+        log_test_case(logger, "test_empty_history", "[]", "", result, passed)
+        assert result == ""
+
+    def test_user_message_prefixed_correctly(self):
+        """user role 메시지는 '사용자:' 접두사로 출력된다."""
+        from src.services.intent_classifier import _format_history
+
+        history = [{"role": "user", "content": "안녕하세요"}]
+        result = _format_history(history)
+
+        passed = "사용자" in result and "안녕하세요" in result
+        log_test_case(logger, "test_user_prefix", history, "사용자: 안녕하세요", result, passed)
+        assert "사용자" in result
+        assert "안녕하세요" in result
+
+    def test_assistant_message_prefixed_correctly(self):
+        """assistant role 메시지는 '시스템:' 접두사로 출력된다."""
+        from src.services.intent_classifier import _format_history
+
+        history = [{"role": "assistant", "content": "무엇을 도와드릴까요?"}]
+        result = _format_history(history)
+
+        passed = "시스템" in result
+        log_test_case(logger, "test_assistant_prefix", history, "시스템:", result, passed)
+        assert "시스템" in result
+
+    def test_clarification_turns_excluded(self):
+        """type='clarification' 항목은 포맷팅에서 제외된다."""
+        from src.services.intent_classifier import _format_history
+
+        history = [
+            {"role": "user", "content": "정상 질의", "type": "query"},
+            {"role": "assistant", "content": "명확화 질문", "type": "clarification"},
+            {"role": "user", "content": "명확화 응답", "type": "clarification"},
+        ]
+        result = _format_history(history)
+
+        passed = "명확화 질문" not in result and "명확화 응답" not in result
+        log_test_case(logger, "test_clarification_excluded", "clarification type",
+                      "제외", result, passed)
+        assert "명확화 질문" not in result
+        assert "명확화 응답" not in result
+
+    def test_max_turns_limits_output(self):
+        """max_turns를 초과하는 이력은 최근 max_turns개만 포함된다."""
+        from src.services.intent_classifier import _format_history
+
+        history = [
+            {"role": "user", "content": f"질의 {i}"}
+            for i in range(10)
+        ]
+        result = _format_history(history, max_turns=3)
+
+        # 최근 3개의 내용만 포함돼야 한다
+        lines = [ln for ln in result.strip().split("\n") if ln.strip()]
+        passed = len(lines) <= 3
+        log_test_case(logger, "test_max_turns", "10개 이력, max=3", "3개 이하", len(lines), passed)
+        assert len(lines) <= 3
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 노드: _build_clarification_history 테스트
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestBuildClarificationHistory:
+    """intent_classifier 노드의 명확화 이력 조립 테스트."""
+
+    def _make_signal(
+        self,
+        source_node: str = "intent_classifier",
+        question: str = "어떤 데이터가 필요하신가요?",
+        answer: str | None = "신규 고객 수입니다",
+        decision: str = "ASK",
+        turn_id: str | None = None,
+    ):
+        from src.agents.models.clarification import AmbiguitySignal
+
+        return AmbiguitySignal(
+            source_node=source_node,
+            decision=decision,
+            ambiguity_type="INTENT",
+            confidence="HIGH",
+            question=question,
+            answer=answer,
+            turn_id=turn_id,
+        )
+
+    def test_empty_resolved_signals(self):
+        """resolved_signals가 없으면 빈 문자열을 반환한다."""
+        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
+        from src.agents.state.state import PipelineState
+
+        state = PipelineState()
+        result = _build_clarification_history(state)
+
+        passed = result == ""
+        log_test_case(logger, "test_empty_signals", "no signals", "", result, passed)
+        assert result == ""
+
+    def test_non_intent_classifier_signals_excluded(self):
+        """source_node가 'intent_classifier'가 아닌 시그널은 제외된다."""
+        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
+        from src.agents.state.state import PipelineState
+
+        signal = self._make_signal(source_node="sql_generator")
+        state = PipelineState(resolved_signals=[signal])
+        result = _build_clarification_history(state)
+
+        passed = result == ""
+        log_test_case(logger, "test_other_source_excluded", "sql_generator signal", "", result, passed)
+        assert result == ""
+
+    def test_intent_classifier_signals_included(self):
+        """source_node='intent_classifier'의 시그널은 Q&A로 조립된다."""
+        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
+        from src.agents.state.state import PipelineState
+
+        signal = self._make_signal(
+            source_node="intent_classifier",
+            question="추출인가요 분석인가요?",
+            answer="추출입니다",
+        )
+        state = PipelineState(resolved_signals=[signal])
+        result = _build_clarification_history(state)
+
+        passed = "추출인가요 분석인가요?" in result and "추출입니다" in result
+        log_test_case(logger, "test_intent_signals_included", signal.question,
+                      "포함", result, passed)
+        assert "추출인가요 분석인가요?" in result
+        assert "추출입니다" in result
+
+    def test_multiple_signals_all_included(self):
+        """여러 intent_classifier 시그널이 모두 순서대로 포함된다."""
+        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
+        from src.agents.state.state import PipelineState
+
+        signals = [
+            self._make_signal(question="첫 번째 질문", answer="첫 번째 답변"),
+            self._make_signal(question="두 번째 질문", answer="두 번째 답변"),
+        ]
+        state = PipelineState(resolved_signals=signals)
+        result = _build_clarification_history(state)
+
+        passed = "첫 번째" in result and "두 번째" in result
+        log_test_case(logger, "test_multiple_signals", "2개 시그널", "모두 포함", result, passed)
+        assert "첫 번째 질문" in result
+        assert "두 번째 답변" in result
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# IntentClassifyResult 생성자 테스트
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestIntentClassifyResult:
+    """IntentClassifyResult 기본 동작 테스트."""
+
+    def test_default_ambiguities_is_empty_list(self):
+        """ambiguities 기본값은 빈 리스트다 (__post_init__ 검증)."""
+        from src.services.intent_classifier import IntentClassifyResult
+        from src.models.enums import HistoryDecision
+
+        result = IntentClassifyResult(resolution=HistoryDecision.NEW)
+
+        passed = result.ambiguities == []
+        log_test_case(logger, "test_default_ambiguities", "no ambiguities", [], result.ambiguities, passed)
+        assert result.ambiguities == []
+
+    def test_is_error_default_false(self):
+        """is_error 기본값은 False다."""
+        from src.services.intent_classifier import IntentClassifyResult
+        from src.models.enums import HistoryDecision
+
+        result = IntentClassifyResult(resolution=HistoryDecision.SKIP)
+
+        passed = result.is_error is False
+        log_test_case(logger, "test_is_error_default", "SKIP result", False, result.is_error, passed)
+        assert result.is_error is False
+
+    def test_error_result_construction(self):
+        """에러 결과가 올바른 필드를 가진다."""
+        from src.services.intent_classifier import IntentClassifyResult
+        from src.models.enums import HistoryDecision, IntentType
+
+        result = IntentClassifyResult(
+            resolution=HistoryDecision.SKIP,
+            intent=IntentType.UNKNOWN,
+            is_error=True,
+        )
+
+        passed = result.is_error is True and result.intent == IntentType.UNKNOWN
+        log_test_case(logger, "test_error_result", "is_error=True",
+                      "SKIP+UNKNOWN", f"{result.resolution}+{result.intent}", passed)
+        assert result.is_error is True
+        assert result.intent == IntentType.UNKNOWN
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # LLM 실제 호출 테스트
-# ══════════════════════════════════════════════════════════════
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @pytest.mark.live_llm
 @pytest.mark.skipif(not _HAS_API_KEY, reason="ANTHROPIC_API_KEY 환경 변수 필요")
 @pytest.mark.asyncio
-async def test_classify_data_extraction_live():
+async def test_intent_classifier_data_extraction_live():
     """실제 LLM 호출로 데이터 추출 의도를 분류한다."""
-    state = PipelineState(preprocessed_input="이번 달 신규 고객 수 알려줘")
-    result = await context_classifier_node(state)
+    from src.services.intent_classifier import intent_classifier
+    from src.agents.nodes.system_prompts import (
+        INTENT_CLASSIFIER_SYSTEM,
+        INTENT_CLASSIFIER_USER,
+    )
+    from src.models.enums import IntentType, HistoryDecision
 
-    intent = result["intent"]
-    confidence = result["intent_confidence"]
+    result = await intent_classifier(
+        query="이번 달 신규 고객 수 알려줘",
+        conversation_history=[],
+        system_prompt=INTENT_CLASSIFIER_SYSTEM,
+        user_template=INTENT_CLASSIFIER_USER,
+    )
 
-    log_test_case(logger, "test_classify_data_extraction_live",
-                  "이번 달 신규 고객 수 알려줘",
-                  "DATA_EXTRACTION or DATA_ANALYSIS",
-                  f"{intent} ({confidence})", True)
+    log_test_case(
+        logger, "test_data_extraction_live",
+        "이번 달 신규 고객 수 알려줘",
+        "DATA_EXTRACTION/DATA_ANALYSIS",
+        f"{result.intent.value} ({result.confidence:.2f})",
+        not result.is_error,
+    )
 
-    assert result["status"] == QueryStatus.INTENT_CLASSIFIED
-    assert intent in (IntentType.DATA_EXTRACTION, IntentType.DATA_ANALYSIS)
-    assert 0.0 <= confidence <= 1.0
+    assert not result.is_error
+    assert result.intent in (IntentType.DATA_EXTRACTION, IntentType.DATA_ANALYSIS)
+    assert 0.0 <= result.confidence <= 1.0
+    assert result.resolution in (HistoryDecision.NEW, HistoryDecision.SKIP)
 
 
 @pytest.mark.live_llm
 @pytest.mark.skipif(not _HAS_API_KEY, reason="ANTHROPIC_API_KEY 환경 변수 필요")
 @pytest.mark.asyncio
-async def test_classify_casual_talk_live():
+async def test_intent_classifier_casual_talk_live():
     """실제 LLM 호출로 일반 대화를 분류한다."""
-    state = PipelineState(preprocessed_input="안녕하세요 좋은 아침이에요")
-    result = await context_classifier_node(state)
+    from src.services.intent_classifier import intent_classifier
+    from src.agents.nodes.system_prompts import (
+        INTENT_CLASSIFIER_SYSTEM,
+        INTENT_CLASSIFIER_USER,
+    )
+    from src.models.enums import IntentType
 
-    intent = result["intent"]
-    log_test_case(logger, "test_classify_casual_talk_live",
-                  "안녕하세요 좋은 아침이에요",
-                  "CASUAL_TALK or CLARIFICATION_NEEDED",
-                  str(intent), True)
+    result = await intent_classifier(
+        query="안녕하세요 좋은 아침이에요",
+        conversation_history=[],
+        system_prompt=INTENT_CLASSIFIER_SYSTEM,
+        user_template=INTENT_CLASSIFIER_USER,
+    )
 
-    assert result["status"] == QueryStatus.INTENT_CLASSIFIED
-    # 일반 대화는 CASUAL_TALK 또는 CLARIFICATION_NEEDED 둘 다 합리적
-    assert intent in (IntentType.CASUAL_TALK, IntentType.CLARIFICATION_NEEDED,
-                      IntentType.GENERAL_QUESTION)
+    log_test_case(
+        logger, "test_casual_talk_live",
+        "안녕하세요 좋은 아침이에요",
+        "CASUAL_TALK",
+        result.intent.value,
+        not result.is_error,
+    )
+
+    assert not result.is_error
+    assert result.intent in (
+        IntentType.CASUAL_TALK,
+        IntentType.CLARIFICATION_NEEDED,
+        IntentType.GENERAL_QUESTION,
+    )
 
 
 @pytest.mark.live_llm
 @pytest.mark.skipif(not _HAS_API_KEY, reason="ANTHROPIC_API_KEY 환경 변수 필요")
 @pytest.mark.asyncio
-async def test_classify_analysis_live():
-    """실제 LLM 호출로 데이터 분석 의도를 분류한다."""
-    state = PipelineState(preprocessed_input="분기별 대출 추이를 분석해줘")
-    result = await context_classifier_node(state)
+async def test_intent_classifier_continuation_live():
+    """실제 LLM 호출로 멀티턴 연속 질의를 판정한다."""
+    from src.services.intent_classifier import intent_classifier
+    from src.agents.nodes.system_prompts import (
+        INTENT_CLASSIFIER_SYSTEM,
+        INTENT_CLASSIFIER_USER,
+    )
+    from src.models.enums import HistoryDecision
 
-    intent = result["intent"]
-    log_test_case(logger, "test_classify_analysis_live",
-                  "분기별 대출 추이를 분석해줘",
-                  "DATA_ANALYSIS", str(intent), True)
+    history = [
+        {"role": "user", "content": "이번 달 신규 고객 수 알려줘"},
+        {"role": "assistant", "content": "이번 달 신규 고객은 1,234명입니다."},
+    ]
 
-    assert result["status"] == QueryStatus.INTENT_CLASSIFIED
-    assert intent == IntentType.DATA_ANALYSIS
+    result = await intent_classifier(
+        query="그 중 VIP 고객은 몇 명이야?",
+        conversation_history=history,
+        system_prompt=INTENT_CLASSIFIER_SYSTEM,
+        user_template=INTENT_CLASSIFIER_USER,
+    )
+
+    log_test_case(
+        logger, "test_continuation_live",
+        "그 중 VIP 고객은 몇 명이야?",
+        "CONTINUE 또는 NEW",
+        result.resolution.value,
+        not result.is_error,
+    )
+
+    assert not result.is_error
+    # 이전 대화 맥락이 있으므로 CONTINUE 또는 NEW가 모두 합리적
+    assert result.resolution in (HistoryDecision.CONTINUE, HistoryDecision.NEW)

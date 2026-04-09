@@ -1,21 +1,21 @@
 """MongoDB 메타데이터 시딩.
 
-PG biz_schema의 실제 테이블/컬럼 구조를 읽어서
+PG ADWOWN 스키마의 실제 테이블/컬럼 구조를 읽어서
 MongoDB meta_db의 5개 컬렉션에 적재한다.
 
 대상 컬렉션:
-  1. dpasset_table       — 테이블 메타 (PG 스키마 기반)
-  2. dpasset_column      — 컬럼 메타 (PG 스키마 기반)
+  1. dpasset_table       — 테이블 메타 (PG ADWOWN 스키마 기반)
+  2. dpasset_column      — 컬럼 메타 (PG ADWOWN 스키마 기반)
   3. standard_code       — 코드 메타 (ES seed_elasticsearch.py의 CODE_META_DOCS와 동일)
   4. standard_code_value — 코드값 (CODE_META_DOCS의 codes 펼침)
-  5. glossary            — 업무 용어사전 (ES seed_elasticsearch.py의 TERM_DICT_DOCS와 동일)
+  5. biz_term            — 업무 용어사전 (ES seed_elasticsearch.py의 TERM_DICT_DOCS와 동일)
 
 TYPE-2: code_meta에 공식 코드만 등록 (PG 미정의 코드 의도적 누락)
 TYPE-3: table/column 설명 품질 혼재 (BEST 15% / GOOD 25% / POOR 40% / MISSING 20%)
 
 사전 조건:
   - MongoDB 컬렉션 스키마가 생성되어 있어야 함 (init_mongodb.js 실행)
-  - PG biz_schema에 테이블이 존재해야 함 (seed_postgres.py 실행)
+  - PG ADWOWN 스키마에 테이블이 존재해야 함 (seed_postgres.py 실행)
 
 사용법:
     pip install pymongo psycopg2-binary python-dotenv
@@ -202,18 +202,18 @@ def seed_mongodb() -> None:
     print(f"  standard_code_value: {code_value_count}건 적재")
 
     # ========================================
-    # 4. glossary — 업무 용어사전
+    # 4. biz_term — 업무 용어사전
     # ========================================
-    print("\n[glossary]")
-    coll_glossary = db["glossary"]
-    coll_glossary.delete_many({})
+    print("\n[biz_term]")
+    coll_biz_term = db["biz_term"]
+    coll_biz_term.delete_many({})
 
     # table_hint → dpasset_table._id 매핑 구성
     table_id_map = {}
     for t in coll_table.find({}, {"_id": 1, "name": 1}):
         table_id_map[t["name"]] = t["_id"]
 
-    glossary_docs = []
+    biz_term_docs = []
     for doc in TERM_DICT_DOCS:
         # table_hint 문자열에서 테이블명 추출 → ObjectId 매핑
         table_ids = []
@@ -230,24 +230,24 @@ def seed_mongodb() -> None:
             if s.strip()
         ]
 
-        glossary_docs.append({
+        biz_term_docs.append({
             "name": doc["term_ko"],
             "synonyms": synonyms,
-            "glossary_definition": doc.get("definition", ""),
+            "biz_term_definition": doc.get("definition", ""),
             "table_ids": table_ids,
         })
 
-    if glossary_docs:
-        result = coll_glossary.insert_many(glossary_docs, ordered=False)
-        print(f"  glossary: {len(result.inserted_ids)}건 적재")
+    if biz_term_docs:
+        result = coll_biz_term.insert_many(biz_term_docs, ordered=False)
+        print(f"  biz_term: {len(result.inserted_ids)}건 적재")
     else:
-        print("  glossary: 0건")
+        print("  biz_term: 0건")
 
     # ── 최종 건수 확인 ──
     print("\n[적재 결과]")
     for coll_name in (
         "dpasset_table", "dpasset_column",
-        "standard_code", "standard_code_value", "glossary",
+        "standard_code", "standard_code_value", "biz_term",
     ):
         cnt = db[coll_name].count_documents({})
         print(f"  {coll_name:<25}: {cnt:>5}건")

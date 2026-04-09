@@ -1171,9 +1171,8 @@ resources/prompts/
     ├── analyzer_viz_judgment_system.txt           # 시각화 판정
     ├── analyzer_viz_judgment_user.txt
     ├── analyzer_viz_svg_system.txt               # SVG 생성
-    ├── analyzer_viz_svg_user.txt
-    ├── formatter_system.txt                      # 결과 포맷팅
-    └── formatter_user.txt
+    └── analyzer_viz_svg_user.txt
+    # formatter_system/user.txt는 rule-based 전환으로 삭제됨
 ```
 
 ### 9-3. 폐쇄망 모델 전환 시 프롬프트 재튜닝 포인트

@@ -15,7 +15,7 @@
 ```
 [사용자 질의]
   → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
-  → knowledge_fetcher 노드 (reason 계층, 도구 기반 병렬 수집)
+  → context_retriever 노드 (reason 계층, 도구 기반 병렬 수집)
      ├── ES table_meta     ← es_table_query
      ├── ES report_sql     ← es_report_query
      ├── History DB (ILIKE) ← history_db_query (키워드 기반)
@@ -44,7 +44,7 @@
 [사용자 질의]
   → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
   → reasoning_preparer 노드 (규칙 기반 가설 생성·탐색 계획)
-  → knowledge_fetcher 노드 (도구 기반 병렬 수집)
+  → context_retriever 노드 (도구 기반 병렬 수집)
      ├── ES table_meta
      ├── ES report_sql
      ├── History DB (ILIKE)        ← 기존 유지 (키워드 매칭 보완)
@@ -201,7 +201,7 @@ reranked = reranker.rerank(
 **결론**: 두 소스 모두 유지하며 결과를 병합한다.
 - History DB: 테이블명·컬럼명이 직접 언급된 경우 강점
 - Qdrant: 비즈니스 의도가 유사한 경우 강점
-- 중복 SQL은 `knowledge_fetcher` 노드에서 dedup 처리
+- 중복 SQL은 `context_retriever` 노드에서 dedup 처리
 
 ---
 
@@ -241,7 +241,7 @@ reranked = reranker.rerank(
 ```
 QdrantConnector.search_sql_history()   → Top-50 후보 (Raw)
          ↓
-knowledge_fetcher 노드 (reason/knowledge_fetcher.py)
+context_retriever 노드 (reason/context_retriever.py)
          ↓
 Reranker.rerank(query, candidates)     → Top-5~10 (Precise)
          ↓
@@ -249,7 +249,7 @@ ContextInfo.vector_past_sqls
 ```
 
 Reranker(`src/connectors/impl/reranker.py`)는 커넥터 계층에 배치되며,
-`knowledge_fetcher` 노드에서 Qdrant 검색 후 재순위를 호출한다.
+`context_retriever` 노드에서 Qdrant 검색 후 재순위를 호출한다.
 임베딩·재순위 기능은 QdrantConnector에 통합되었다(`src/services/__init__.py` 참조).
 
 ### 7.2 폴백
@@ -272,7 +272,7 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 > `src/connectors/impl/qdrant_connector.py`에 통합되었다.
 > 검색 쿼리 빌더와 컨텍스트 조립 기능은 독립 서비스 대신
 > `SearchKeywords` 모델(`src/agents/models/normalization.py`)과
-> `query_normalizer` 서비스, `knowledge_fetcher` 노드에 분산 통합되었다.
+> `query_normalizer` 서비스, `context_retriever` 노드에 분산 통합되었다.
 
 ### 수정
 
@@ -283,7 +283,7 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 | `src/models/context.py` | `ContextInfo`에 `vector_past_sqls: list[str]` 필드 추가 | 구현 완료 |
 | `src/connectors/impl/qdrant_connector.py` | `search_sql_history()` + 하이브리드 검색 + BGE-M3 임베딩 전환 | 구현 완료 |
 | `src/services/query_normalizer.py` | `sql_history_search` 벡터 쿼리 합성 로직 (슬롯 기반) | 통합 예정 |
-| `src/agents/nodes/reason/knowledge_fetcher.py` | sql_history 벡터 검색 호출, 병렬 수집에 포함 | 통합 예정 |
+| `src/agents/nodes/reason/context_retriever.py` | sql_history 벡터 검색 호출, 병렬 수집에 포함 | 통합 예정 |
 | `src/agents/nodes/interpret/query_normalizer.py` | `sql_history_search` 생성 로직 (후처리 단계) | 통합 예정 |
 | `devtools/scripts/seed_qdrant.py` | BGE-M3 하이브리드 임베딩, Named Vectors 스키마 | 구현 완료 |
 | `pyproject.toml` | `FlagEmbedding` 의존성 추가, `fastembed` 제거 | 구현 완료 |
@@ -317,5 +317,5 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 | 버전 | 날짜 | 변경 내용 |
 |------|------|----------|
 | 1.0 | 2026-03-21 | 초안 작성 |
-| 1.1 | 2026-04-01 | v3 파이프라인 리팩터링 반영: Context Service → knowledge_fetcher 노드, SQL Generator → sql_generator 노드, SearchQueryBuilder → query_normalizer 서비스 통합, 임베딩·재순위 QdrantConnector 통합, 파일 경로 현행화 (reranker.py 위치 변경, ContextInfo → models/context.py), 구현 상태 칼럼 추가 |
+| 1.1 | 2026-04-01 | v3 파이프라인 리팩터링 반영: Context Service → context_retriever 노드, SQL Generator → sql_generator 노드, SearchQueryBuilder → query_normalizer 서비스 통합, 임베딩·재순위 QdrantConnector 통합, 파일 경로 현행화 (reranker.py 위치 변경, ContextInfo → models/context.py), 구현 상태 칼럼 추가 |
 | 1.2 | 2026-04-02 | planner → reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용) |

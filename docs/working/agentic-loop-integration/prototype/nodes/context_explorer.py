@@ -47,7 +47,7 @@ async def context_explorer_node(state: AgenticCoreState) -> dict:
         # 중복 방지
         if step.tool in ("search_use_cases", "search_table_meta",
                          "search_code_meta", "search_report_sql",
-                         "search_manual", "search_glossary"):
+                         "search_manual", "search_biz_terms"):
             if step.input in searched_queries:
                 step.status = "SKIPPED"
                 step.insight = "이미 검색한 쿼리 — 스킵"
@@ -139,7 +139,7 @@ async def _execute_tool(step: ExecutionStep) -> Any:
         "search_code_meta": _tool_search_code_meta,
         "search_report_sql": _tool_search_report_sql,
         "search_manual": _tool_search_manual,
-        "search_glossary": _tool_search_glossary,
+        "search_biz_terms": _tool_search_biz_terms,
         "get_sample_data": _tool_get_sample_data,
     }
     tool_fn = tool_map.get(step.tool)
@@ -191,14 +191,14 @@ async def _tool_search_manual(query: str) -> list[dict]:
     return []
 
 
-async def _tool_search_glossary(term: str) -> list[dict]:
+async def _tool_search_biz_terms(term: str) -> list[dict]:
     """금융 용어사전 검색.
 
-    TODO: MongoConnector.search_glossary(term)
+    TODO: MongoConnector.search_biz_terms(term)
     """
     # from src.connectors.manager import get_connector_manager
     # mgr = get_connector_manager()
-    # results = await mgr.mongo.search_glossary(term)
+    # results = await mgr.mongo.search_biz_terms(term)
     return []
 
 

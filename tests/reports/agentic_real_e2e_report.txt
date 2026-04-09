@@ -69,7 +69,7 @@
     failed_steps: 0
     tool_calls: 2
     knowledge_items: 2
-    candidate_tables: 0
+    explored_tables: 0
     step_insights: ['search_table_meta 결과 없음', '용어사전 2건 확인']
 
 ## FLOW_REAL

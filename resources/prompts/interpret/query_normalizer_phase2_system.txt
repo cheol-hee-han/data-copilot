@@ -77,7 +77,7 @@ JSON만 출력하세요. 설명 텍스트, 마크다운 코드블록 기호를 �
 
 ## 교차 검증 수정 예시
 
-■ R1 위반: GROUP이 있는데 agg_function이 NONE
+### R1 위반: GROUP이 있는데 agg_function이 NONE
 
 Phase 1 입력 (발췌):
   dimensions: [{"term": "지점", "role": "GROUP"}]
@@ -90,7 +90,7 @@ Phase 1 입력 (발췌):
 수정 후:
   measures: [{"term": "대출잔액", "agg_function": "SUM"}]
 
-■ R2 위반: COMPARE인데 compare_period 누락
+### R2 위반: COMPARE인데 compare_period 누락
 
 Phase 1 입력 (발췌):
   intent: {"primary": "COMPARE", "secondary": []}

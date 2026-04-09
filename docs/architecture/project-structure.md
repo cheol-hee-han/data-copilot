@@ -41,16 +41,16 @@ src/
 │       │
 │       ├── interpret/                 # Interpret 계층 — 질의 해석
 │       │   ├── __init__.py
-│       │   ├── context_classifier.py  # 통합 노드 — 이력 해소 + 의도 분류 (단일 LLM 호출)
+│       │   ├── intent_classifier.py  # 통합 노드 — 이력 해소 + 의도 분류 (단일 LLM 호출)
 │       │   ├── query_normalizer.py    # 질의 정규화 — 8-Slot 구조화 (2-Phase LLM)
 │       │   ├── clarification_handler.py # 통합 명확화 노드 — 5개 트리거 소스, source_node 복귀 (AmbiguitySignal 기반)
-│       │   └── 미사용_intent_classifier.py # (미사용) context_classifier로 통합
+│       │   └── 미사용_intent_classifier.py # (미사용) intent_classifier로 통합
 │       │
 │       ├── reason/                    # Reason 계층 — 에이전틱 추론 루프
 │       │   ├── __init__.py
 │       │   ├── reasoning_preparer.py   # 추론 준비 — 규칙 기반 질의 분해, 가설 생성, 탐색 계획 (LLM 없음)
-│       │   ├── knowledge_fetcher.py     # 초기 탐색 — 도구 기반 ES/Qdrant/DB 검색 실행
-│       │   ├── knowledge_interpreter.py # 컨텍스트 해석 — 검색 결과 해석, 지식 승격
+│       │   ├── context_retriever.py     # 초기 탐색 — 도구 기반 ES/Qdrant/DB 검색 실행
+│       │   ├── context_interpreter.py # 컨텍스트 해석 — 검색 결과 해석, 지식 승격
 │       │   ├── readiness_gate.py      # 준비도 판정 — evaluate_readiness() SSOT 호출
 │       │   ├── sql_generator.py       # SQL 생성 — dialect 라우팅 + LLM SQL 생성
 │       │   ├── sql_validator.py       # SQL 검증 — 3-레이어 (안전성·구조·실행) 검증
@@ -67,7 +67,7 @@ src/
 │
 ├── services/                          # 서비스 계층 — 검색·분석·도메인 지식
 │   ├── __init__.py
-│   ├── context_classifier.py          # 통합 분류 서비스 — 이력 해소 + 의도 분류 (LLM 위임)
+│   ├── intent_classifier.py          # 통합 분류 서비스 — 이력 해소 + 의도 분류 (LLM 위임)
 │   ├── query_normalizer.py            # 정규화 서비스 — 8-Slot LLM 파이프라인
 │   ├── data_analyzer.py               # 데이터 분석 서비스 — 통계·시각화 판정·SVG 생성
 │   ├── response_formatter.py          # 결과 포맷팅 서비스 — 보고서 변환
@@ -159,37 +159,36 @@ resources/
 ├── prompts/                           # LLM 프롬프트 — 3계층 디렉토리 구조
 │   ├── README.md
 │   ├── interpret/                     # 질의 해석 계층 (13 files)
-│   │   ├── context_classifier_system.txt       # 이력 해소 + 의도 분류 통합
-│   │   ├── context_classifier_user.txt         # 이력/의도 사용자 템플릿
+│   │   ├── intent_classifier_system.txt       # 이력 해소 + 의도 분류 통합
+│   │   ├── intent_classifier_user.txt         # 이력/의도 사용자 템플릿
 │   │   ├── query_normalizer_phase1_system.txt  # 정규화 Phase1
 │   │   ├── query_normalizer_phase1_user.txt    # 정규화 Phase1 사용자 템플릿
 │   │   ├── query_normalizer_phase2_system.txt  # 정규화 Phase2 교차검증
 │   │   ├── query_normalizer_phase2_user.txt    # 정규화 Phase2 사용자 템플릿
-│   │   ├── 미사용_intent_classifier_system.txt # (미사용) 의도 분류 — context_classifier로 통합
+│   │   ├── 미사용_intent_classifier_system.txt # (미사용) 의도 분류 — intent_classifier로 통합
 │   │   ├── 미사용_intent_classifier_user.txt   # (미사용)
 │   │   ├── 미사용_intent_classifier_legacy_system.txt # (미사용)
 │   │   ├── 미사용_clarifier_system.txt         # (미사용) — clarification_handler는 규칙 기반
 │   │   ├── 미사용_clarifier_user.txt           # (미사용)
-│   │   ├── 미사용_history_resolver_system.txt  # (미사용) — context_classifier로 통합
+│   │   ├── 미사용_history_resolver_system.txt  # (미사용) — intent_classifier로 통합
 │   │   └── 미사용_history_resolver_user.txt    # (미사용)
 │   ├── reason/                        # 추론 계층 (8 files)
-│   │   ├── knowledge_interpreter_system.txt    # 검색 결과 해석·지식 승격
+│   │   ├── context_interpreter_system.txt    # 검색 결과 해석·지식 승격
 │   │   ├── sql_generator_system.txt            # SQL 생성
 │   │   ├── sql_generator_fix_section.txt       # SQL 수정 피드백 삽입 조각
 │   │   ├── sql_validator_system.txt            # 의미 검증 (Layer 2b)
 │   │   ├── recovery_agent_system.txt           # 복구 재계획
 │   │   ├── 미사용_planner_system.txt           # (미사용) — reasoning_preparer는 규칙 기반
 │   │   ├── 미사용_recovery_planner_system.txt  # (미사용) — recovery_agent로 통합
-│   │   └── 미사용_table_comparison_system.txt  # (미사용) — knowledge_interpreter로 통합
+│   │   └── 미사용_table_comparison_system.txt  # (미사용) — context_interpreter로 통합
 │   └── present/                       # 표현 계층 (8 files)
 │       ├── analyzer_system.txt                 # 데이터 분석
 │       ├── analyzer_user.txt                   # 분석 사용자 템플릿
 │       ├── analyzer_viz_judgment_system.txt     # 시각화 판정
 │       ├── analyzer_viz_judgment_user.txt       # 시각화 판정 사용자 템플릿
 │       ├── analyzer_viz_svg_system.txt          # SVG 생성
-│       ├── analyzer_viz_svg_user.txt            # SVG 생성 사용자 템플릿
-│       ├── formatter_system.txt                # 결과 포맷팅
-│       └── formatter_user.txt                  # 포맷팅 사용자 템플릿
+│       └── analyzer_viz_svg_user.txt            # SVG 생성 사용자 템플릿
+│       # formatter_system/user.txt는 rule-based 전환으로 삭제됨
 │
 ├── connectors/                        # 커넥터별 설정
 │   ├── README.md

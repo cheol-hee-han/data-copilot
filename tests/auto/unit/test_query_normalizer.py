@@ -80,11 +80,9 @@ from src.services.query_normalizer import (
 from src.services.query_normalizer import (
     ALL_SYNONYMS,
     ABBREVIATION_MAP,
-    OUTPUT_TEMPLATE_REGISTRY,
 )
 from src.utils.llm.prompt import (
     serialize_synonym_dict,
-    serialize_template_registry,
 )
 
 
@@ -170,14 +168,15 @@ class TestNormalizationModels:
 class TestPreprocessor:
     """전처리기 테스트."""
 
-    def test_abbreviation_expansion(self):
+    def test_abbreviation_not_expanded_in_preprocess(self):
+        """약어 확장은 LLM 추론으로 전환됨 — 전처리 단계에서는 치환하지 않음."""
         result = _preprocess_for_normalization("YoY 매출 추이")
-        assert "전년동기대비" in result
-        assert "YoY" not in result
+        assert "YoY" in result  # 약어가 그대로 보존
 
-    def test_abbreviation_expansion_nim(self):
+    def test_abbreviation_nim_not_expanded(self):
+        """NIM도 전처리에서 치환하지 않음."""
         result = _preprocess_for_normalization("NIM 변화 추이")
-        assert "순이자마진" in result
+        assert "NIM" in result
 
     def test_tilde_normalization(self):
         result = _preprocess_for_normalization("지점별~~~매출")
@@ -365,21 +364,10 @@ class TestSynonyms:
         assert "대출" in entities
         assert "지점" in entities
 
-    def test_output_template_registry_has_banking_docs(self):
-        assert "여신명세" in OUTPUT_TEMPLATE_REGISTRY
-        assert "수신명세" in OUTPUT_TEMPLATE_REGISTRY
-        assert "연체명세" in OUTPUT_TEMPLATE_REGISTRY
-        assert "여신현황" in OUTPUT_TEMPLATE_REGISTRY
-
     def test_synonym_prompt_text_not_empty(self):
         text = serialize_synonym_dict(ALL_SYNONYMS)
         assert len(text) > 100
         assert "[measures]" in text
-
-    def test_output_template_prompt_text_not_empty(self):
-        text = serialize_template_registry(OUTPUT_TEMPLATE_REGISTRY)
-        assert len(text) > 100
-        assert "여신명세" in text
 
     def test_abbreviation_map_has_banking_terms(self):
         assert "NIM" in ABBREVIATION_MAP

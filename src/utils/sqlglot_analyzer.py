@@ -1,13 +1,26 @@
 """sqlglot 기반 SQL 파싱 및 구조 분석 유틸리티.
 
-유사 SQL에서 조인 패턴, 코드성 컬럼 값, 집계 패턴, 날짜 조건 등
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+유사 SQL 이력에서 조인 패턴, 코드성 컬럼 값, 집계 패턴, 날짜 조건 등
 12가지 구조적 힌트를 추출하여 LLM에 압축된 구조 정보를 제공한다.
 
-주요 기능:
+LLM에 SQL 원문을 그대로 전달하면 토큰 낭비가 크고 핵심 패턴이 묻히므로,
+sqlglot AST를 활용해 조인/집계/필터 등 구조적 특징만 추출하여 프롬프트에
+주입한다. 이를 통해 LLM이 유사 SQL의 테이블 조합, 코드값 사용 패턴 등을
+효율적으로 참조할 수 있다.
+
+테이블 추출 전략: sqlglot AST 파싱을 우선 시도하되, Sybase IQ의
+BEGIN...END / IF...THEN 등 비표준 PL/SQL 블록은 파싱 실패하므로
+폐쇄망 테이블 네이밍 규칙(TB_XXX_XXXXXXX)을 regex fallback으로 보완한다.
+
+핵심 함수:
   - extract_structural_hints: SQL 원문 → dict (12가지 구조 힌트)
-  - parse_sql_safe: 방언별 안전한 파싱 (실패 시 None)
-  - merge_hints: 다수 SQL에서 추출한 힌트 dict 병합
-  - get_real_tables / get_real_columns: AST에서 테이블/컬럼 추출
+  - parse_sql_safe: 방언별 안전한 파싱 (실패 시 None, 흐름 차단 없음)
+  - merge_hints: 다수 SQL에서 추출한 힌트 dict 병합 (중복 제거 + 빈도 기반)
+  - get_real_tables: AST + regex fallback으로 테이블 추출
+  - get_real_columns: AST에서 실제 참조 컬럼만 추출 (alias/함수 제외)
+  - extract_select_alias_map: SELECT 절의 출력alias → 원본컬럼 매핑
 """
 
 from __future__ import annotations
@@ -32,9 +45,13 @@ def extract_structural_hints(
         StructuralHints 필드명을 키로 하는 dict.
         호출측에서 StructuralHints(**result)로 변환 가능.
     """
+    # 테이블은 AST 실패 시에도 regex fallback으로 추출 가능
+    source_tables = get_real_tables(sql, dialect)
+
     ast = parse_sql_safe(sql, dialect)
     if ast is None:
-        return {}
+        # AST 파싱 실패 — 테이블만이라도 반환
+        return {"source_tables": source_tables} if source_tables else {}
 
     # alias -> 테이블명 매핑 구성
     alias_map = _build_alias_map(ast)
@@ -48,7 +65,7 @@ def extract_structural_hints(
         ),
         "date_filters": _extract_date_filters(ast),
         # 테이블 정보
-        "source_tables": get_real_tables(ast),
+        "source_tables": source_tables,
         # SELECT 출력 구조
         "select_columns": _extract_select_columns(
             ast, alias_map,
@@ -197,8 +214,8 @@ def extract_select_alias_map(
     return alias_map
 
 
-def get_real_tables(ast: sqlglot.Expression) -> list[str]:
-    """CTE 오인을 방지하여 실제 테이블명만 추출한다.
+def _extract_tables_from_ast(ast: sqlglot.Expression) -> list[str]:
+    """CTE 오인을 방지하여 AST에서 실제 테이블명만 추출한다 (내부용).
 
     find_all(exp.Table) 대신 traverse_scope()를 사용하여
     CTE 별칭을 실제 테이블로 잘못 반환하는 문제를 해소한다.
@@ -231,16 +248,17 @@ def _strip_comments_and_literals(sql: str) -> str:
     return _COMMENT_OR_LITERAL_RE.sub(" ", sql)
 
 
-def get_real_tables_with_fallback(
+def get_real_tables(
     sql: str,
     dialect: str | None = None,
 ) -> list[str]:
-    """AST 파싱 → 실패 시 regex fallback으로 테이블명을 추출한다.
+    """AST 파싱 + regex fallback으로 테이블명을 추출한다.
+
+    1차: sqlglot AST 파싱 성공 시 정밀 추출 (CTE 제외).
+    2차: 테이블 네이밍 규칙(TB_XXX_XXXXXXX) regex로 보완.
 
     Sybase IQ의 BEGIN...END / IF...THEN 등 PL/SQL 블록은
-    sqlglot이 파싱하지 못하므로, 테이블 네이밍 규칙(TB_XXX_XXXXXXX)
-    기반 regex로 보완한다.
-
+    sqlglot이 파싱하지 못하므로 regex fallback이 필수다.
     주석과 문자열 리터럴 내 테이블명은 제거 후 매칭하여 오탐을 방지한다.
     """
     ast = parse_sql_safe(sql, dialect)
@@ -248,7 +266,7 @@ def get_real_tables_with_fallback(
     # 1차: AST 파싱 성공 시 정밀 추출
     ast_tables: list[str] = []
     if ast is not None:
-        ast_tables = get_real_tables(ast)
+        ast_tables = _extract_tables_from_ast(ast)
 
     # 2차: regex fallback — 주석·리터럴 제거 후 매칭
     cleaned = _strip_comments_and_literals(sql)

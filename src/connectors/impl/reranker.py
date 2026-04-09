@@ -1,5 +1,7 @@
 """BGE-Reranker-v2-m3 재순위 서비스.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 Cross-Encoder 방식으로 쿼리-문서 쌍을 동시 분석하여
 벡터 검색의 Top-N 후보를 정밀 재순위한다.
 
@@ -90,7 +92,7 @@ class _OnnxRerankerBackend:
         self._tokenizer: Any = None
 
     def load(self) -> None:
-        """ONNX 세션과 토크나이저를 로딩한다."""
+        """ONNX 세션과 토크나이저를 초기화한다."""
         import onnxruntime as ort
 
         onnx_path = self._resolve_onnx_model()
@@ -231,7 +233,7 @@ class _PyTorchRerankerBackend:
         self._model: Any = None
 
     def load(self) -> None:
-        """FlagReranker 모델을 로딩한다."""
+        """FlagReranker 모델을 초기화한다."""
         from FlagEmbedding import FlagReranker
 
         # CPU에서는 fp16 비활성화

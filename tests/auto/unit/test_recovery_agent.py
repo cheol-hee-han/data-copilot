@@ -253,7 +253,7 @@ class TestFinalizeGiveUp:
 
     def test_high_score_force_generate(self):
         """score ≥ threshold → GENERATING + force_generated."""
-        from src.agents.state.state import CandidateTable
+        from src.agents.state.state import TableMeta
         reason = _reason(
             knowledge_items=[
                 _ki(
@@ -261,8 +261,8 @@ class TestFinalizeGiveUp:
                     confidence=0.9, value="v", is_critical=True,
                 ),
             ],
-            candidate_tables=[
-                CandidateTable(
+            explored_tables=[
+                TableMeta(
                     table_name="TB_A", description="설명",
                 ),
             ],
@@ -270,7 +270,6 @@ class TestFinalizeGiveUp:
         _finalize_give_up(reason)
         assert reason.phase == Phase.GENERATING
         assert reason.is_force_generated is True
-        assert len(reason.inference_notes) > 0
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,29 +1,29 @@
-"""리소스 로더.
+"""리소스 로더 — resources/ 디렉토리의 비-Python 파일 통합 로딩.
 
-resources/ 디렉토리의 리소스 파일을 로드하는 유틸리티.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
 
-프롬프트(.txt), 도메인 사전(.yaml), ES 설정, 평가 골든셋(.json),
-SQL 쿼리 템플릿(.sql) 등 앱이 실행 시 읽는 비-Python 파일을
-한 곳(resources/)에서 관리한다.
+프롬프트(.txt), 도메인 사전(.yaml), 평가 골든셋(.json),
+SQL 쿼리 템플릿(.sql), MongoDB 파이프라인, Cypher 쿼리 등
+앱이 실행 시 읽는 비-Python 파일을 한 곳(resources/)에서 관리한다.
+
+리소스를 코드 안에 하드코딩하지 않고 파일로 분리하는 이유:
+  - 프롬프트/쿼리를 코드 변경 없이 수정 가능
+  - 폐쇄망 배포 시 resources/ 디렉토리만 교체하여 환경별 커스터마이징
+  - 파일이 없으면 코드 내 기본값(fallback)을 사용하므로 점진적 도입 가능
 
 로딩 원칙:
     - resources/ 에 파일이 있으면 해당 파일 사용
     - 파일이 없으면 코드 내 기본값 사용 (fallback)
     - resources/ 디렉토리 자체가 없어도 정상 동작
 
-제공 함수:
-    - load_yaml(name, default) — YAML 로드, 없으면 default 반환
-    - load_json(name, default) — JSON 로드, 없으면 default 반환
-    - load_csv(name, default) — CSV 로드, 없으면 default 반환
-    - load_text(name, default) — 텍스트 로드, 없으면 default 반환
-    - load_text_required(name) — 필수 텍스트 로드, 없으면 FileNotFoundError
-    - load_sql_template(name) — SQL 템플릿 로드 (주석 제거)
-    - load_es_query(name, query) — ES 쿼리 JSON 로드 + {query} 치환
-    - exists(name) — 파일 존재 여부 확인
+핵심 함수:
+    - load_text / load_text_required — 텍스트 로드 (프롬프트 등)
+    - load_yaml / load_json / load_csv — 구조화 데이터 로드
+    - load_sql_template — SQL 템플릿 로드 (주석 제거)
+    - load_mongo_pipeline — MongoDB aggregation 파이프라인 로드
+    - load_cypher — Neo4j Cypher 쿼리 로드 (주석 제거 + 치환)
+    - exists — 파일 존재 여부 확인
     - RESOURCES_DIR — resources/ 디렉토리 경로 상수
-
-하위 호환:
-    - CUSTOM_DIR — RESOURCES_DIR의 별칭 (기존 코드 호환)
 """
 
 from __future__ import annotations

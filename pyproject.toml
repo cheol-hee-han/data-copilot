@@ -25,6 +25,7 @@ dependencies = [
     "asyncpg>=0.30.0",
     "psycopg2-binary>=2.9.0",
     "psycopg[binary]>=3.1.0",
+    "psycopg-pool>=3.2.0",
     
     # Search & Vector
     "elasticsearch>=8.0.0,<9.0.0",
@@ -81,6 +82,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+prod = [
+    "gunicorn>=23.0.0",           # WSGI/ASGI 운영 서버 (Linux 전용, uvicorn worker)
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

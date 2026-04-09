@@ -1,5 +1,7 @@
 """자연어 질의 정규화 노드 — 8-Slot NormalizedQuery 구조화.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 사용자의 자연어 질의를 LLM 2-Phase 호출을 통해 8-Slot 구조(intent, entities,
 measures, filters, time_range, group_by, output_hint, ambiguities)로 정규화한다.
 Phase1 에서 슬롯을 추출하고, Phase2 에서 검증·보완하여 NormalizedQuery 모델을 생성한다.
@@ -36,6 +38,10 @@ from src.agents.state.state import (
 )
 from src.services.query_normalizer import run_normalization
 from src.utils.logger import get_logger
+from src.utils.tracker.dispatch import (
+    dispatch_tracking_event,
+    REASONING_STEP,
+)
 from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
@@ -168,5 +174,60 @@ async def normalize_query_node(
             "T3 AmbiguitySignal 생성 (INFER)",
             count=ambiguity_count,
         )
+
+    # ── Reasoning Flow 트레이스 ──
+    await dispatch_tracking_event(REASONING_STEP, {
+        "node": "normalize_query",
+        "phase": "interpret",
+        "step_type": "llm_decision",
+        "round": 0,
+        "hypothesis_id": "",
+        "inputs": {
+            "raw_query": raw_query,
+            "clarification_context": (
+                clarification_ctx[:200] if clarification_ctx else "(없음)"
+            ),
+        },
+        "output": {
+            "rewritten_query": getattr(normalized, "rewritten_query", ""),
+            "8_slot": {
+                "intent": intent_primary,
+                "entities": entity_terms,
+                "measures": measure_terms,
+                "time": time_type,
+                "filters": filter_count,
+                "output_hint": (
+                    normalized.output_hint.format
+                    if normalized.output_hint else "NONE"
+                ),
+            },
+            "ambiguities": [
+                {
+                    "type": a.get("ambiguity_type", ""),
+                    "decision": a.get("decision", ""),
+                    "question": a.get("question", "")[:100],
+                }
+                for a in normalized.ambiguities
+            ],
+            "search_keywords": (
+                {
+                    "meta": getattr(
+                        normalized.search_keywords, "meta_search", [],
+                    ),
+                    "vector": getattr(
+                        normalized.search_keywords, "vector_search", "",
+                    ),
+                }
+                if normalized.search_keywords else {}
+            ),
+        },
+        "routing": {
+            "next_node": "reasoning_preparer",
+            "reason": (
+                f"8-Slot 완료, 모호성 {ambiguity_count}건"
+                + (" INFER 처리" if ambiguity_count > 0 else "")
+            ),
+        },
+    })
 
     return result

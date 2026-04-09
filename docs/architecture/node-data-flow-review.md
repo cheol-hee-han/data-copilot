@@ -12,7 +12,7 @@
 
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
-| `preprocessed_input` | context_classifier | **정상** | sanitize 완료된 사용자 질의 |
+| `preprocessed_input` | intent_classifier | **정상** | sanitize 완료된 사용자 질의 |
 | `normalized_query` | query_normalizer (선택적) | **조건부** | `settings.normalization_enabled=False`이면 None |
 | `resolved_signals` | clarification_handler | **정상** | INFER 모호성 참조용 |
 
@@ -23,11 +23,11 @@
 
 **누락 데이터**:
 - `conversation_history`가 reasoning_preparer에 전달되지 않음. 대화 맥락에서 이전 턴에서 언급된 테이블명이나 조건을 활용할 수 없음.
-- `continue_context`(context_classifier 산출)도 reasoning_preparer에서 참조하지 않음. 연속 대화에서 이전 맥락이 실행계획에 반영되지 않음.
+- `continue_context`(intent_classifier 산출)도 reasoning_preparer에서 참조하지 않음. 연속 대화에서 이전 맥락이 실행계획에 반영되지 않음.
 
 ---
 
-### 1.2 knowledge_fetcher_node (도구 실행)
+### 1.2 context_retriever_node (도구 실행)
 
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
@@ -47,14 +47,14 @@
 
 ---
 
-### 1.3 knowledge_interpreter_node (배치 LLM 해석)
+### 1.3 context_interpreter_node (배치 LLM 해석)
 
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
-| `reason.candidate_tables` | knowledge_fetcher | **정상** | 관찰 데이터(날짜분포, 샘플) 포함 |
-| `reason.explored_use_cases` | knowledge_fetcher | **정상** | 유사 SQL JSON |
-| `reason.code_map` | knowledge_fetcher | **정상** | 코드값 매핑 |
-| `reason.execution_plan` | knowledge_fetcher | **정상** | DONE 스텝 메타 |
+| `reason.candidate_tables` | context_retriever | **정상** | 관찰 데이터(날짜분포, 샘플) 포함 |
+| `reason.explored_use_cases` | context_retriever | **정상** | 유사 SQL JSON |
+| `reason.code_map` | context_retriever | **정상** | 코드값 매핑 |
+| `reason.execution_plan` | context_retriever | **정상** | DONE 스텝 메타 |
 | `reason.knowledge_items` | reasoning_preparer | **정상** | UNRESOLVED 항목 |
 | `preprocessed_input` | interpret 계층 | **정상** | 원본 질의 |
 | `normalized_query` | interpret 계층 | **조건부** | 시간 조건 추출용 |
@@ -70,13 +70,13 @@
 | `{table_observations}` | `_serialize_table_observations()` | 테이블별 블록 | 잘 구조화됨 |
 
 **핵심 문제 — explored_use_cases의 무제한 JSON 직렬화**:
-- `_serialize_tool_results()` ([knowledge_interpreter.py:268-272](src/agents/nodes/reason/knowledge_interpreter.py#L268-L272))에서 `json.dumps(explored_use_cases, ensure_ascii=False)`를 호출.
+- `_serialize_tool_results()` ([context_interpreter.py:268-272](src/agents/nodes/reason/context_interpreter.py#L268-L272))에서 `json.dumps(explored_use_cases, ensure_ascii=False)`를 호출.
 - 유사 SQL 10건 × 평균 500토큰 = **5,000토큰**이 프롬프트에 무삭제로 주입됨.
 - 폐쇄망 모델(70B)의 컨텍스트 윈도우 대비 과도한 비중.
 
 **누락 데이터**:
-- `reason.query_decomposition`이 knowledge_interpreter 프롬프트에 전달되지 않음. LLM이 "사용자가 원하는 것이 무엇인지"의 구조화된 분해를 참조하지 못하고 `original_query` 원문만으로 판단.
-- `reason.dead_ends`가 전달되지 않음. 이전 실패 경로를 knowledge_interpreter가 인지하지 못해, 이미 실패한 테이블을 다시 SELECTED로 판정할 수 있음 (recovery 루프 시).
+- `reason.query_decomposition`이 context_interpreter 프롬프트에 전달되지 않음. LLM이 "사용자가 원하는 것이 무엇인지"의 구조화된 분해를 참조하지 못하고 `original_query` 원문만으로 판단.
+- `reason.dead_ends`가 전달되지 않음. 이전 실패 경로를 context_interpreter가 인지하지 못해, 이미 실패한 테이블을 다시 SELECTED로 판정할 수 있음 (recovery 루프 시).
 
 ---
 
@@ -84,10 +84,10 @@
 
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
-| `reason.knowledge_items` | knowledge_interpreter | **정상** | is_critical 기반 term_resolution |
-| `reason.candidate_tables` | knowledge_interpreter | **정상** | description 기반 table_coverage |
-| `reason.candidate_tables[*].join_keys` | knowledge_interpreter | **부분 공급** | 아래 분석 참조 |
-| `reason.execution_plan` | knowledge_fetcher | **정상** | PENDING 여부 확인 |
+| `reason.knowledge_items` | context_interpreter | **정상** | is_critical 기반 term_resolution |
+| `reason.candidate_tables` | context_interpreter | **정상** | description 기반 table_coverage |
+| `reason.candidate_tables[*].join_keys` | context_interpreter | **부분 공급** | 아래 분석 참조 |
+| `reason.execution_plan` | context_retriever | **정상** | PENDING 여부 확인 |
 | `reason.loop_guard` | 각 노드 누적 | **정상** | 종료 조건 |
 | `reason.exploration_phase` | 자체/recovery_agent | **정상** | initial/recovery 분기 |
 
@@ -95,7 +95,7 @@
 - `calculate_readiness()` ([confidence_scorer.py:141-154](src/services/confidence_scorer.py#L141-L154))에서 `ct.join_keys`를 사용하여 join_path 점수(20%)를 계산.
 - 그런데 `join_keys`는 **두 가지 경로로만 채워짐**:
   1. `CandidateTable.from_meta()` — MongoDB 메타에 `join_keys` 필드가 있을 때 (현재 from_meta에서 join_keys를 파싱하지 않음!)
-  2. `knowledge_interpreter`의 `new_tables[*].join_keys` — LLM이 추론한 조인키
+  2. `context_interpreter`의 `new_tables[*].join_keys` — LLM이 추론한 조인키
 - **from_meta()에서 join_keys를 파싱하지 않고 빈 리스트로 남기므로**, LLM이 new_tables에서 join_keys를 명시적으로 출력하지 않으면 **항상 빈 리스트**.
 - 결과: 다중 테이블 시나리오에서 `has_common_key`가 항상 False → `join_score = 0.3` → 준비도 점수가 **일관적으로 낮게** 산출.
 
@@ -110,9 +110,9 @@
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
 | `reason.query_decomposition` | reasoning_preparer | **정상** | measures/filters/group_by/order_limit |
-| `reason.knowledge_items` (CONFIRMED) | knowledge_interpreter | **정상** | `format_confirmed_text()` |
-| `reason.candidate_tables` (non-REJECTED) | knowledge_interpreter | **정상** | 컬럼 상세 포함 |
-| `reason.explored_use_cases` (_relevant) | knowledge_interpreter | **정상** | 상위 10건 |
+| `reason.knowledge_items` (CONFIRMED) | context_interpreter | **정상** | `format_confirmed_text()` |
+| `reason.candidate_tables` (non-REJECTED) | context_interpreter | **정상** | 컬럼 상세 포함 |
+| `reason.explored_use_cases` (_relevant) | context_interpreter | **정상** | 상위 10건 |
 | `reason.dead_ends` | recovery_agent | **정상** | `format_dead_ends_text()` |
 | `reason.failure_reason` | sql_validator | **정상** | 재시도 시 fix 피드백 |
 | `preprocessed_input` | interpret 계층 | **정상** | user 메시지 |
@@ -132,7 +132,7 @@
 **누락 데이터**:
 - `reason.code_map`이 sql_generator 프롬프트에 **전달되지 않음**.
   - 코드 컬럼의 값 매핑(예: `LOAN_STS_CD → {01: 정상, 02: 연체}`)을 LLM이 참조할 수 없어, **WHERE 절에 잘못된 코드값을 사용**할 가능성이 높음.
-  - knowledge_interpreter가 code_map 정보를 knowledge_items에 반영하긴 하지만, 전체 코드값 목록이 아닌 요약만 들어감.
+  - context_interpreter가 code_map 정보를 knowledge_items에 반영하긴 하지만, 전체 코드값 목록이 아닌 요약만 들어감.
 
 - `reason.inference_notes`가 sql_generator에 전달되지 않음. force_generate 시 "추론 포함" 맥락을 LLM이 인지하지 못함.
 
@@ -143,9 +143,9 @@
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
 | `reason.generated_sql` | sql_generator | **정상** | 검증 대상 |
-| `reason.candidate_tables` | knowledge_interpreter | **정상** | L1 테이블/컬럼 범위 |
+| `reason.candidate_tables` | context_interpreter | **정상** | L1 테이블/컬럼 범위 |
 | `reason.query_decomposition` | reasoning_preparer | **정상** | L2a 구조 검증 |
-| `reason.knowledge_items` (CONFIRMED) | knowledge_interpreter | **정상** | L2b 미확인값 감지 |
+| `reason.knowledge_items` (CONFIRMED) | context_interpreter | **정상** | L2b 미확인값 감지 |
 | `reason.dead_ends` | recovery_agent | **정상** | L2b 반복 감지 |
 | `preprocessed_input` | interpret 계층 | **정상** | L2b 의도 대조 |
 | dialect | connector_manager | **정상** | sqlglot 파싱 |
@@ -169,12 +169,12 @@
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
 | `reason.failure_type/reason` | readiness_gate / sql_validator | **정상** | 진입 맥락 |
-| `reason.knowledge_items` | knowledge_interpreter | **정상** | 확인/미해소 분류 |
-| `reason.candidate_tables` | knowledge_interpreter | **정상** | REJECTED 제외 |
+| `reason.knowledge_items` | context_interpreter | **정상** | 확인/미해소 분류 |
+| `reason.candidate_tables` | context_interpreter | **정상** | REJECTED 제외 |
 | `reason.dead_ends` | 자체 누적 | **정상** | 반복 방지 |
-| `reason.explored_use_cases` | knowledge_fetcher | **정상** | 탐색 이력 + 관련성 태그 |
-| `reason.discovered_facts` | knowledge_interpreter | **정상** | 누적 인사이트 |
-| `reason.candidate_tables[*].sample_rows` | knowledge_fetcher | **정상** | 샘플 현황 |
+| `reason.explored_use_cases` | context_retriever | **정상** | 탐색 이력 + 관련성 태그 |
+| `reason.discovered_facts` | context_interpreter | **정상** | 누적 인사이트 |
+| `reason.candidate_tables[*].sample_rows` | context_retriever | **정상** | 샘플 현황 |
 | `reason.loop_guard` | 각 노드 누적 | **정상** | 종료 조건 |
 | `reason.hypotheses` | reasoning_preparer / 자체 | **정상** | 가설 관리 |
 
@@ -194,8 +194,8 @@
 | 필요 데이터 | 소스 | 공급 상태 | 비고 |
 |-------------|------|-----------|------|
 | `reason.validated_sql` | sql_validator | **정상** | 성공 분기 |
-| `reason.knowledge_items` (CONFIRMED, CONFLICTED) | knowledge_interpreter | **정상** | ContextInfo + T5 |
-| `reason.candidate_tables` | knowledge_interpreter | **정상** | TableMeta 생성 |
+| `reason.knowledge_items` (CONFIRMED, CONFLICTED) | context_interpreter | **정상** | ContextInfo + T5 |
+| `reason.candidate_tables` | context_interpreter | **정상** | TableMeta 생성 |
 | `reason.loop_guard` | 각 노드 | **정상** | 요약 통계 |
 | `reason.dead_ends` | recovery_agent | **정상** | 실패 요약 |
 | `reason.exploration_summary` | recovery_agent (give_up) | **정상** | LLM 총평 |
@@ -203,7 +203,7 @@
 **문제**:
 - `_build_context_info()`에서 **CONFIRMED 상태의 `table:*` KI만** 사용하여 ContextInfo를 구성.
 - 하지만 `_promote_sampled_confidence()`에서 샘플만 있으면 무조건 CONFIRMED로 승격하므로, **REJECTED 테이블도 CONFIRMED KI가 남아있으면 ContextInfo에 포함**될 수 있음.
-  - 실제로는 [knowledge_interpreter.py:156-159](src/agents/nodes/reason/knowledge_interpreter.py#L156-L159)에서 REJECTED 테이블의 KI를 삭제하므로 대부분 방지되지만, `_promote_sampled_confidence()`가 Phase 6에서 REJECTED 제거 이후에 실행되므로 **타이밍 문제 없음** — 이 부분은 정상.
+  - 실제로는 [context_interpreter.py:156-159](src/agents/nodes/reason/context_interpreter.py#L156-L159)에서 REJECTED 테이블의 KI를 삭제하므로 대부분 방지되지만, `_promote_sampled_confidence()`가 Phase 6에서 REJECTED 제거 이후에 실행되므로 **타이밍 문제 없음** — 이 부분은 정상.
 
 ---
 
@@ -213,7 +213,7 @@
 
 | 노드 | 직렬화 | 평가 |
 |------|--------|------|
-| knowledge_interpreter | `_build_table_block()` | **우수** — 메타 원본/관찰/LLM 추론 출처를 태그로 구분 |
+| context_interpreter | `_build_table_block()` | **우수** — 메타 원본/관찰/LLM 추론 출처를 태그로 구분 |
 | sql_generator | `_format_table_for_sql_prompt()` | **우수** — 컬럼 상세(한글명, 타입, PK, 설명)까지 전달 |
 | recovery_agent | `_build_exploration_history()` | **우수** — 검색쿼리별 그루핑 + 관련성 ✓/✗ 표시 |
 | sql_validator | `serialize_decomp_slots()` | **양호** — 구조화된 슬롯 분리 |
@@ -222,8 +222,8 @@
 
 | 노드 | 직렬화 | 문제 | 영향도 |
 |------|--------|------|--------|
-| knowledge_interpreter | `_serialize_tool_results()` | explored_use_cases를 **JSON.dumps 통째 주입** — 건수 제한 없음 | **높음** — 토큰 폭발, 폐쇄망 모델 컨텍스트 초과 |
-| knowledge_interpreter | `_serialize_unresolved_items()` | CANDIDATE 상태 제외 — 아직 확인 중인 항목도 미해소로 취급해야 함 | **중간** — LLM이 불완전한 미해소 목록을 받음 |
+| context_interpreter | `_serialize_tool_results()` | explored_use_cases를 **JSON.dumps 통째 주입** — 건수 제한 없음 | **높음** — 토큰 폭발, 폐쇄망 모델 컨텍스트 초과 |
+| context_interpreter | `_serialize_unresolved_items()` | CANDIDATE 상태 제외 — 아직 확인 중인 항목도 미해소로 취급해야 함 | **중간** — LLM이 불완전한 미해소 목록을 받음 |
 | sql_generator | `format_confirmed_text()` | evidence(근거)가 미포함 — "왜 확인되었는지" 모름 | **낮음** — SQL 생성에 직접 영향 적음 |
 | readiness_gate | 직렬화 없음 (rule-based) | join_keys 빈 리스트 문제 (위 1.4 참조) | **높음** — 점수 왜곡 |
 
@@ -248,7 +248,7 @@
 - `(메타 원본)`: table_name, columns, description — MongoDB에서 직접 파싱
 - `(관찰)`: observed_date_columns, sample_rows — DB 쿼리 결과
 - `(LLM 추론)`: inferred_entity_scope, inferred_functional_usage, inferred_data_refresh_hint
-- **장점**: knowledge_interpreter 프롬프트에서 출처별 신뢰도 차등 적용 가능.
+- **장점**: context_interpreter 프롬프트에서 출처별 신뢰도 차등 적용 가능.
 
 #### (4) LoopGuard 다층 카운터
 - `total_tool_calls`, `replan_count`, `generate_attempts`, `local_fix_count` 4개 독립 카운터.
@@ -273,7 +273,7 @@
 
 **원인 추적**:
 - `CandidateTable.from_meta()` ([state.py:184-222](src/agents/state/state.py#L184-L222))에서 MongoDB 응답을 파싱하지만, **join_keys 필드를 파싱하지 않음** (columns, description 등만 파싱).
-- `knowledge_interpreter`가 `new_tables[*].join_keys`를 LLM 응답에서 파싱하지만, `_merge_llm_inferred_fields()` ([knowledge_interpreter.py:479-498](src/agents/nodes/reason/knowledge_interpreter.py#L479-L498))에서 **join_keys를 병합하지 않음** (entity_scope, functional_usage, data_refresh_hint 3개만 병합).
+- `context_interpreter`가 `new_tables[*].join_keys`를 LLM 응답에서 파싱하지만, `_merge_llm_inferred_fields()` ([context_interpreter.py:479-498](src/agents/nodes/reason/context_interpreter.py#L479-L498))에서 **join_keys를 병합하지 않음** (entity_scope, functional_usage, data_refresh_hint 3개만 병합).
 
 **영향**:
 - `calculate_readiness()`의 join_path 점수(20%)가 다중 테이블 시 항상 0.3으로 고정.
@@ -282,7 +282,7 @@
 
 **수정 방안**:
 1. `_merge_llm_inferred_fields()`에 join_keys 병합 추가.
-2. knowledge_fetcher의 `_extract_tables()`에서 PK 컬럼 기반 join_keys 추론 추가.
+2. context_retriever의 `_extract_tables()`에서 PK 컬럼 기반 join_keys 추론 추가.
 3. 유사 SQL의 `StructuralHints.join_patterns`에서 join_keys를 역추출.
 
 #### (2) code_map이 sql_generator에 전달되지 않음 [심각도: 높음]
@@ -295,7 +295,7 @@
 
 #### (3) explored_use_cases의 무제한 직렬화 [심각도: 높음]
 
-**현상**: knowledge_interpreter 프롬프트에 `json.dumps(explored_use_cases)` 통째 주입.
+**현상**: context_interpreter 프롬프트에 `json.dumps(explored_use_cases)` 통째 주입.
 
 **영향**: 유사 SQL이 10건 이상이면 프롬프트 토큰이 급증하여:
 - 폐쇄망 모델(Solar Pro 2 70B, 컨텍스트 4K~8K)에서 컨텍스트 초과.
@@ -316,17 +316,17 @@ table_score = len(with_desc) / len(candidates)
 
 **수정 방안**: SELECTED + PENDING 테이블만 대상으로 계산.
 
-#### (5) query_decomposition이 knowledge_interpreter/recovery_agent에 미전달 [심각도: 중간]
+#### (5) query_decomposition이 context_interpreter/recovery_agent에 미전달 [심각도: 중간]
 
-**현상**: 사용자 질의의 구조화된 분해(measures, filters, group_by)가 knowledge_interpreter와 recovery_agent 프롬프트에 전달되지 않음.
+**현상**: 사용자 질의의 구조화된 분해(measures, filters, group_by)가 context_interpreter와 recovery_agent 프롬프트에 전달되지 않음.
 
 **영향**:
-- knowledge_interpreter: "어떤 측정값이 필요한지" 구조적으로 알지 못해, 테이블 판정 시 질의 의도와의 정렬도가 낮아질 수 있음.
+- context_interpreter: "어떤 측정값이 필요한지" 구조적으로 알지 못해, 테이블 판정 시 질의 의도와의 정렬도가 낮아질 수 있음.
 - recovery_agent: "무엇이 부족한지" 판단 시 decomposition 없이 원본 질의와 실패 사유만으로 재계획 수립.
 
 #### (6) _promote_sampled_confidence의 무조건 승격 [심각도: 중간]
 
-**현상**: [knowledge_interpreter.py:524-543](src/agents/nodes/reason/knowledge_interpreter.py#L524-L543)
+**현상**: [context_interpreter.py:524-543](src/agents/nodes/reason/context_interpreter.py#L524-L543)
 ```python
 if ki.confidence < 0.8:
     ki.confidence = 0.85
@@ -351,7 +351,7 @@ if ki.confidence < 0.8:
 ### 4.1 정상 흐름 (Happy Path)
 
 ```
-reasoning_preparer → knowledge_fetcher → knowledge_interpreter → readiness_gate → sql_generator → sql_validator → result_finalizer
+reasoning_preparer → context_retriever → context_interpreter → readiness_gate → sql_generator → sql_validator → result_finalizer
 ```
 
 | 구간 | 전달 데이터 | 정합성 |
@@ -366,7 +366,7 @@ reasoning_preparer → knowledge_fetcher → knowledge_interpreter → readiness
 ### 4.2 Recovery 흐름
 
 ```
-readiness_gate(REPLAN) → recovery_agent → knowledge_fetcher → knowledge_interpreter → readiness_gate
+readiness_gate(REPLAN) → recovery_agent → context_retriever → context_interpreter → readiness_gate
 ```
 
 | 구간 | 전달 데이터 | 정합성 |
@@ -376,7 +376,7 @@ readiness_gate(REPLAN) → recovery_agent → knowledge_fetcher → knowledge_in
 | fetcher→interpreter | 기존 + 새 candidate_tables | **주의** — 중복 테이블 발생 가능 |
 | interpreter→gate | 갱신된 knowledge_items | **정상** |
 
-**중복 테이블 문제**: recovery_agent가 같은 테이블에 대해 search_table_meta를 재요청하면, knowledge_fetcher가 새 CandidateTable을 생성하여 candidate_tables에 **동일 테이블이 2건** 존재할 수 있음. `_should_skip_step()`이 searched_queries로 중복을 방지하지만, 테이블명이 아닌 검색어 기준이므로 다른 키워드로 같은 테이블이 반환되면 중복 발생.
+**중복 테이블 문제**: recovery_agent가 같은 테이블에 대해 search_table_meta를 재요청하면, context_retriever가 새 CandidateTable을 생성하여 candidate_tables에 **동일 테이블이 2건** 존재할 수 있음. `_should_skip_step()`이 searched_queries로 중복을 방지하지만, 테이블명이 아닌 검색어 기준이므로 다른 키워드로 같은 테이블이 반환되면 중복 발생.
 
 ### 4.3 SQL Fix 흐름
 
@@ -402,7 +402,7 @@ sql_validator(SEMANTIC_LOCAL) → sql_generator(재시도) → sql_validator
 
 ### 5.2 Phase 2 DB 쿼리(날짜분포, 샘플)가 loop_guard에 미반영 [심각도: 높음]
 
-`_observe_all_date_distributions()`과 `_sample_unsampled_tables()` ([knowledge_fetcher.py:319-322](src/agents/nodes/reason/knowledge_fetcher.py#L319-L322))가 후보 테이블 N개에 대해 최대 2N회 DB 호출을 수행하지만, `total_tool_calls`에 반영되지 않음. `_fetch_use_case_related_metas()`도 동일 문제.
+`_observe_all_date_distributions()`과 `_sample_unsampled_tables()` ([context_retriever.py:319-322](src/agents/nodes/reason/context_retriever.py#L319-L322))가 후보 테이블 N개에 대해 최대 2N회 DB 호출을 수행하지만, `total_tool_calls`에 반영되지 않음. `_fetch_use_case_related_metas()`도 동일 문제.
 
 ### 5.3 candidate_tables 중복 테이블 방지 미비 [심각도: 중간]
 

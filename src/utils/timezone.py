@@ -1,7 +1,21 @@
-"""서울(KST) 타임존 유틸리티.
+"""서울(KST) 타임존 유틸리티 — 프로젝트 전체 시간 기준 통일.
 
-프로젝트 전체에서 사용하는 타임존·포맷 상수를 한 곳에서 관리한다.
-외부 의존성 없이 stdlib만 사용 — 폐쇄망 배포 호환.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+서버·로그·트레이스 등 프로젝트 전체에서 사용하는 타임존(KST)과
+포맷 상수를 한 곳에서 관리하여, datetime.now() 직접 호출로 인한
+UTC/KST 불일치를 방지한다. 외부 의존성(pytz 등) 없이 stdlib
+timezone만 사용하여 폐쇄망 배포 호환성을 보장한다.
+
+UTC 자정~09시 사이에는 date.today()와 KST 날짜가 하루 차이나므로,
+날짜가 필요한 곳에서는 반드시 today_kst()를 사용해야 한다.
+
+핵심 함수:
+    - now_kst: 현재 시각을 KST datetime으로 반환
+    - today_kst: 오늘 날짜를 KST 기준으로 반환
+    - now_stamp: 로그/트레이스용 'yyyy-mm-dd HH:MM:SS.SSS' 포맷
+    - now_filesafe: 파일명용 'yyyymmdd_HHMMSS' 포맷
+    - to_stamp: 임의 datetime을 KST 간결 포맷으로 변환
 
 사용 예::
 

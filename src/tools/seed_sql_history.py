@@ -1,5 +1,7 @@
 """SQL 수행이력 벡터 시딩 배치 도구.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 PostgreSQL(tb_sys_sql_descriptions)에서 SQL 수행이력을 관리하고,
 BGE-M3 임베딩(Dense+Sparse)을 생성하여 Qdrant sql_history 컬렉션에 적재한다.
 
@@ -51,7 +53,7 @@ from typing import Any
 from src.config import settings
 from src.connectors.manager import get_connector_manager
 from src.utils.logger import get_logger, setup_logging
-from src.utils.sqlglot_analyzer import get_real_tables_with_fallback
+from src.utils.sqlglot_analyzer import get_real_tables
 from src.utils.timezone import now_stamp
 
 logger = get_logger(__name__)
@@ -279,7 +281,12 @@ def _add_query_filters(
 
 
 class SQLHistorySeeder:
-    """SQL 수행이력 벡터 시딩 오케스트레이터."""
+    """SQL 수행이력 벡터 시딩 오케스트레이터.
+
+    infer/embed/all 모드에 따라 PG에서 SQL을 추출하고,
+    LLM으로 비즈니스 설명을 생성한 뒤, BGE-M3 임베딩으로
+    Qdrant에 적재하는 전체 워크플로우를 관리한다.
+    """
 
     def __init__(
         self,
@@ -420,7 +427,7 @@ class SQLHistorySeeder:
         Returns:
             (tables_used, table_meta_text, code_meta_text)
         """
-        tables = get_real_tables_with_fallback(sql_text)
+        tables = get_real_tables(sql_text)
         if not tables:
             return [], "(없음)", "(없음)"
 
@@ -541,7 +548,7 @@ class SQLHistorySeeder:
             desc = row.get("description", "")
             enrichment = row.get("enrichment", "")
             enriched = f"{desc} | {enrichment}" if enrichment else desc
-            tables = get_real_tables_with_fallback(sql_text)
+            tables = get_real_tables(sql_text)
             records.append(SQLRecord(
                 system_code=row.get("system_code", ""),
                 sql_text=sql_text,

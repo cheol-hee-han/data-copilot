@@ -1,5 +1,7 @@
 """확신도(Confidence Score) 계산 및 행동 판정 모듈.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 에이전트가 "SQL을 생성할 준비가 됐는가"를 판단하는 수치를 계산하고,
 다음 행동을 결정하는 단일 판정 함수(evaluate_readiness)를 제공한다.
 
@@ -89,6 +91,9 @@ def evaluate_readiness(
     # 2. 충분한 확신 → SQL 생성
     score = calculate_readiness(reason)
     if score >= THRESHOLD_GENERATE and all_critical_confirmed(reason):
+        # 탐색된 테이블이 없으면 점수만 높아도 SQL 생성 불가 → 재계획
+        if not reason.explored_tables:
+            return ReadinessVerdict.REPLAN
         return ReadinessVerdict.GENERATE
 
     # 3. 탐색 스텝 남음 → 탐색 계속
@@ -99,8 +104,8 @@ def evaluate_readiness(
     if remaining:
         return ReadinessVerdict.EXPLORE
 
-    # 4. CONFLICTED → 추론 불가 충돌만 사용자 확인
-    # 단순 용어 모호성은 관행적 추론으로 진행 (§9.1 "선 추론 후 표시" 정책)
+    # 4. CONFLICTED → 서로 다른 테이블이 관련된 추론 불가 충돌만 사용자 확인
+    # 단순 용어 모호성(동일 테이블 내)은 관행적 추론으로 진행 (§9.1 "선 추론 후 표시" 정책)
     if should_ask_user(reason):
         return ReadinessVerdict.ASK_USER
 
@@ -135,16 +140,16 @@ def calculate_readiness(
         ]
         term_score = len(resolved) / len(items)
     else:
-        term_score = 0.5
+        term_score = 0.0
     scores.append(("term_resolution", term_score, 0.70))
 
     # 2. 유사 SQL 활용사례 (30%)
-    # LLM이 관련성 판정한(_relevant=True) 활용사례 건수 기반
+    # LLM이 관련성 판정한(relevant=True) 활용사례 건수 기반
     use_cases = reason.explored_use_cases
     if use_cases:
         relevant_cnt = sum(
             1 for uc in use_cases
-            if uc.get("_relevant", False)
+            if uc.relevant
         )
         uc_score = min(relevant_cnt / 3, 1.0)
     else:

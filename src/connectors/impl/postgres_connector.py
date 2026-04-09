@@ -1,5 +1,7 @@
 """PostgreSQL 커넥터 — 정보계 DB 쿼리 실행 및 SQL 이력 DB.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 두 가지 역할의 커넥터를 제공한다.
 InfoDBConnector는 정보계 DB에 대해 읽기 전용(SELECT/WITH만 허용) 쿼리를 실행하며,
 SQL 문 앞부분을 정규식으로 검증하여 DML/DDL을 원천 차단한다.
@@ -41,33 +43,40 @@ class InfoDBConnector(DatabaseConnector):
 
     @property
     def default_schema(self) -> str:
-        return ""
+        return settings.info_db_default_schema or ""
 
     def __init__(self, use_dummy: bool = True) -> None:
         self._use_dummy = use_dummy
         self._engine: Any = None
 
     async def connect(self) -> None:
-        """DB 연결 초기화."""
+        """DB 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("정보계 DB Dummy 모드로 초기화")
             return
 
+        from sqlalchemy import URL
         from sqlalchemy.ext.asyncio import (
             create_async_engine,
         )
 
-        url = (
-            f"postgresql+asyncpg://"
-            f"{settings.info_db_user}"
-            f":{settings.info_db_password}"
-            f"@{settings.info_db_host}"
-            f":{settings.info_db_port}"
-            f"/{settings.info_db_name}"
+        url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=settings.info_db_user,
+            password=settings.info_db_password,
+            host=settings.info_db_host,
+            port=settings.info_db_port,
+            database=settings.info_db_name,
         )
         self._engine = create_async_engine(
             url,
             echo=False,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_pool_max_overflow,
+            pool_recycle=settings.db_pool_recycle,
+            # stale 커넥션 감지 — 매 획득 시 SELECT 1로 유효성 검사.
+            # 오버헤드 ~1ms이나 장시간 운영 시 stale 커넥션 방지 효과가 큼.
+            pool_pre_ping=True,
             pool_timeout=settings.db_pool_timeout,
             connect_args={
                 "command_timeout": settings.db_query_timeout,
@@ -76,12 +85,12 @@ class InfoDBConnector(DatabaseConnector):
         logger.info("정보계 DB 연결 완료")
 
     async def disconnect(self) -> None:
-        """DB 연결 종료."""
+        """DB 연결을 종료한다."""
         if self._engine:
             await self._engine.dispose()
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         try:
@@ -90,7 +99,8 @@ class InfoDBConnector(DatabaseConnector):
             async with self._engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     async def execute_query(
@@ -153,26 +163,31 @@ class HistoryDBConnector(DatabaseConnector):
         self._engine: Any = None
 
     async def connect(self) -> None:
-        """DB 연결 초기화."""
+        """DB 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("이력 DB Dummy 모드로 초기화")
             return
 
+        from sqlalchemy import URL
         from sqlalchemy.ext.asyncio import (
             create_async_engine,
         )
 
-        url = (
-            f"postgresql+asyncpg://"
-            f"{settings.history_db_user}"
-            f":{settings.history_db_password}"
-            f"@{settings.history_db_host}"
-            f":{settings.history_db_port}"
-            f"/{settings.history_db_name}"
+        url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=settings.history_db_user,
+            password=settings.history_db_password,
+            host=settings.history_db_host,
+            port=settings.history_db_port,
+            database=settings.history_db_name,
         )
         self._engine = create_async_engine(
             url,
             echo=False,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_pool_max_overflow,
+            pool_recycle=settings.db_pool_recycle,
+            pool_pre_ping=True,
             pool_timeout=settings.db_pool_timeout,
             connect_args={
                 "command_timeout": settings.db_query_timeout,
@@ -180,12 +195,12 @@ class HistoryDBConnector(DatabaseConnector):
         )
 
     async def disconnect(self) -> None:
-        """DB 연결 종료."""
+        """DB 연결을 종료한다."""
         if self._engine:
             await self._engine.dispose()
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         try:
@@ -194,7 +209,8 @@ class HistoryDBConnector(DatabaseConnector):
             async with self._engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     async def execute_query(
@@ -202,7 +218,7 @@ class HistoryDBConnector(DatabaseConnector):
         query: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """쿼리 실행."""
+        """범용 쿼리를 실행한다 (SELECT 제한 없음, 이력 적재용)."""
         if self._use_dummy:
             return generate_dummy_data(query)
         from sqlalchemy import text

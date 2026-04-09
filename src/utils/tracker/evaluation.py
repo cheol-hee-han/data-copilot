@@ -1,8 +1,23 @@
-"""파이프라인 트레이스 데이터 모델.
+"""파이프라인 트레이스 데이터 모델 — Pydantic 기반 직렬화 스키마.
 
-Pydantic 모델: 트레이스의 직렬화 스키마를 정의한다.
-``DataCopilotCallbackHandler`` 가 이 모델들을 사용하여
-런타임 트레이스를 기록한다.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+단일 파이프라인 실행의 전체 텔레메트리를 구조화된 Pydantic 모델로
+정의한다. ``DataCopilotCallbackHandler``가 런타임에 이 모델들을
+채워 넣고, JSON 직렬화하여 트레이스 파일로 저장한다.
+
+Pydantic을 사용하는 이유: 트레이스 JSON의 스키마를 명시적으로 정의하여
+직렬화/역직렬화 안정성을 보장하고, visualizer·trace_analyzer 등
+소비자가 일관된 구조에 의존할 수 있도록 한다.
+
+모델 구조:
+    - EvaluationTrace: 최상위 컨테이너 (run_id, 요약 통계, 하위 기록 리스트)
+    - TimelineEntry: 통합 타임라인 — 모든 이벤트를 순번(seq)으로 정렬
+    - NodeRecord: 노드 시작/종료 + 입출력 요약
+    - LLMCallRecord: LLM 호출별 프롬프트/응답/토큰/지연
+    - DecisionRecord: 에이전트 의사결정과 근거
+    - ContextRetrievalRecord: 컨텍스트 소스별 검색 결과
+    - SQLRecord: SQL 생성/검증/실행 라이프사이클
 """
 
 from __future__ import annotations
@@ -107,6 +122,47 @@ class SQLRecord(BaseModel):
     execution_time_ms: float = 0.0
 
 
+class RoutingDecision(BaseModel):
+    """LLM/Rule 판단 후 엣지 결정."""
+
+    next_node: str = ""                    # 다음 노드 이름
+    reason: str = ""                       # "NEW+DATA_EXTRACTION → 정규화 진행"
+    is_retry: bool = False                 # 재시도 여부
+    retry_count: int = 0                   # 몇 번째 재시도
+
+
+class ReasoningStep(BaseModel):
+    """에이전트 사고 흐름의 단일 단계."""
+
+    seq: int                               # 글로벌 순번 (1부터)
+    node: str                              # 노드 이름
+    phase: str                             # interpret | reason | present
+    round: int = 0                         # 가설 라운드 (0=초기, 1+=복구)
+    hypothesis_id: str = ""                # H1, H2, ...
+    step_type: str = ""                    # llm_decision | rule_decision
+                                           # | tool_execution | validation
+                                           # | recovery | analysis
+
+    # 입력 요약 (사람이 읽을 수 있는 수준으로 압축)
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+    # LLM/Rule 판단 결과
+    output: dict[str, Any] = Field(default_factory=dict)
+
+    # 라우팅
+    routing: RoutingDecision = Field(
+        default_factory=RoutingDecision,
+    )
+
+    # 메타
+    duration_ms: float = 0.0
+    model: str = ""                        # LLM 모델 (rule-based면 빈 문자열)
+    tokens: int = 0                        # 총 토큰
+    timestamp: str = Field(
+        default_factory=now_stamp,
+    )
+
+
 class EvaluationTrace(BaseModel):
     """단일 파이프라인 실행의 전체 트레이스."""
 
@@ -138,6 +194,11 @@ class EvaluationTrace(BaseModel):
 
     # 통합 타임라인 (실행 순서 재현용)
     timeline: list[TimelineEntry] = Field(
+        default_factory=list,
+    )
+
+    # 추론 흐름 (사람이 읽을 수 있는 사고 과정 추적)
+    reasoning_flow: list[ReasoningStep] = Field(
         default_factory=list,
     )
 

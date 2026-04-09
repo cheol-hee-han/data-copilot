@@ -7,7 +7,7 @@
  *   2. dpasset_column      — 컬럼 메타 (query_table_meta.json $lookup 대상)
  *   3. standard_code       — 코드 메타 (query_code_meta.json 메인)
  *   4. standard_code_value — 코드값 (query_code_meta.json $lookup 대상)
- *   5. glossary            — 업무 용어사전 (query_dictionary.json 메인)
+ *   5. biz_term            — 업무 용어사전 (query_dictionary.json 메인)
  *
  * 실행:
  *   docker exec dc-mongodb mongosh -u mongoadmin -p mongo_pass \
@@ -175,13 +175,13 @@ db.standard_code_value.createIndex({ code_id: 1 }, { name: "idx_code_value_code_
 print("  [OK] standard_code_value 컬렉션 생성 완료");
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 5. glossary — 업무 용어사전
+// 5. biz_term — 업무 용어사전
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // query_dictionary.json 메인 컬렉션
-// 필드: name, synonyms, glossary_definition, table_ids
+// 필드: name, synonyms, biz_term_definition, table_ids
 // $lookup 시 localField: table_ids → dpasset_table._id
 
-db.createCollection("glossary", {
+db.createCollection("biz_term", {
   validator: {
     $jsonSchema: {
       bsonType: "object",
@@ -196,7 +196,7 @@ db.createCollection("glossary", {
           items: { bsonType: "string" },
           description: "동의어 목록 (예: [대출잔액, 융자잔액])"
         },
-        glossary_definition: {
+        biz_term_definition: {
           bsonType: "string",
           description: "용어 정의 (예: 대출 실행 후 미상환 원금 잔액)"
         },
@@ -210,11 +210,11 @@ db.createCollection("glossary", {
   }
 });
 
-db.glossary.createIndex({ name: 1 }, { unique: true });
-db.glossary.createIndex({ synonyms: 1 }, { name: "idx_glossary_synonyms" });
-db.glossary.createIndex({ name: "text", glossary_definition: "text" }, { name: "idx_glossary_text" });
+db.biz_term.createIndex({ name: 1 }, { unique: true });
+db.biz_term.createIndex({ synonyms: 1 }, { name: "idx_biz_term_synonyms" });
+db.biz_term.createIndex({ name: "text", biz_term_definition: "text" }, { name: "idx_biz_term_text" });
 
-print("  [OK] glossary 컬렉션 생성 완료");
+print("  [OK] biz_term 컬렉션 생성 완료");
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 완료 확인
@@ -230,4 +230,4 @@ db.getCollectionNames().forEach(function(name) {
 print("\n관계 구조:");
 print("  dpasset_table.name ──1:N──→ dpasset_column.table_name");
 print("  standard_code._id  ──1:N──→ standard_code_value.code_id");
-print("  glossary.table_ids ──N:M──→ dpasset_table._id");
+print("  biz_term.table_ids ──N:M──→ dpasset_table._id");

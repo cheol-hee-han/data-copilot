@@ -1,14 +1,27 @@
-"""LangGraph 커스텀 이벤트 디스패치 유틸리티.
+"""LangGraph 커스텀 이벤트 디스패치 유틸리티 — 안전한 추적 이벤트 전송.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+LLM 클라이언트, 커넥터 등 그래프 노드 바깥의 유틸리티에서
+DataCopilotCallbackHandler로 추적 이벤트를 전달하는 단일 진입점이다.
 LangGraph 실행 컨텍스트 내에서만 이벤트를 전달하며,
-그래프 외부(단위 테스트 등)에서 호출되면 조용히 무시한다.
+그래프 외부(단위 테스트 등)에서 호출되면 RuntimeError를 잡아 조용히 무시한다.
+
+직접 adispatch_custom_event를 호출하지 않고 이 모듈을 경유하는 이유:
+  - 그래프 외부 호출 시 RuntimeError를 안전하게 억제
+  - 이벤트 이름 상수를 한 곳에서 관리하여 오타 방지
+  - Python 3.12에서 contextvars 기반 RunnableConfig 자동 추출을
+    활용하므로 명시적 config 전달이 불필요
+
+핵심 함수:
+    - dispatch_tracking_event: 그래프 컨텍스트 안전 이벤트 디스패치
+    - record_prompt_variables: 직전 LLM 호출에 프롬프트 변수 보강
 
 사용법::
 
-    from src.utils.tracker.dispatch import dispatch_tracking_event
+    from src.utils.tracker.dispatch import dispatch_tracking_event, LLM_CALL
 
-    # 커넥터/유틸리티에서 — config 자동 추출 (Python 3.12)
-    await dispatch_tracking_event("llm.call", {
+    await dispatch_tracking_event(LLM_CALL, {
         "node": "resolve_history",
         "model": "claude-sonnet-4-20250514",
         ...
@@ -17,10 +30,11 @@ LangGraph 실행 컨텍스트 내에서만 이벤트를 전달하며,
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 # ── 이벤트 이름 상수 ─────────────────────────────────
@@ -44,6 +58,9 @@ LLM_PROMPT_VARIABLES = "llm.prompt_variables"
 
 # sql.*
 SQL_RECORDED = "sql.recorded"
+
+# reasoning.*
+REASONING_STEP = "reasoning.step"
 
 
 async def record_prompt_variables(
@@ -86,7 +103,4 @@ async def dispatch_tracking_event(
         # LangGraph 실행 컨텍스트 밖 — 무시
         pass
     except Exception:
-        logger.debug(
-            "tracking event dispatch 실패",
-            extra={"event": name},
-        )
+        logger.debug("tracking event dispatch 실패", event=name)

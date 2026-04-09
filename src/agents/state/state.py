@@ -1,5 +1,7 @@
 """LangGraph 파이프라인 통합 상태 모델.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 3계층(interpret → reason → present) 파이프라인의 전체 상태를 정의한다.
 reason 계층의 에이전틱 추론 상태는 ReasoningState로 중첩된다.
 
@@ -7,13 +9,12 @@ reason 계층의 에이전틱 추론 상태는 ReasoningState로 중첩된다.
     - PipelineState: 파이프라인 전체 공유 상태
     - ReasoningState: 에이전틱 추론 루프 내부 상태
     - KnowledgeItem, Hypothesis, ExecutionStep 등: 추론 서브타입
-    - KeyDateColumn, ObservedDateColumn: CandidateTable 보조 모델
+    - KeyDateColumn, ObservedDateColumn: TableMeta 보조 모델
 
 re-export 대상:
     - IntentType, QueryStatus, VisualizationType (src.models.enums)
-    - ColumnMeta, ContextInfo, TableMeta (src.models.context)
     - AnalysisResult, SQLResult (src.models.result)
-    - TraceEntry, add_trace, format_trace_summary (src.models.trace)
+    - TraceEntry, add_trace (src.models.trace)
 """
 
 from __future__ import annotations
@@ -32,14 +33,9 @@ from src.models.enums import (  # noqa: F401
     IntentType,
     Phase,
     QueryStatus,
+    SelectionStatus,
     StepStatus,
-    TableSelectionStatus,
     VisualizationType,
-)
-from src.models.context import (  # noqa: F401
-    ColumnMeta,
-    ContextInfo,
-    TableMeta,
 )
 from src.models.result import (  # noqa: F401
     AnalysisResult,
@@ -49,7 +45,6 @@ from src.models.result import (  # noqa: F401
 from src.models.trace import (  # noqa: F401
     TraceEntry,
     add_trace,
-    format_trace_summary,
 )
 from src.agents.models.clarification import AmbiguitySignal
 from src.agents.models.normalization import NormalizedQuery
@@ -81,8 +76,8 @@ class KnowledgeItem(BaseModel):
     source: str = ""
     evidence: list[str] = Field(default_factory=list)
     is_critical: bool = True
-    knowledge_id: str = ""       # "K1", "K2" 등. reasoning_preparer에서 초기 생성 시 채번
-    is_inferred: bool = False    # True이면 도구 증거 없는 추론
+    # reasoning_preparer에서 "K1", "K2" 등으로 채번
+    knowledge_id: str = ""
 
     def promote(
         self, new_status: ConfidenceStatus, value: str,
@@ -115,9 +110,10 @@ class ExecutionStep(BaseModel):
     tool: str
     input: str
     purpose: str
-    expected_output: str = ""
     status: StepStatus = StepStatus.PENDING
     insight: str | None = None
+    raw_result: dict[str, Any] | list | None = None
+    # depends_on: int | None = None  # (TODO) 선행 스텝 번호 (None이면 독립 실행)
 
 
 class KeyDateColumn(BaseModel):
@@ -136,28 +132,114 @@ class ObservedDateColumn(BaseModel):
     column_name: str
     date_range: str = ""
     date_pattern: str = ""
+    recent_values: list[str] = Field(default_factory=list)
 
 
 class ColumnInfo(BaseModel):
-    """컬럼 상세 정보."""
+    """컬럼 상세 정보.
 
+    메타 원본(name~is_pk)은 MongoDB 테이블 메타에서 파싱되고,
+    DB 관찰 결과(total_rows~discovered_values)는 context_retriever에서
+    get_column_profile / get_column_values 실행 시 채워진다.
+    """
+
+    # ── 메타 원본 ──
     name: str
     alt_name: str = ""
     description: str = ""
     col_type: str = ""
     is_pk: bool = False
 
+    # ── DB 관찰 결과 (context_retriever에서 채움) ──
+    # W: RET (get_column_profile)  R: INT/GEN/VAL/RCV
+    total_rows: int | None = None
+    non_null_count: int | None = None
+    null_count: int | None = None
+    null_rate: float | None = None
+    distinct_count: int | None = None
+    min_val: str | None = None
+    max_val: str | None = None
+    # W: RET (get_column_values)  R: INT/GEN/RCV
+    # LIKE 검색으로 확인한 실제 DB 고유값 목록 (중복 제거된 합집합)
+    discovered_values: list[str] | None = None
 
-class CandidateTable(BaseModel):
-    """탐색 중 발견된 후보 테이블."""
 
-    # ── 메타 원본 (ES에서 파싱) ──
+class BizManualEntry(BaseModel):
+    """업무 매뉴얼 검색 결과.
+
+    Qdrant biz_manual 컬렉션에서 검색된 개별 매뉴얼 항목.
+    context_interpreter에서 질의 관련성을 판정한다.
+    """
+
+    biz_manual_id: str = ""          # "bm_001" 등 (fetcher에서 채번)
+    content: str = ""
+    score: float = 0.0
+    source: str = ""             # 검색 쿼리
+    point_id: str = ""               # Qdrant point id (페이징 시 exclude 대상)
+    source_step: int = 0             # 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용)
+    selection_status: SelectionStatus = SelectionStatus.PENDING
+    selection_reason: str = ""
+
+
+class BizTermEntry(BaseModel):
+    """비즈니스 용어 사전 검색 결과.
+
+    MongoDB biz_term 컬렉션에서 검색된 개별 용어 항목.
+    context_interpreter에서 질의 관련성을 판정한다.
+    """
+
+    biz_term_id: str = ""        # "bt_001" 등 (fetcher에서 채번)
+    term: str = ""
+    definition: str = ""
+    synonyms: list[str] = Field(default_factory=list)
+    related_tables: list[str] = Field(default_factory=list)
+    source: str = ""             # 검색 쿼리
+    source_step: int = 0         # 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용)
+    selection_status: SelectionStatus = SelectionStatus.PENDING
+    selection_reason: str = ""
+
+
+class UseCaseEntry(BaseModel):
+    """탐색 중 발견된 유사 SQL 활용사례.
+
+    Qdrant sql_history 검색 결과를 구조화한다.
+    context_interpreter에서 질의 관련성을 판정(relevant)하고,
+    enrichment 결과(enrichment_tables, enrichment_codes)를 첨부한다.
+    """
+
+    id: str = ""
+    description: str = ""
+    sql: str = ""
+    domain: str = ""
+    score: float = 0.0
+
+    # ── Qdrant point id (페이징 시 exclude 대상) ──
+    point_id: str = ""
+    # ── 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용) ──
+    source_step: int = 0
+
+    # ── LLM 판정 (context_interpreter) ──
+    relevant: bool = False
+    eval_reason: str = ""
+
+    # ── enrichment (context_retriever) ──
+    enrichment_tables: list[dict] = Field(default_factory=list)
+    enrichment_codes: dict[str, dict] = Field(default_factory=dict)
+
+    model_config = {"extra": "allow"}
+
+
+class TableMeta(BaseModel):
+    """탐색 중 발견된 테이블 엔트리."""
+
+    # ── 메타 원본 (MongoDB에서 파싱) ──
     table_name: str
     alt_name: str = ""
     description: str = ""
     schema_name: str = ""
     db_source: str = ""
     subject_area: str = ""
+    source_step: int = 0         # 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용)
     columns: list[ColumnInfo] = Field(default_factory=list)
 
     # ── 관찰 사실 (rule-based, DB 쿼리) ──
@@ -169,20 +251,16 @@ class CandidateTable(BaseModel):
     )
     sample_rows: list[dict] | None = None
 
-    # ── LLM 추론 (출처 구분 필요) ──
-    inferred_entity_scope: str = ""
-    inferred_functional_usage: str = ""
-    inferred_data_refresh_hint: str = ""
-    inferred_key_date_column: str = ""
+    # ── LLM 추론 ──
     inference_confidence: float = 0.0
 
     # ── 판정 결과 (batch_interpret 후) ──
-    selection_status: TableSelectionStatus = TableSelectionStatus.PENDING
+    selection_status: SelectionStatus = SelectionStatus.PENDING
     selection_reason: str = ""
 
     @classmethod
-    def from_meta(cls, meta: dict) -> CandidateTable | None:
-        """MongoDB 메타 dict → CandidateTable 변환 팩토리.
+    def from_meta(cls, meta: dict) -> TableMeta | None:
+        """MongoDB 메타 dict → TableMeta 변환 팩토리.
 
         신규 필드(name, description, columns[].name)를 우선 참조하고
         하위 호환을 위해 table_name / table_description도 폴백 지원한다.
@@ -231,7 +309,7 @@ class CandidateTable(BaseModel):
 class CodeMeta(BaseModel):
     """코드 컬럼의 코드값 매핑 정보.
 
-    search_code_meta 결과를 컬럼 단위로 저장하여
+    lookup_code_meta 결과를 컬럼 단위로 저장하여
     sql_generator, recovery_agent 등에서 풍부한 추론에 활용한다.
     """
 
@@ -245,13 +323,18 @@ class DeadEnd(BaseModel):
     """실패한 탐색 경로 기록."""
 
     hypothesis_id: str
-    failure_type: FailureType = FailureType.NO_USE_CASE
+    failure_type: FailureType = FailureType.NO_KNOWLEDGE
     reason: str = ""
     lessons_learned: str = ""
 
 
 class LoopGuard(BaseModel):
-    """다층 루프 제어 카운터."""
+    """다층 루프 제어 카운터.
+
+    에이전틱 추론 루프가 무한 반복에 빠지지 않도록 4가지 차원의 카운터를 관리한다.
+    각 카운터가 config.py에 정의된 상한(MAX_TOOL_CALLS 등)에 도달하면
+    should_terminate()가 True를 반환하여 루프를 강제 종료시킨다.
+    """
 
     total_tool_calls: int = 0
     replan_count: int = 0
@@ -271,6 +354,7 @@ class LoopGuard(BaseModel):
         self.local_fix_count += 1
 
     def should_escalate_to_structural(self) -> bool:
+        """로컬 수정 한도 초과 시 구조적 재계획으로 전환해야 하는지 판정한다."""
         return self.local_fix_count >= MAX_LOCAL_FIXES
 
 
@@ -304,6 +388,7 @@ class StructuralHints(BaseModel):
     has_having: bool = False
 
     def is_empty(self) -> bool:
+        """구조적 힌트가 하나도 추출되지 않았는지 판정한다."""
         return not (
             self.join_patterns or self.code_columns
             or self.agg_expressions or self.date_filters
@@ -368,12 +453,12 @@ class ReasoningState(BaseModel):
     """에이전틱 추론 루프의 내부 상태.
 
     PipelineState.reason 필드로 중첩되며,
-    reason 계층 노드(reasoning_preparer → knowledge_fetcher → knowledge_interpreter →
+    reason 계층 노드(reasoning_preparer → context_retriever → context_interpreter →
     readiness_gate → sql_generator → sql_validator → recovery_agent →
     result_finalizer)가 사용한다.
 
     W/R 표기: W=기록(Write), R=참조(Read) 하는 노드.
-    약어: PRP=reasoning_preparer, FET=knowledge_fetcher, INT=knowledge_interpreter,
+    약어: PRP=reasoning_preparer, RET=context_retriever, INT=context_interpreter,
           RDG=readiness_gate, GEN=sql_generator, VAL=sql_validator,
           RCV=recovery_agent, FIN=result_finalizer
     """
@@ -402,25 +487,34 @@ class ReasoningState(BaseModel):
         default_factory=list,
     )
     # W: PRP/EXP (search_use_cases 결과)  R: PRP/GEN/FIN
-    explored_use_cases: list[dict] = Field(
+    explored_use_cases: list[UseCaseEntry] = Field(
         default_factory=list,
     )
     # W: PRP/EXP  R: GEN/VAL/RCV/FIN
-    candidate_tables: list[CandidateTable] = Field(
+    explored_tables: list[TableMeta] = Field(
         default_factory=list,
     )
-    # W: PRP/EXP  R: PRP/EXP/RCV (중복 검색 방지)
-    searched_queries: list[str] = Field(
+    # W: RET (search_manual)  R: INT/RCV (업무 규정·계수산출식 참조)
+    explored_biz_manuals: list[BizManualEntry] = Field(
         default_factory=list,
+    )
+    # W: RET (search_biz_terms)  R: INT/RCV (용어 해소·매핑)
+    explored_biz_terms: list[BizTermEntry] = Field(
+        default_factory=list,
+    )
+    # W: EXP (lookup_code_meta)  R: GEN/RCV (코드값 기반 SQL 추론)
+    explored_codes: dict[str, CodeMeta] = Field(
+        default_factory=dict,
+    )
+    # W: EXP  R: PRP/EXP (도구 실행 중복 방지, "tool:input" 형식)
+    executed_tool_keys: set[str] = Field(
+        default_factory=set,
     )
     # W: EXP  R: RCV (도구 실행 결과 해석 누적)
     discovered_facts: list[str] = Field(
         default_factory=list,
     )
-    # W: EXP (search_code_meta)  R: GEN/RCV (코드값 기반 SQL 추론)
-    code_map: dict[str, CodeMeta] = Field(
-        default_factory=dict,
-    )
+
     # ── 실패 기록 ──
     # W: RCV  R: RCV/GEN/VAL/FIN (반복 방지, 실패 상세)
     dead_ends: list[DeadEnd] = Field(
@@ -433,6 +527,12 @@ class ReasoningState(BaseModel):
     # W: VAL  R: FIN/pipeline 라우팅
     validated_sql: str | None = None
 
+    # ── SQL 생성 가정 (재시도 시 덮어쓰기, 최종 성공 시 resolved_signals로 전환) ──
+    # W: GEN  R: FIN
+    pending_assumptions: list[str] = Field(
+        default_factory=list,
+    )
+
     # ── SQL 검증 상세 (Layer2b PASS 시 체크 항목별 판정 사유) ──
     # W: VAL(PASS)  R: insight_builder
     # 구조: {"check_name": {"pass": bool, "detail": str}}
@@ -440,11 +540,18 @@ class ReasoningState(BaseModel):
         default_factory=dict,
     )
 
+    # ── SQL 검증 총평 (Layer2b PASS/FAIL 시 LLM 종합 판단) ──
+    # W: VAL  R: formatter (조회 과정 요약), insight_builder
+    validation_summary: str = ""
+
     # ── 실패 맥락 (VAL/EVL → pipeline 라우팅/GEN/RCV) ──
     # W: VAL/EVL  R: pipeline 라우팅, GEN(fix 피드백), RCV(DeadEnd)
     failure_type: FailureType | None = None
     # W: VAL/EVL  R: GEN(fix 피드백), RCV(DeadEnd reason)
     failure_reason: str | None = None
+    # W: VAL(local_fix)  R: GEN(재시도 시 이전 시도 전체 표시)
+    # generator↔validator 루프에서 이전 fix 시도를 누적 기록
+    fix_history: list[str] = Field(default_factory=list)
 
     # ── 루프 제어 ──
     # W: EXP/RCV/GEN/VAL  R: EVL (종료 조건), pipeline 라우팅
@@ -456,12 +563,9 @@ class ReasoningState(BaseModel):
     # W: PRP (초기화), recovery_agent (갱신)  R: readiness_gate, pipeline 라우팅
     exploration_phase: Literal["initial", "recovery"] = "initial"
     recovery_rounds: int = 0
-    last_verdict: str | None = None  # ReadinessVerdict.value 문자열
     recovery_entry_source: Literal[
-        "readiness_gate", "sql_validator", None,
+        "readiness_gate", "sql_validator", "sql_generator", None,
     ] = None
-    inference_notes: list[str] = Field(default_factory=list)
-    conflicted_bounce_count: int = 0
     is_force_generated: bool = False
 
     # ── 최종 출력 ──
@@ -517,9 +621,11 @@ class ReasoningState(BaseModel):
 
 
 def should_terminate(reason: ReasoningState) -> bool:
-    """루프 강제 종료 조건.
+    """추론 루프의 강제 종료 조건을 판정한다.
 
-    5가지 조건 중 하나라도 충족하면 추론 루프를 종료한다.
+    도구 호출 총량, 재계획 횟수, SQL 생성 시도, 명시적 실패, 가설 소진 등
+    5가지 조건 중 하나라도 충족하면 True를 반환하여 루프를 종료시킨다.
+    pipeline.py의 조건부 엣지에서 호출되어 라우팅을 결정한다.
     """
     g = reason.loop_guard
     pending = reason.get_pending_hypotheses()
@@ -546,7 +652,7 @@ class PipelineState(BaseModel):
     reason 계층의 에이전틱 추론 상태는 reason 필드에 중첩된다.
 
     W/R 표기: W=기록, R=참조 하는 노드/계층.
-    약어: PRE=preprocess, CTX=context_classifier,
+    약어: PRE=preprocess, CTX=intent_classifier,
           NRM=normalize_query, CLR=clarify, EXE=execute_sql,
           ANL=analyze_data, FMT=format_response
     """
@@ -569,6 +675,10 @@ class PipelineState(BaseModel):
     # ── Interpret 계층 ──
     # W: runner (sanitize 후)  R: CTX/NRM/reason 계층 전체
     preprocessed_input: str = ""
+    # W: intent_classifier (DATA_ANALYSIS 시 rewriter 입력 보관,
+    #    CONTINUE 시 맥락 해소 후 질의)
+    # R: analyzer (시각화/분석 지시 참조)
+    analysis_query: str = ""
     # W: CTX  R: pipeline 라우팅/NRM
     intent: IntentType = IntentType.UNKNOWN
     # W: CTX  R: 로깅
@@ -594,7 +704,6 @@ class PipelineState(BaseModel):
         list[AmbiguitySignal], operator.add,
     ] = Field(default_factory=list)
 
-
     # ── Reason 계층 (에이전틱 추론) ──
     # W/R: reason 계층 전체 (상세는 ReasoningState 참조)
     reason: ReasoningState = Field(
@@ -602,10 +711,6 @@ class PipelineState(BaseModel):
     )
 
     # ── Present 계층 ──
-    # W: result_finalizer  R: EXE/ANL/FMT
-    context: ContextInfo = Field(
-        default_factory=ContextInfo,
-    )
     # W: EXE  R: ANL/FMT/runner
     sql_result: SQLResult = Field(
         default_factory=SQLResult,
@@ -620,6 +725,10 @@ class PipelineState(BaseModel):
     )
     # W: FMT/error_end  R: runner (최종 응답)
     formatted_response: str = ""
+    # W: FMT  R: runner (stream.end 전송, 턴 metadata 저장)
+    result_data: dict[str, Any] | None = None
+    # W: FMT  R: runner (stream.end 전송, 턴 metadata 저장)
+    process_summary: dict[str, Any] | None = None
 
     # ── 상태 관리 ──
     # W: 각 노드 (에러 시)  R: pipeline 라우팅

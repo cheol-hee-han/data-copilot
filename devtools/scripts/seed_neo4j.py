@@ -192,23 +192,23 @@ def seed_phase1(driver, mongo_db) -> None:
         _run_cypher_batch(driver, cypher, batch, "CodeDefinition")
     print(f"  CodeDefinition 노드: {len(code_values)}건")
 
-    # 1d. DomainConcept (glossary)
-    glossary = list(mongo_db["glossary"].find({}))
+    # 1d. DomainConcept (biz_term)
+    biz_term = list(mongo_db["biz_term"].find({}))
 
-    # glossary.table_ids → 테이블명 역매핑
+    # biz_term.table_ids → 테이블명 역매핑
     table_id_map = {}
     for t in mongo_db["dpasset_table"].find({}):
         table_id_map[t["_id"]] = t.get("name", "")
 
-    if glossary:
+    if biz_term:
         batch = []
-        for g in glossary:
+        for g in biz_term:
             table_ids = g.get("table_ids", [])
             # 첫 번째 연결 테이블만 PRIMARY로
             first_table = table_id_map.get(table_ids[0]) if table_ids else ""
             batch.append({
                 "name": g.get("name", ""),
-                "definition": g.get("glossary_definition", ""),
+                "definition": g.get("biz_term_definition", ""),
                 "synonyms": g.get("synonyms", []),
                 "table_name": first_table,
             })
@@ -217,7 +217,7 @@ def seed_phase1(driver, mongo_db) -> None:
         MERGE (d:DomainConcept {name: row.name})
         SET d.definition = coalesce(row.definition, ''),
             d.synonyms = coalesce(row.synonyms, []),
-            d.category = 'glossary',
+            d.category = 'biz_term',
             d.source = 'mongodb_seed'
         WITH d, row
         WHERE row.table_name IS NOT NULL AND row.table_name <> ''
@@ -225,7 +225,7 @@ def seed_phase1(driver, mongo_db) -> None:
         MERGE (d)-[:RESOLVED_BY {role: 'PRIMARY'}]->(t)
         """
         _run_cypher_batch(driver, cypher, batch, "DomainConcept")
-    print(f"  DomainConcept 노드: {len(glossary)}건")
+    print(f"  DomainConcept 노드: {len(biz_term)}건")
 
 
 # ══════════════════════════════════════════════════════════════

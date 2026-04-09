@@ -1,5 +1,7 @@
 """Neo4j 온톨로지 그래프 커넥터 — 테이블 관계/업무 규칙/JOIN 경로 탐색.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 5종의 그래프 탐색을 제공한다:
   - search_join_paths: 두 테이블 간 최단 JOIN 경로
   - search_domain_tables: 도메인 개념 → 관련 테이블 + FK 이웃 확장
@@ -49,7 +51,7 @@ class Neo4jConnector(SearchConnector):
         self._cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
     async def connect(self) -> None:
-        """Neo4j 연결 초기화."""
+        """Neo4j 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("Neo4j Dummy 모드로 초기화")
             return
@@ -66,13 +68,13 @@ class Neo4jConnector(SearchConnector):
         logger.info("Neo4j 연결 완료")
 
     async def disconnect(self) -> None:
-        """Neo4j 연결 종료."""
+        """Neo4j 연결을 종료한다."""
         if self._driver:
             await self._driver.close()
             logger.info("Neo4j 연결 종료")
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         if not self._driver:
@@ -80,7 +82,8 @@ class Neo4jConnector(SearchConnector):
         try:
             await self._driver.verify_connectivity()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     async def search(

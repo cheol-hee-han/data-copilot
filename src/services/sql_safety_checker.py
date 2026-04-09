@@ -1,5 +1,7 @@
 """SQL 안전성 검증 서비스 — LLM이 생성한 SQL의 다층 방어 검증 파이프라인.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 LLM이 생성한 SQL이 실행되기 전에 5단계 검증 파이프라인을 통과시켜
 보안 위협과 데이터 유출을 사전 차단하는 심층 방어(Defense-in-Depth) 전략을 구현한다.
 
@@ -91,7 +93,11 @@ class SafetyCheckResult:
 
 
 def is_aggregate_query(sql_upper: str) -> bool:
-    """집계 쿼리 여부를 판별한다."""
+    """집계 쿼리 여부를 판별한다.
+
+    LIMIT 검증에서 집계 쿼리를 예외 처리하기 위해 사용한다.
+    GROUP BY가 있거나 SELECT절이 집계함수로만 구성된 경우 True.
+    """
     if not _AGG_PATTERN.search(sql_upper):
         return False
     if "GROUP BY" in sql_upper:

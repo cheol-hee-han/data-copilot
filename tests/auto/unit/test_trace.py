@@ -26,8 +26,8 @@ from src.agents.state.state import (
     PipelineState,
     TraceEntry,
     add_trace,
-    format_trace_summary,
 )
+from src.models.trace import format_trace_summary
 
 
 # ──────────────────────────────────────────────────

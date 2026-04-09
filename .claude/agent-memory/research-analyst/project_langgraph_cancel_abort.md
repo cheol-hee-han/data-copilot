@@ -4,7 +4,7 @@ description: asyncio.Task.cancel() + LangGraph 조합의 한계, 체크포인터
 type: project
 ---
 
-LangGraph 사용자 주도 중단은 공식 완전 해결 패턴이 없으며, 다수 버그가 미해결 상태 (2026-04-04 기준).
+LangGraph 사용자 주도 중단은 공식 완전 해결 패턴이 없으며, 다수 버그가 미해결 상태 (2026-04-06 재확인, LangGraph 1.0 포함).
 
 **체크포인터 상태 보존 조건:**
 - superstep 완료 시점에만 checkpoint_writes 확정

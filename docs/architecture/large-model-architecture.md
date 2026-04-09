@@ -10,7 +10,7 @@
 > | 버전 | 날짜 | 변경 내용 |
 > | ---- | ---- | --------- |
 > | 1.0 | 2026-03-28 | 초안 작성 |
-> | 1.1 | 2026-04-01 | 노드 리네임 반영: `context_explorer` → `knowledge_fetcher` + `knowledge_interpreter`, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent`, `table_verifier` 삭제, `clarify` → `clarification_handler`. LLM 호출 맵 갱신. |
+> | 1.1 | 2026-04-01 | 노드 리네임 반영: `context_explorer` → `context_retriever` + `context_interpreter`, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent`, `table_verifier` 삭제, `clarify` → `clarification_handler`. LLM 호출 맵 갱신. |
 > | 1.2 | 2026-04-02 | `planner` → `reasoning_preparer` 리네임 반영 (규칙 기반, LLM 호출 없음). Reason 계층 LLM 호출 수 조정 (5~9회 → 4~8회). |
 
 ---
@@ -25,14 +25,14 @@
 현재 LLM 호출 맵 (1개 질의 처리)
 
 Interpret (4회)
-  ① context_classifier   — 3-way 이력 분류 + 6-way 의도 분류 (통합)
+  ① intent_classifier   — 3-way 이력 분류 + 6-way 의도 분류 (통합)
   ③ query_normalizer P1  — 8-Slot 추출
   ④ query_normalizer P2  — 교차 검증 (선택적)
 
 Reason (4~8회)
   ⑤ reasoning_preparer   — 규칙 기반 가설 생성 + 실행계획 (LLM 호출 없음)
-  ⑥ knowledge_fetcher     — 초기 지식 탐색
-     knowledge_interpreter — 배치 해석 (탐색 스텝당 1~3회)
+  ⑥ context_retriever     — 초기 지식 탐색
+     context_interpreter — 배치 해석 (탐색 스텝당 1~3회)
   ⑦ (삭제됨: table_verifier — readiness_gate로 대체)
   ⑧ sql_generator       — SQL 생성
   ⑨ sql_validator L2b   — 의미 검증 (선택적)
@@ -55,7 +55,7 @@ table_verifier(현재 삭제됨)가 만들던 `column_mapping`은 sql_generator�
 
 **문제 B: 동일 추론의 반복**
 
-"CUST_NO를 COUNT한다"는 사실이 reasoning_preparer(지식 초기화) → knowledge_fetcher/knowledge_interpreter(컬럼 발견) →
+"CUST_NO를 COUNT한다"는 사실이 reasoning_preparer(지식 초기화) → context_retriever/context_interpreter(컬럼 발견) →
 readiness_gate(준비도 판단) → generator(SQL 작성)에서 **4번 독립적으로 추론**된다.
 각 단계의 LLM이 이전 단계의 결론을 자기 방식으로 다시 해석해야 한다.
 
@@ -68,7 +68,7 @@ knowledge_items의 `evidence` 필드에 텍스트로 압축되어 다음 노드�
 **문제 D: 과도한 세분화**
 
 기존 history_resolver(3-way 분류)와 intent_classifier(6-way 분류)는
-`context_classifier`로 통합되어 **한 번의 호출로 동시에 수행**된다.
+`intent_classifier`로 통합되어 **한 번의 호출로 동시에 수행**된다.
 query_normalizer의 Phase 2(교차 검증)도 Phase 1이 충분히 정확하면 불필요하다.
 
 ### 1.3 현재 설계에서 유지할 것
@@ -119,23 +119,23 @@ query_normalizer의 Phase 2(교차 검증)도 Phase 1이 충분히 정확하면 
 ### 3.1 AS-IS: 4개 LLM 호출
 
 ```text
-context_classifier (LLM①) → normalizer_P1 (LLM②) → normalizer_P2 (LLM③, 선택)
+intent_classifier (LLM①) → normalizer_P1 (LLM②) → normalizer_P2 (LLM③, 선택)
   → clarification_handler (LLM④, 조건부)
 ```
 
 각 호출이 **이전 호출의 출력 1개만** 받는 직렬 구조.
-context_classifier는 `conversation_history` + `sanitized_input`을 함께 보지만,
+intent_classifier는 `conversation_history` + `sanitized_input`을 함께 보지만,
 normalizer는 `sanitized_input`만 본다.
 
 ### 3.2 TO-BE: 2개 LLM 호출
 
 ```text
-context_classifier (LLM①) — 이력 해소 + 의도 분류 + 데이터/비데이터 판단 (sanitize는 runner.py로 이동)
+intent_classifier (LLM①) — 이력 해소 + 의도 분류 + 데이터/비데이터 판단 (sanitize는 runner.py로 이동)
   → normalize (LLM②, DATA intent만) — 8-Slot 정규화 (단일 Phase)
   → clarification_handler (LLM③, 조건부) — 변경 없음
 ```
 
-#### `context_classifier` 노드 — 통합 질의 이해
+#### `intent_classifier` 노드 — 통합 질의 이해
 
 **입력:**
 
@@ -159,7 +159,7 @@ context_classifier (LLM①) — 이력 해소 + 의도 분류 + 데이터/비데
 **이것이 가능한 이유:**
 
 기존 history_resolver의 3-way 분류(CONTINUE/NEW/UNSURE)와
-intent_classifier의 6-way 분류는 `context_classifier`로 통합 구현되었다.
+intent_classifier의 6-way 분류는 `intent_classifier`로 통합 구현되었다.
 두 판단은 **동일 입력(사용자 질의 + 대화 이력)**을 보고 판단한다.
 70B+ 모델은 이 두 판단을 한 번의 추론에서 동시에 수행할 수 있다.
 실제로 사람도 "이 질문이 이전 대화와 이어지는지"와 "데이터 요청인지 잡담인지"를
@@ -180,7 +180,7 @@ intent_classifier의 6-way 분류는 `context_classifier`로 통합 구현되었
 
 **변경점:**
 - Phase 2(교차 검증) 삭제 — 397B/120B 모델은 Phase 1에서 충분히 정확
-- `context_classifier`에서 이미 `resolved_query`를 생성했으므로, normalizer는 이를 입력으로 사용
+- `intent_classifier`에서 이미 `resolved_query`를 생성했으므로, normalizer는 이를 입력으로 사용
   (이전에는 `preprocessed_input`을 사용하여 history 맥락이 반영되지 않는 경우 있었음)
 
 **비판적 검토:**
@@ -207,14 +207,14 @@ intent_classifier의 6-way 분류는 `context_classifier`로 통합 구현되었
 ### 4.1 AS-IS: 5~9개 LLM 호출, 8개 노드
 
 ```text
-reasoning_preparer (rule) → knowledge_fetcher/knowledge_interpreter (LLM×N) → readiness_gate (rule)
+reasoning_preparer (rule) → context_retriever/context_interpreter (LLM×N) → readiness_gate (rule)
   → generator (LLM) → validator (rule+LLM) → recovery_agent (LLM)
   → finalizer (rule)
 ```
 
 **핵심 문제 재확인:**
 - reasoning_preparer가 `normalized_query`를 `query_decomposition`으로 축소 (4/8 슬롯 유실)
-- knowledge_interpreter의 배치 해석이 knowledge_items에 플랫하게 축적 (관계 없음)
+- context_interpreter의 배치 해석이 knowledge_items에 플랫하게 축적 (관계 없음)
 - table_verifier(삭제됨)의 column_mapping이 generator에 도달하지 않던 문제
 - generator가 10개 섹션의 중복 정보를 교차 대조해야 함
 - readiness_gate(rule)가 "준비 됐나?" 판단을 수행 (기존 evaluator+verifier 중복 해소)
@@ -228,14 +228,14 @@ research (tool-augmented LLM) → generate_sql (LLM) → validate (rule+exec)
 
 #### `research` 노드 — 통합 탐색·검증
 
-현재 **reasoning_preparer + knowledge_fetcher/knowledge_interpreter + readiness_gate** 노드를
+현재 **reasoning_preparer + context_retriever/context_interpreter + readiness_gate** 노드를
 하나의 tool-augmented LLM 호출로 통합한다.
 
 **핵심 아이디어:**
 
 현재 구조에서 각 노드가 하는 일을 분석가 관점에서 보면:
 - reasoning_preparer: "무엇을 찾아야 하는지" 계획 → **생각하기**
-- knowledge_fetcher/knowledge_interpreter: 실제로 ES/Qdrant/DB를 검색·해석 → **찾기**
+- context_retriever/context_interpreter: 실제로 ES/Qdrant/DB를 검색·해석 → **찾기**
 - readiness_gate: "충분한지" 판단 → **생각하기**
 
 "생각하기" 3번 + "찾기" 1번인데, 추론 가능한 모델이면 **"찾으면서 동시에 생각"**할 수 있다.
@@ -296,7 +296,7 @@ research 노드 내부 흐름:
 
 | 관점 | AS-IS (4노드) | TO-BE (1노드) |
 | ---- | ------------- | ------------- |
-| 검색 전략 | reasoning_preparer가 규칙 기반 계획 → knowledge_fetcher/knowledge_interpreter가 순차 실행 | 모델이 검색하면서 전략을 적응적으로 조정 |
+| 검색 전략 | reasoning_preparer가 규칙 기반 계획 → context_retriever/context_interpreter가 순차 실행 | 모델이 검색하면서 전략을 적응적으로 조정 |
 | 매핑 검증 | (table_verifier 삭제됨, readiness_gate가 rule 기반 판단) | 검색 결과를 보면서 동시에 검증 |
 | 준비도 판단 | readiness_gate(rule) + reasoning_preparer(규칙 기반 재계획) | 모델이 "충분한지" 스스로 판단하고 필요 시 추가 검색 |
 | 문맥 보존 | 각 노드 간 state 직렬화로 맥락 손실 | 단일 대화에서 추론 체인 유지 |
@@ -437,7 +437,7 @@ generate_sql이 이를 직접 참조하여 SQL을 생성했다.
 - `FAIL_SYNTAX`, `FAIL_SEMANTIC_LOCAL` → generate_sql 재시도 (fix_instruction 전달)
 - `FAIL_STRUCTURAL`, `FAIL_EMPTY`, `FAIL_DB_ERROR` → **research 재실행** (dead_end 전달)
 
-현재는 recovery_agent가 새 hypothesis를 생성하고 knowledge_fetcher/knowledge_interpreter로 다시 보내는데,
+현재는 recovery_agent가 새 hypothesis를 생성하고 context_retriever/context_interpreter로 다시 보내는데,
 TO-BE에서는 research에 `dead_ends`를 전달하여 같은 실수를 피하게 한다.
 
 ### 4.3 Reason 계층 — 절감 효과
@@ -535,7 +535,7 @@ class PipelineState(BaseModel):
 
 | 필드 | 제거 이유 |
 | ---- | --------- |
-| `intent_confidence` | context_classifier 노드에서 trace_log에 기록, state 불필요 |
+| `intent_confidence` | intent_classifier 노드에서 trace_log에 기록, state 불필요 |
 | `query_category` | intent로 충분, trace_log에 기록 |
 | `clarification_response` | 다운스트림 참조 0건 |
 | `reason: ReasoningState` (전체) | `ResearchResult` + 플랫 필드로 대체 |
@@ -610,9 +610,9 @@ class ResearchResult(BaseModel):
 ### 7.1 AS-IS
 
 ```text
-context_classifier(LLM) → normalizer(LLM×2)
+intent_classifier(LLM) → normalizer(LLM×2)
   → [clarification_handler(LLM)]
-  → reasoning_preparer(rule) → knowledge_fetcher/knowledge_interpreter(LLM×N) → readiness_gate(rule)
+  → reasoning_preparer(rule) → context_retriever/context_interpreter(LLM×N) → readiness_gate(rule)
   → generator(LLM) → validator(rule+LLM) → [recovery_agent(LLM)]
   → finalizer(rule)
   → executor(rule) → analyzer(LLM) → viz_judgment(LLM) → [viz_svg(LLM)]
@@ -624,7 +624,7 @@ context_classifier(LLM) → normalizer(LLM×2)
 ### 7.2 TO-BE
 
 ```text
-context_classifier(LLM) → normalize(LLM)
+intent_classifier(LLM) → normalize(LLM)
   → [clarification_handler(LLM)]
   → research(LLM+tools) → generate_sql(LLM) → validate(rule+exec)
   → [recover(LLM)]
@@ -661,7 +661,7 @@ config:
 ---
 flowchart TD
     subgraph interpret["Interpret 계층"]
-        A([사용자 질의]) --> U["context_classifier<br/><small>이력 해소 + 의도 분류<br/>(LLM①, sanitize는 runner.py)</small>"]
+        A([사용자 질의]) --> U["intent_classifier<br/><small>이력 해소 + 의도 분류<br/>(LLM①, sanitize는 runner.py)</small>"]
         A -->|인젝션/에러| ERR
         U -->|"DATA intent"| N["normalize<br/><small>8-Slot 정규화<br/>(LLM②)</small>"]
         U -->|"CASUAL_TALK<br/>GENERAL_QUESTION<br/>META_QUESTION"| CLR
@@ -719,7 +719,7 @@ flowchart LR
 
     subgraph pipeline["파이프라인"]
         direction TB
-        UND["context_classifier"]
+        UND["intent_classifier"]
         NORM["normalize"]
         CLR["clarification_handler"]
         RSR["research"]
@@ -750,7 +750,7 @@ flowchart LR
 
 **멀티턴 상태 전이:**
 
-| 턴 | 사용자 입력 | context_classifier 판정 | 결과 |
+| 턴 | 사용자 입력 | intent_classifier 판정 | 결과 |
 | -- | ---------- | -------------- | ---- |
 | 1 | "데이터 좀 뽑아줘" | NEW + CLARIFICATION_NEEDED | clarification_handler → 명확화 질문 |
 | 2 | "이번달 여신 잔액" | CONTINUE + DATA_EXTRACTION | normalize → research → SQL 생성 |
@@ -899,7 +899,7 @@ config:
 ---
 flowchart LR
     subgraph write["생성 (Write)"]
-        W_UND["context_classifier"]
+        W_UND["intent_classifier"]
         W_NOR["normalize"]
         W_RES["research"]
         W_GEN["generate_sql"]
@@ -920,7 +920,7 @@ flowchart LR
     end
 
     subgraph read["소비 (Read)"]
-        R_UND["context_classifier"]
+        R_UND["intent_classifier"]
         R_NOR["normalize"]
         R_RES["research"]
         R_GEN["generate_sql"]
@@ -965,7 +965,7 @@ research 노드가 "언제 어떤 도구를 호출할지"를 LLM이 판단한다
 - 도구 결과 요약기(summarizer)를 rule-based로 구현하여 컨텍스트 관리
 - research가 실패하면 현재 구조(reasoning_preparer+explorer)로 폴백하는 **이중 경로**
 
-### 8.2 두 번째 리스크: context_classifier 노드의 복합 출력
+### 8.2 두 번째 리스크: intent_classifier 노드의 복합 출력
 
 history_resolution + intent_classification + query_rewriting을 한 번에 출력하면
 하나가 틀릴 때 전체가 틀리는 **연쇄 실패** 위험.
@@ -982,9 +982,9 @@ history_resolution + intent_classification + query_rewriting을 한 번에 출�
 
 ```text
 Phase 1: Interpret 통합 (리스크 낮음)
-  ├─ context_classifier 노드 구현 완료 (history_resolver + intent_classifier 통합)
+  ├─ intent_classifier 노드 구현 완료 (history_resolver + intent_classifier 통합)
   ├─ normalizer Phase 2 비활성화 테스트
-  └─ A/B 비교: 현재 3~4 호출 vs context_classifier 1호출
+  └─ A/B 비교: 현재 3~4 호출 vs intent_classifier 1호출
 
 Phase 2: Present 통합 (리스크 낮음)
   ├─ present 노드 구현 (analyzer + viz_judgment + formatter 통합)

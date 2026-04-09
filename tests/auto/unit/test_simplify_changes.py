@@ -153,7 +153,7 @@ class TestSerializeDecompSlots:
         }
         result = serialize_decomp_slots(decomp)
         assert set(result.keys()) == {
-            "{measures}", "{filters}", "{group_by}", "{order_limit}",
+            "{measures}", "{filters}", "{group_by}", "{order_limit}", "{output_hint}",
         }
         # JSON 문자열인지 확인
         for v in result.values():

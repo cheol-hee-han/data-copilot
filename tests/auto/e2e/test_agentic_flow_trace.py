@@ -20,7 +20,7 @@ from src.agents.state.state import (
     PipelineState,
     ReasoningState,
     StepStatus,
-    CandidateTable,
+    TableMeta,
     ColumnInfo,
     ExecutionStep,
     Hypothesis,
@@ -29,8 +29,8 @@ from src.agents.state.state import (
     StructuralHints,
 )
 from src.agents.nodes.reason.reasoning_preparer import reasoning_preparer_node
-from src.agents.nodes.reason.knowledge_fetcher import (
-    knowledge_fetcher_node,
+from src.agents.nodes.reason.context_retriever import (
+    context_retriever_node,
 )
 from src.agents.nodes.reason.readiness_gate import (
     readiness_gate_node,
@@ -111,20 +111,20 @@ class TestReasoningPreparerFlowTrace:
             "knowledge_items_count": len(
                 reason.knowledge_items
             ),
-            "candidate_tables_count": len(
-                reason.candidate_tables
+            "explored_tables_count": len(
+                reason.explored_tables
             ),
             "execution_steps": len(
                 reason.execution_plan
             ),
-            "searched_queries": reason.searched_queries,
+            "executed_tool_keys": reason.executed_tool_keys,
         }
 
         _record(
             "reasoning_preparer", "customer_query",
             "이번 달 신규 고객 수",
             f"가설 {trace['hypotheses_count']}개, "
-            f"후보테이블 {trace['candidate_tables_count']}개",
+            f"후보테이블 {trace['explored_tables_count']}개",
             trace, "PASS" if trace["hypotheses_count"] > 0
             else "FAIL",
             findings=(
@@ -133,7 +133,7 @@ class TestReasoningPreparerFlowTrace:
             ),
         )
 
-        # 검증: reasoning_preparer는 항상 H_INIT 1개 생성
+        # 검증: reasoning_preparer는 항상 H1 1개 생성
         assert reason.phase == Phase.EXPLORING
         assert len(reason.hypotheses) == 1
         assert reason.current_hypothesis is not None
@@ -157,7 +157,7 @@ class TestReasoningPreparerFlowTrace:
             ],
             "candidates": [
                 ct.table_name
-                for ct in reason.candidate_tables
+                for ct in reason.explored_tables
             ],
         }
 
@@ -206,7 +206,7 @@ class TestExplorerFlowTrace:
                     ),
                     ExecutionStep(
                         step=2,
-                        tool="search_code_meta",
+                        tool="lookup_code_meta",
                         input="CUST_TYPE_CD",
                         purpose="고객유형 코드값 확인",
                         status=StepStatus.PENDING,
@@ -215,7 +215,7 @@ class TestExplorerFlowTrace:
             ),
         )
 
-        result = await knowledge_fetcher_node(state)
+        result = await context_retriever_node(state)
         new_state = _apply(state, result)
 
         reason = new_state.reason
@@ -239,7 +239,7 @@ class TestExplorerFlowTrace:
                 reason.knowledge_items
             ),
             "new_tables": len(
-                reason.candidate_tables
+                reason.explored_tables
             ),
             "insights": [
                 s.insight for s in reason.execution_plan
@@ -266,7 +266,7 @@ class TestExplorerFlowTrace:
         """이미 검색한 쿼리 스킵."""
         state = PipelineState(
             reason=ReasoningState(
-                searched_queries=["고객"],
+                executed_tool_keys={"search_table_meta:고객"},
                 hypotheses=[
                     Hypothesis(
                         hypothesis_id="H1",
@@ -286,7 +286,7 @@ class TestExplorerFlowTrace:
             ),
         )
 
-        result = await knowledge_fetcher_node(state)
+        result = await context_retriever_node(state)
         new_state = _apply(state, result)
 
         reason = new_state.reason
@@ -340,6 +340,9 @@ class TestEvaluatorFlowTrace:
                         confidence=0.9,
                         is_critical=True,
                     ),
+                ],
+                explored_tables=[
+                    TableMeta(table_name="TB_CSC_001M", name="TB_CSC_001M", description="고객"),
                 ],
                 explored_use_cases=[
                     {"sql": "SELECT 1", "similarity": 0.85},
@@ -456,8 +459,8 @@ class TestValidatorFlowTrace:
         state = PipelineState(
             reason=ReasoningState(
                 generated_sql="DELETE FROM users",
-                candidate_tables=[
-                    CandidateTable(
+                explored_tables=[
+                    TableMeta(
                         table_name="users",
                         columns=[ColumnInfo(name="id")],
                     ),
@@ -497,8 +500,8 @@ class TestValidatorFlowTrace:
                     "group_by": ["지점"],
                     "measures": [],
                 },
-                candidate_tables=[
-                    CandidateTable(
+                explored_tables=[
+                    TableMeta(
                         table_name="tb_cust",
                         columns=[ColumnInfo(name="branch_cd")],
                     ),
@@ -650,8 +653,8 @@ class TestBoundaryConversionTrace:
             "FROM tb_cust GROUP BY branch_cd"
         )
         reason.final_status = FinalStatus.SUCCESS
-        reason.candidate_tables = [
-            CandidateTable(
+        reason.explored_tables = [
+            TableMeta(
                 table_name="tb_cust",
                 columns=[
                     ColumnInfo(name="branch_cd"),
@@ -671,7 +674,7 @@ class TestBoundaryConversionTrace:
         trace_out = {
             "has_sql": bool(state.reason.validated_sql),
             "table_count": len(
-                state.reason.candidate_tables
+                state.reason.explored_tables
             ),
             "knowledge_count": len(
                 state.reason.knowledge_items

@@ -1,5 +1,7 @@
 """자연어 질의를 8-Slot NormalizedQuery 구조로 변환하는 정규화 서비스.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 비정형 자연어를 intent, entities, measures, dimensions, filters, time,
 modifiers, output_hint의 8개 슬롯으로 구조화하여, 후속 SQL 생성 단계에서
 LLM이 정확한 쿼리를 작성할 수 있도록 정형 입력을 제공한다.

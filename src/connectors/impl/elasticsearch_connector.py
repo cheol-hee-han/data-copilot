@@ -1,5 +1,7 @@
 """ElasticSearch 커넥터 — 보고서 SQL 검색 전용 게이트웨이.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 ES 인덱스(report_sql)에 대한 보고서 SQL/요건 검색을 제공한다.
 테이블/컬럼 메타, 코드 메타 검색은 MongoDB로 일원화되었으며,
 ES의 table_meta, code_meta 메서드는 하위 호환용으로 보존한다.
@@ -40,7 +42,7 @@ class ElasticSearchConnector(SearchConnector):
         self._client: Any = None
 
     async def connect(self) -> None:
-        """ES 연결 초기화."""
+        """ES 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("ElasticSearch Dummy 모드로 초기화")
             return
@@ -60,23 +62,24 @@ class ElasticSearchConnector(SearchConnector):
         logger.info("ElasticSearch 연결 완료")
 
     async def disconnect(self) -> None:
-        """ES 연결 종료."""
+        """ES 연결을 종료한다."""
         if self._client:
             await self._client.close()
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         try:
             return await self._client.ping()
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     async def search(
         self, query: str, **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """통합 검색."""
+        """search_type 파라미터에 따라 적절한 검색 메서드로 디스패치한다."""
         search_type = kwargs.get(
             "search_type", "table_meta",
         )

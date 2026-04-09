@@ -1,5 +1,7 @@
 """FastAPI 서버 — Data Copilot 프로세스 진입점.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 자연어 데이터 추출/분석 요청을 받아 LangGraph 파이프라인을 실행하고
 결과를 반환하는 웹 서버이다. WebSocket(/ws/{session_id})을 통한 실시간 챗봇 통신과
 REST API(/api/query)를 통한 단건 요청을 모두 지원한다.
@@ -31,16 +33,18 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.agents.graph.checkpointer import create_checkpointer
 from src.agents.graph.pipeline import get_compiled_app
@@ -48,10 +52,12 @@ from src.agents.models.user_messages import ERR_GENERIC, format_error
 from src.config import settings
 from src.connectors.manager import get_connector_manager
 from src.agents.graph.runner import run_pipeline
+from src.routers.sessions import router as sessions_router
 from src.services.session import get_session_store
 from src.services.session.store import HistoryEntryType
+from src.services.turn_text_store import get_conversation_history
 from src.tools.langsmith import setup_langsmith
-from src.utils.logger import get_logger, setup_logging
+from src.utils.logger import get_logger, setup_logging, shutdown_logging
 from src.utils.security import detect_prompt_injection, mask_pii
 from src.utils.truncate import truncate_log
 
@@ -79,30 +85,95 @@ class QueryRequest(BaseModel):
     include_trace: bool = Field(
         default=False, description="추론 과정 추적 로그 포함 여부"
     )
+    include_insight: bool = Field(
+        default=False, description="통찰 데이터 포함 여부",
+    )
+
+
+# 필수 커넥터 — 실패 시 서버 기동 중단
+_REQUIRED_CONNECTORS = {"mongodb", "info_db", "history_db", "qdrant"}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """서버 시작/종료 시 리소스 관리."""
+    """서버 시작/종료 시 리소스 관리.
+
+    try/finally로 기동 실패 시에도 리소스 정리를 보장한다.
+    필수 커넥터 연결 실패 시 서버 기동을 중단한다.
+    """
     setup_logging()
     setup_langsmith()
     manager = get_connector_manager()
-    await manager.connect_all()
     store = get_session_store()
-    await store.connect()
 
-    # Checkpointer 초기화 + 그래프 컴파일 (DI, async context manager)
-    async with create_checkpointer(
-        settings.checkpointer, settings.history_db,
-    ) as checkpointer:
-        get_compiled_app(checkpointer=checkpointer)
-        logger.info("서버 시작 완료")
-        yield
+    try:
+        await manager.connect_all()
 
-    # create_checkpointer의 __aexit__에서 pool.close() 자동 정리
-    await store.disconnect()
-    await manager.disconnect_all()
-    logger.info("서버 종료")
+        # 기동 시 실제 연결 검증 — lazy 초기화 커넥터의 연결 실패를 조기 감지.
+        # health_check_all()에 커넥터별 타임아웃(5초)이 적용되어 hang하지 않는다.
+        statuses = await manager.health_check_all()
+        for name in _REQUIRED_CONNECTORS:
+            if not statuses.get(name, False):
+                logger.error(
+                    "필수 커넥터 연결 실패 — 서버 기동 중단",
+                    connector=name,
+                )
+                raise RuntimeError(
+                    f"필수 커넥터 연결 실패: {name}",
+                )
+        for name, ok in statuses.items():
+            if not ok and name not in _REQUIRED_CONNECTORS:
+                logger.warning(
+                    "선택 커넥터 연결 실패 (degraded 모드)",
+                    connector=name,
+                )
+
+        try:
+            await store.connect()
+        except Exception:
+            if settings.session_backend.lower() == "redis":
+                logger.warning(
+                    "Redis 연결 실패 — Memory 세션 스토어로 전환 "
+                    "(서버 재시작 시 대화 이력 소실)",
+                )
+                from src.services.session.store import (
+                    _replace_store,
+                )
+                store = _replace_store()
+            else:
+                raise
+
+        # Checkpointer 초기화 + 그래프 컴파일 (DI, async context manager)
+        # create_checkpointer는 (checkpointer, pool) 튜플을 yield한다.
+        # pool은 turn_text_store 등 커스텀 테이블 접근 시 재사용한다.
+        async with create_checkpointer(
+            settings.history_db,
+        ) as (checkpointer, pool):
+            if pool is not None:
+                manager.set_checkpointer_pool(pool)
+            get_compiled_app(checkpointer=checkpointer)
+
+            # CancelStore 초기화 (SessionStore와 동일 백엔드)
+            from src.agents.graph.cancel import set_cancel_store
+            from src.services.cancel_store import (
+                MemoryCancelStore,
+                RedisCancelStore,
+            )
+            _redis = getattr(store, "_client", None)
+            if settings.session_backend == "redis" and _redis:
+                set_cancel_store(RedisCancelStore(_redis))
+            else:
+                set_cancel_store(MemoryCancelStore())
+
+            logger.info("서버 시작 완료", connectors=statuses)
+            yield
+
+    finally:
+        # 기동 실패/정상 종료 모두에서 리소스 정리 보장
+        await store.disconnect()
+        await manager.disconnect_all()
+        logger.info("서버 종료")
+        shutdown_logging()
 
 
 app = FastAPI(
@@ -112,7 +183,91 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# static/vendor/ 디렉터리에서 로컬 번들 JS/CSS 서빙
+# 세션/턴 관리 라우터 등록 (/api/sessions, /api/turns)
+app.include_router(sessions_router)
+
+
+# ── 보안 헤더 미들웨어 ────────────────────────────────────
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """응답에 보안 헤더를 추가하는 미들웨어.
+
+    /vendor 정적 파일 경로는 Cache-Control을 적용하지 않는다.
+    정적 파일은 브라우저 캐싱이 성능에 중요하므로 no-store를 제외한다.
+    WebSocket upgrade 요청도 통과하지만 HTTP 응답 헤더만 의미 있다.
+    """
+
+    async def dispatch(
+        self, request: Request, call_next: Any,
+    ) -> Any:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = (
+            "strict-origin-when-cross-origin"
+        )
+        # 정적 파일은 브라우저 캐싱 허용
+        if not request.url.path.startswith("/vendor"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# ── CORS 미들웨어 ────────────────────────────────────────
+# 프론트엔드 분리 배포 시 필수. 폐쇄망에서는 allow_origins를 특정 도메인으로 제한한다.
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],           # 운영 시 특정 도메인으로 제한 필요
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+# ── GZip 압축 미들웨어 ───────────────────────────────────
+# 1KB 이상 응답을 자동 압축하여 네트워크 전송량을 절감한다.
+from fastapi.middleware.gzip import GZipMiddleware
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# ── 글로벌 예외 핸들러 ────────────────────────────────────
+# 기존 엔드포인트의 try/except에서 잡히지 않은 예외만 여기에 도달한다.
+# WebSocket은 이 핸들러를 거치지 않으므로 기존 예외 처리와 충돌 없음.
+
+
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(
+    request: Request, exc: ValidationError,
+) -> JSONResponse:
+    """Pydantic 검증 실패 시 사용자 친화적 메시지를 반환한다."""
+    logger.warning("요청 검증 실패", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=422,
+        content={"error": "입력값이 올바르지 않습니다. 확인 후 다시 시도해주세요."},
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(
+    request: Request, exc: Exception,
+) -> JSONResponse:
+    """미처리 예외에 대한 안전망.
+
+    사용자에게 내부 정보를 노출하지 않는다 (code-style.md 규칙 준수).
+    """
+    logger.error("처리되지 않은 예외", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=500,
+        content={"error": "내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."},
+    )
+
+
+# ── 정적 파일 마운트 ──────────────────────────────────────
+
 _vendor_dir = Path(__file__).parent.parent / "static" / "vendor"
 if _vendor_dir.exists():
     app.mount(
@@ -120,6 +275,9 @@ if _vendor_dir.exists():
         StaticFiles(directory=str(_vendor_dir)),
         name="vendor",
     )
+
+
+# ── 엔드포인트 ────────────────────────────────────────────
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -137,7 +295,6 @@ async def health_check():
     manager = get_connector_manager()
     statuses = await manager.health_check_all()
 
-    # LLM API 연결 확인 (프로바이더에 따라 API 키 확인)
     if settings.llm_provider == "anthropic":
         llm_ok = bool(settings.anthropic_api_key)
     else:
@@ -149,6 +306,38 @@ async def health_check():
         "status": "ok" if all_ok else "degraded",
         "connectors": statuses,
     }
+
+
+@app.get("/health/live")
+async def liveness():
+    """프로세스 생존 확인 (Kubernetes liveness probe).
+
+    프로세스가 살아있으면 항상 200을 반환한다.
+    커넥터 상태와 무관하므로 hang 위험이 없다.
+    """
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def readiness():
+    """서비스 준비 상태 확인 (Kubernetes readiness probe).
+
+    필수 커넥터만 검사하여 readiness를 판단한다.
+    health_check_all()에 타임아웃이 적용되어 있으므로 hang하지 않는다.
+    필수 커넥터 실패 시 503을 반환하여 로드밸런서가 트래픽을 차단하도록 한다.
+    """
+    manager = get_connector_manager()
+    statuses = await manager.health_check_all()
+    all_required_ok = all(
+        statuses.get(k, False) for k in _REQUIRED_CONNECTORS
+    )
+    return JSONResponse(
+        status_code=200 if all_required_ok else 503,
+        content={
+            "status": "ready" if all_required_ok else "not_ready",
+            "connectors": statuses,
+        },
+    )
 
 
 async def _handle_slash_command(
@@ -188,6 +377,8 @@ async def _run_ws_pipeline(
     data: str,
     session_id: str,
     websocket: WebSocket,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
     """WebSocket 메시지에 대해 파이프라인을 실행하고 응답을 전송한다.
 
@@ -196,17 +387,53 @@ async def _run_ws_pipeline(
     """
     store = get_session_store()
 
+    _ws_closed = False
+
+    async def _safe_send(msg: dict[str, Any]) -> bool:
+        """WebSocket 전송 — 끊겼으면 False 반환, 예외 없음."""
+        nonlocal _ws_closed
+        if _ws_closed:
+            return False
+        try:
+            await websocket.send_text(
+                json.dumps(msg, default=str, ensure_ascii=False),
+            )
+            return True
+        except (WebSocketDisconnect, RuntimeError):
+            _ws_closed = True
+            logger.warning("WS 전송 실패 (연결 종료)", session_id=session_id)
+            return False
+        except Exception as e:
+            _ws_closed = True
+            logger.warning(
+                "WS 전송 실패 (연결 오류)",
+                error=type(e).__name__,
+                detail=str(e)[:200],
+                session_id=session_id,
+            )
+            return False
+
     async def on_event(msg: dict[str, Any]) -> None:
         """파이프라인 진행 이벤트를 WebSocket으로 전송한다."""
-        await websocket.send_json(msg)
+        await _safe_send(msg)
 
     try:
+        conversation_history = await store.get_history(session_id)
+        if not conversation_history:
+            try:
+                pool = get_connector_manager().checkpointer_pool
+                if pool:
+                    conversation_history = await get_conversation_history(
+                        pool, session_id,
+                    )
+            except Exception:
+                logger.warning("DB 대화이력 fallback 실패", exc_info=True)
         pipeline_result = await run_pipeline(
             data,
             session_id,
-            conversation_history=await store.get_history(
-                session_id,
-            ),
+            conversation_history=conversation_history,
+            client_ip=client_ip,
+            user_agent=user_agent,
             on_event=on_event,
         )
     finally:
@@ -235,9 +462,12 @@ async def _run_ws_pipeline(
         },
     )
 
+    # WS가 이미 끊겼으면 이력 저장만 하고 전송 생략
+    if _ws_closed:
+        return
+
     # 시각화 분리 전송 (텍스트 응답보다 먼저)
     viz = pipeline_result.visualization
-    sql_res = pipeline_result.sql_result
     if viz.has_visualization:
         viz_msg: dict[str, Any] = {
             "type": "viz",
@@ -245,32 +475,59 @@ async def _run_ws_pipeline(
             "code": viz.svg_code,
             "chart_type": viz.chart_type.value,
         }
-        # 차트 원본 데이터 테이블 (UI에서 "데이터 보기" 토글)
-        if sql_res and sql_res.columns and sql_res.rows:
-            viz_msg["table_data"] = {
-                "columns": sql_res.columns,
-                "rows": sql_res.rows[:100],
-            }
-        await websocket.send_json(viz_msg)
+        if not await _safe_send(viz_msg):
+            return
 
     # 스트리밍 응답 전송 (start → chunk → end)
-    await websocket.send_json({
+    # stream.start 전송 실패 시 stream.end도 불필요 — 프론트엔드가 스트림 시작을 모름
+    if not await _safe_send({
         "type": "stream",
         "action": "start",
         "label": "답변 작성 중",
-    })
-    await websocket.send_json({
-        "type": "stream",
-        "action": "chunk",
-        "text": masked_response,
-    })
+    }):
+        return
 
-    # 통찰(insight) — runner에서 State 접근 시점에 구성됨
-    await websocket.send_json({
-        "type": "stream",
-        "action": "end",
-        "insight": pipeline_result.insight,
-    })
+    # stream.start 전송 후에는 stream.end를 반드시 전송하여
+    # 프론트엔드의 setBusy(false) 호출을 보장한다.
+    try:
+        await _safe_send({
+            "type": "stream",
+            "action": "chunk",
+            "text": masked_response,
+        })
+    finally:
+        # 통찰(insight) — runner에서 State 접근 시점에 구성됨
+        # turn_id/user_turn_id는 UI가 좋아요·다운로드 기록 API 호출에 사용한다.
+        end_msg: dict[str, Any] = {
+            "type": "stream",
+            "action": "end",
+            "status": (
+                "cancelled" if pipeline_result.cancelled
+                else "success"
+            ),
+            "insight": pipeline_result.insight,
+            "turn_id": pipeline_result.turn_id,
+            "user_turn_id": pipeline_result.user_turn_id,
+            "trace_files": pipeline_result.trace_files or [],
+        }
+        if pipeline_result.result_data:
+            end_msg["result_data"] = pipeline_result.result_data
+        if pipeline_result.process_summary:
+            end_msg["process_summary"] = (
+                pipeline_result.process_summary
+            )
+        sent = await _safe_send(end_msg)
+        if sent:
+            logger.info(
+                "stream.end 전송 완료",
+                session_id=session_id,
+                status=end_msg["status"],
+            )
+        else:
+            logger.warning(
+                "stream.end 전송 실패",
+                session_id=session_id,
+            )
 
     # 다운로드 가능 알림 (SQL 결과가 있는 경우)
     result_stats = pipeline_result.insight.get(
@@ -284,11 +541,12 @@ async def _run_ws_pipeline(
         _cache_sql_result(
             session_id, pipeline_result.sql_result,
         )
-        await websocket.send_json({
+        await _safe_send({
             "type": "download_ready",
             "session_id": session_id,
             "row_count": row_count,
             "formats": ["csv", "json"],
+            "turn_id": pipeline_result.turn_id,
         })
 
 
@@ -306,6 +564,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     - 응답 전송 전 PII 마스킹 적용
     - 내부 예외 메시지는 사용자에게 노출하지 않음
     """
+    await websocket.accept()
+
     if not _is_valid_session_id(session_id):
         logger.warning(
             "유효하지 않은 session_id",
@@ -313,8 +573,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         )
         await websocket.close(code=1008)
         return
-
-    await websocket.accept()
     logger.info("WebSocket 연결", session_id=session_id)
 
     store = get_session_store()
@@ -322,16 +580,30 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     try:
         while True:
-            data = await websocket.receive_text()
+            raw = await websocket.receive_text()
+
+            # JSON 프로토콜 파싱 (하위호환: plain text fallback)
+            user_text = raw
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    user_text = parsed.get("text", raw)
+                    # Phase 2/3 확장 필드 (현재 미사용, 향후 활용)
+                    # user_model = parsed.get("model")
+                    # user_thinking = parsed.get("thinking_mode")
+                    # is_regen = parsed.get("action") == "regen"
+                    # original_turn_id = parsed.get("original_turn_id")
+            except (json.JSONDecodeError, ValueError):
+                pass  # plain text fallback
 
             # 슬래시 명령어 처리
             if await _handle_slash_command(
-                data.strip(), session_id, websocket,
+                user_text.strip(), session_id, websocket,
             ):
                 continue
 
             # 프롬프트 인젝션 감지
-            if detect_prompt_injection(data):
+            if detect_prompt_injection(user_text):
                 await websocket.send_json({
                     "type": "error",
                     "message": "허용되지 않는 입력 패턴이 감지되었습니다.",
@@ -340,19 +612,37 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # 파이프라인 실행
             try:
-                await _run_ws_pipeline(data, session_id, websocket)
+                await _run_ws_pipeline(
+                    user_text,
+                    session_id,
+                    websocket,
+                    client_ip=(
+                        websocket.client.host if websocket.client else None
+                    ),
+                    user_agent=websocket.headers.get("user-agent"),
+                )
+            except WebSocketDisconnect:
+                raise
             except Exception as e:
                 logger.error(
                     "파이프라인 오류",
                     error=str(e),
                     session_id=session_id,
                 )
-                await websocket.send_json({
-                    "type": "error",
-                    "message": format_error(ERR_GENERIC),
-                })
+                try:
+                    await websocket.send_json({
+                        "type": "stream",
+                        "action": "end",
+                        "status": "error",
+                    })
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": format_error(ERR_GENERIC),
+                    })
+                except (WebSocketDisconnect, RuntimeError):
+                    break
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         logger.info("WebSocket 연결 종료", session_id=session_id)
 
 
@@ -364,7 +654,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         500: {"description": "서버 내부 오류"},
     },
 )
-async def query_endpoint(request: QueryRequest):
+async def query_endpoint(http_request: Request, request: QueryRequest):
     """REST API 기반 쿼리 엔드포인트.
 
     session_id를 전달하면 대화 이력·명확화 상태가 세션 스토어에서
@@ -397,12 +687,26 @@ async def query_endpoint(request: QueryRequest):
 
     try:
         try:
+            conversation_history = await store.get_history(session_id)
+            if not conversation_history:
+                try:
+                    pool = get_connector_manager().checkpointer_pool
+                    if pool:
+                        conversation_history = await get_conversation_history(
+                            pool, session_id,
+                        )
+                except Exception:
+                    logger.warning("DB 대화이력 fallback 실패", exc_info=True)
             pipeline_result = await run_pipeline(
                 user_input,
                 session_id,
-                conversation_history=await store.get_history(
-                    session_id,
+                conversation_history=conversation_history,
+                client_ip=(
+                    http_request.client.host
+                    if http_request.client
+                    else None
                 ),
+                user_agent=http_request.headers.get("user-agent"),
             )
         finally:
             await store.append_history(
@@ -434,6 +738,16 @@ async def query_endpoint(request: QueryRequest):
             "session_id": session_id,
             "response": masked_response,
         }
+        if pipeline_result.result_data:
+            result_body["result_data"] = (
+                pipeline_result.result_data
+            )
+        if pipeline_result.process_summary:
+            result_body["process_summary"] = (
+                pipeline_result.process_summary
+            )
+        if request.include_insight and pipeline_result.insight:
+            result_body["insight"] = pipeline_result.insight
         if pipeline_result.visualization.has_visualization:
             result_body["visualization"] = {
                 "type": "svg",

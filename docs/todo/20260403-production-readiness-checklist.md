@@ -479,6 +479,255 @@ HTTP body 자체의 크기 제한은 없음 (대용량 payload DoS 가능).
 
 ---
 
+## 11. LLM 안전장치 강화
+
+### 11.1 토큰 예산 관리 부재
+
+**현상**: `llm_default_max_tokens` 등 출력 토큰 설정만 존재. 프롬프트 조립 후 입력 토큰 수를 사전 검증하지 않아 컨텍스트 윈도우 초과 가능.
+멀티턴 세션에서 누적 토큰 소비량 추적 없음.
+
+**보완**:
+- 프롬프트 조립 후 `tiktoken` 또는 모델별 토크나이저로 입력 토큰 카운팅
+- 컨텍스트 윈도우 80% 초과 시 자동 truncation (오래된 대화 이력부터 제거)
+- 세션별 누적 토큰 카운터 → 임계치 초과 시 경고/차단
+- 특히 폐쇄망 오픈소스 모델(Solar Pro 2 70B: 32K, Qwen3.5: 128K)은 Claude 대비 윈도우가 제한적
+
+### 11.2 LLM 응답 스키마 검증 부재
+
+**현상**: LLM 응답에 대해 JSON 파싱만 수행. 필수 필드 존재 여부, 타입, enum 범위 등 구조 검증 없음.
+`_parse_sql_response`에서 `status` 필드 검증은 추가되었으나, 다른 노드의 LLM 응답은 미검증.
+
+**보완**:
+- 노드별 LLM 응답 Pydantic 모델 정의 → `model_validate()` 적용
+- 검증 실패 시 재시도 또는 구조화된 에러 반환 (현재 KeyError/TypeError로 전파)
+- 특히 오픈소스 모델은 JSON 구조 불안정성이 높아 필수
+
+### 11.3 DB 조회 결과 → LLM 전달 시 PII 필터링 부재
+
+**현상**: SQL 생성 시 PII 컬럼 차단은 있으나, DB 조회 결과가 `analyzer`/`formatter` 노드의 LLM 프롬프트에 전달될 때 마스킹 없음.
+SQL safety checker는 SELECT 대상 컬럼만 검증하며, 실제 반환된 데이터 값의 PII는 미검사.
+
+**보완**:
+- DB 결과 → LLM 전달 전 PII 마스킹 레이어 추가
+- 명확화 질의에 사용자 입력 포함 시에도 PII 마스킹 적용
+- SQL 실패 시 에러 메시지에 포함될 수 있는 샘플 데이터 필터링
+- LangSmith/트레이스 로그에서 PII 자동 삭제
+
+---
+
+## 12. LangGraph 그래프 운영 패턴
+
+> 참조: `docs/research/20260330-langgraph-production-patterns.md`
+
+### 12.1 그래프 싱글턴 컴파일 미적용
+
+**현상**: 리서치에서 "모듈 수준 1회 컴파일 + lifespan checkpointer 사후 주입"을 권고하나,
+현재 `runner.py`의 그래프 빌드 패턴이 권고 패턴과 일치하는지 확인 필요.
+
+**보완** (리서치 섹션 5.1 권고):
+```python
+# pipeline.py — 모듈 수준에서 1회 컴파일
+graph = builder.compile()
+
+# main.py — lifespan에서 checkpointer 사후 주입
+async with AsyncPostgresSaver.from_conn_string(DB_URI) as saver:
+    graph.checkpointer = saver
+    yield
+```
+
+### 12.2 Checkpoint TTL 미적용 — DB 무한 성장 위험
+
+**현상**: `CheckpointerConfig.thread_ttl_days=30` 설정은 존재하나 **실제 purge 로직 미구현**.
+AsyncPostgresSaver는 자동 삭제 기능이 없어 checkpoint 테이블이 무한 성장.
+
+**보완**:
+- 주기적 checkpoint 정리 배치 (asyncio background task 또는 cron)
+  ```sql
+  DELETE FROM checkpoints
+  WHERE created_at < NOW() - INTERVAL '30 days';
+  ```
+- checkpoint 테이블 크기 모니터링 + 알림
+- 또는 PostgreSQL 파티셔닝으로 월별 테이블 자동 drop
+
+### 12.3 폐쇄망 트레이싱 전환
+
+**현상**: LangSmith 의존 (폐쇄망 사용 불가). 자체 `eval_tracker`는 평가용이지 운영 모니터링용이 아님.
+요청별 `run_id`, `tags`, `metadata` 주입도 미적용.
+
+**보완** (리서치 섹션 2.5 권고):
+- `BaseCallbackHandler` 상속 커스텀 핸들러 구현
+  - 노드별 실행 시간, LLM 호출 횟수, 토큰 사용량 추적
+  - 내부 추적 시스템(PostgreSQL 로그 테이블 또는 OTel Collector)으로 전송
+- 호출 시 config callbacks 주입 방식:
+  ```python
+  result = await graph.ainvoke(state, config={
+      "callbacks": [InternalTraceHandler(session_id, user_id)],
+      "run_id": uuid4(),
+      "tags": ["production", "nl2sql"],
+      "metadata": {"user_id": user_id, "env": "prod"},
+  })
+  ```
+- `eval_tracker`의 운영 지표 수집 기능은 커스텀 핸들러로 통합
+
+---
+
+## 13. 프롬프트 버전 관리
+
+### 13.1 프롬프트 변경 추적 없음
+
+**현상**: `resources/prompts/` 파일에 버전 메타데이터 없음.
+프롬프트 수정이 SQL 생성 품질에 미치는 영향을 추적할 수 없음.
+
+**보완**:
+- 프롬프트 파일 상단에 `# version: 1.2` + 변경 사유 주석
+- 또는 별도 `prompt_registry.yaml`로 파일별 버전·변경 이력 관리
+- 실행 로그에 프롬프트 파일 해시값 기록 → 품질 회귀 분석 가능
+
+### 13.2 프롬프트 롤백 절차 없음
+
+**현상**: 프롬프트 변경으로 품질 저하 시 git revert + 재배포만 가능.
+폐쇄망에서 재배포는 시간 소요가 크므로 핫 롤백 필요.
+
+**보완**:
+- 프롬프트 핫 리로드 (파일 변경 감지 → 자동 재로딩)
+- 또는 설정으로 프롬프트 버전 선택 (`prompt_version: "v1.1"` → 해당 버전 파일 로드)
+
+---
+
+## 14. 임베딩 모델 일관성
+
+### 14.1 모델 버전 고정 없음
+
+**현상**: `embedding_model="BAAI/bge-m3"` — HuggingFace revision 미지정.
+모델 업데이트 시 임베딩 차원/분포가 변경되어 Qdrant 기존 벡터와 불일치 위험.
+
+**보완**:
+- HuggingFace revision 해시 고정: `embedding_model_revision="abc123def"`
+- 폐쇄망 반입 시 모델 파일 해시 검증
+
+### 14.2 벡터 호환성 검증 없음
+
+**현상**: 임베딩 모델 교체 시 기존 Qdrant 벡터와 불일치를 감지하는 메커니즘 없음.
+검색 품질이 조용히 저하될 수 있음.
+
+**보완**:
+- 서버 시작 시 샘플 쿼리 임베딩 → 기존 벡터와 코사인 유사도 검증
+- 유사도가 임계치 이하면 경고 로그 + 재인덱싱 권고
+- 재인덱싱 스크립트 + 블루/그린 컬렉션 전환 전략 문서화
+
+---
+
+## 15. CI/CD 및 품질 게이트
+
+### 15.1 자동화 파이프라인 없음
+
+**현상**: GitHub Actions, Jenkins 등 CI 설정 없음. 코드 변경의 품질 검증이 수동에 의존.
+
+**보완**:
+- push/PR 시 자동 실행: `pytest` + `ruff` lint + `mypy` type check
+- 폐쇄망에서는 Jenkins 또는 GitLab CI 자체 호스팅
+- 골든셋 회귀 테스트를 CI 파이프라인에 포함
+
+### 15.2 테스트 커버리지 기준 없음
+
+**현상**: `pytest-cov` 설치됨, 최소 커버리지 미설정. 커버리지 추적/게이트 없음.
+
+**보완**:
+- `pyproject.toml`에 `--cov-fail-under=70` 설정
+- 핵심 모듈(pipeline, state, services) 커버리지 80% 이상 목표
+
+### 15.3 테스트 스위트 정비 필요
+
+**현상**: 삭제된 모듈(`intent_resolver`, `history_resolver`)을 참조하는 테스트 5건+ 실패 중.
+`@pytest.mark.skip` 사유가 "삭제됨"인 테스트 다수.
+
+**보완**:
+- 깨진 import 테스트 수정 또는 삭제
+- skip 사유 정리, 불필요한 skip 테스트 제거
+- 새 아키텍처(v4)에 맞는 테스트 추가
+
+---
+
+## 16. 백업 및 재해 복구 (DR)
+
+### 16.1 DB 백업 전략 없음
+
+**현상**: MongoDB, PostgreSQL, Qdrant 백업 정책 미수립. 장애 시 데이터 유실 위험.
+금융권 규정상 데이터 보관 및 복구 능력 필수.
+
+**보완**:
+- 커넥터별 백업 스케줄 수립:
+  | DB | 백업 방식 | 주기 | 보관 |
+  |----|----------|------|------|
+  | PostgreSQL (info_db) | pg_dump + WAL 아카이빙 | 일 1회 full + 실시간 WAL | 30일 |
+  | PostgreSQL (history_db) | pg_dump | 일 1회 | 90일 |
+  | MongoDB | mongodump | 일 1회 | 30일 |
+  | Qdrant | snapshot API | 주 1회 | 4주 |
+
+### 16.2 RTO/RPO 미정의
+
+**현상**: 금융권 요건 기준 복구 목표 미설정.
+
+**보완**:
+- RTO (복구 시간 목표): 4시간 이내
+- RPO (복구 시점 목표): 1시간 이내
+- 정기 DR 훈련 (반기 1회)
+
+### 16.3 장애 복구 절차서 없음
+
+**현상**: 커넥터별 장애 시나리오에 대한 운영 매뉴얼 없음.
+
+**보완**:
+- 시나리오별 복구 절차 문서화 (MongoDB 장애, PostgreSQL 장애, Qdrant 장애, LLM API 장애)
+- 에스컬레이션 경로 정의 (1차: 자동 재시도 → 2차: 운영자 알림 → 3차: 수동 개입)
+
+### 16.4 DB 페일오버 없음
+
+**현상**: 단일 `info_db_host` — replica/failover 미구성.
+
+**보완**:
+- PostgreSQL read replica + 커넥션 스트링 failover 설정
+- 또는 pgbouncer/HAProxy 기반 커넥션 라우팅
+
+---
+
+## 17. API 버전 관리
+
+### 17.1 버전 프리픽스 없음
+
+**현상**: `/api/query`, `/ws/{session_id}` — 버전 없는 엔드포인트.
+향후 breaking change 시 기존 클라이언트 대응 불가.
+
+**보완**:
+- `/api/v1/query`로 변경
+- 하위 호환성 유지 기간 + 폐기(deprecation) 정책 수립
+- 응답 헤더에 `API-Version` 포함
+
+---
+
+## 18. 프론트엔드 빌드/배포
+
+### 18.1 프로덕션 빌드 설정 미확인
+
+**현상**: React + Vite + TypeScript 프론트엔드의 프로덕션 빌드 설정 및 배포 파이프라인 미확인.
+FastAPI `StaticFiles` 마운트는 있으나, 빌드 산출물 경로 관리 불명확.
+
+**보완**:
+- `vite build` 프로덕션 빌드 스크립트 확인/정비
+- 빌드 결과물 경로와 FastAPI `StaticFiles` 경로 일치 확인
+- 환경별(dev/prod) 빌드 설정 분리
+
+### 18.2 폐쇄망 npm 의존성
+
+**현상**: npm 패키지 오프라인 설치 전략 없음.
+
+**보완**:
+- `node_modules` 아카이브 또는 private npm registry (Verdaccio 등)
+- `package-lock.json` 기반 정확한 버전 고정
+- 폐쇄망 반입 전 의존성 무결성 검증
+
+---
+
 ## 우선순위 요약
 
 | 순위 | 항목 | 난이도 | 영향도 |
@@ -488,6 +737,9 @@ HTTP body 자체의 크기 제한은 없음 (대용량 payload DoS 가능).
 | **P0** | 커넥션 풀 설정 (1.3) | 낮음 | 높음 |
 | **P0** | Global Exception Handler (2.2) | 낮음 | 높음 |
 | **P0** | 로그 로테이션 (6.2) | 낮음 | 높음 |
+| **P0** | Checkpoint TTL 적용 (12.2) | 낮음 | 높음 |
+| **P0** | 테스트 스위트 정비 (15.3) | 낮음 | 높음 |
+| **P0** | DB 결과 PII 필터링 (11.3) | 중간 | 높음 |
 | **P1** | SSO 인증 진입점 (3.1) | 높음 | 높음 |
 | **P1** | 감사 추적 (3.3) | 중간 | 높음 |
 | **P1** | CORS/보안 헤더 미들웨어 (2.1, 2.5) | 낮음 | 중간 |
@@ -495,6 +747,10 @@ HTTP body 자체의 크기 제한은 없음 (대용량 payload DoS 가능).
 | **P1** | Rate Limiting (2.1) | 낮음 | 중간 |
 | **P1** | Dockerfile + 프로덕션 compose (8.1, 8.2) | 중간 | 높음 |
 | **P1** | JSON 로그 포맷 (6.1) | 낮음 | 중간 |
+| **P1** | 폐쇄망 트레이싱 전환 (12.3) | 중간 | 높음 |
+| **P1** | 토큰 예산 관리 (11.1) | 낮음 | 중간 |
+| **P1** | CI/CD 파이프라인 (15.1) | 중간 | 높음 |
+| **P1** | DB 백업 전략 (16.1) | 중간 | 높음 |
 | **P2** | 파이프라인 타임아웃 강화 (5.3) | 낮음 | 중간 |
 | **P2** | Fallback 전략 (5.2) | 중간 | 중간 |
 | **P2** | 메트릭 수집 (6.3) | 중간 | 중간 |
@@ -502,8 +758,21 @@ HTTP body 자체의 크기 제한은 없음 (대용량 payload DoS 가능).
 | **P2** | Uvicorn/Gunicorn 프로덕션 설정 (2.4) | 낮음 | 중간 |
 | **P2** | 리버스 프록시 설정 (8.3) | 중간 | 중간 |
 | **P2** | Admin API (9.1) | 중간 | 중간 |
+| **P2** | LLM 응답 스키마 검증 (11.2) | 낮음 | 중간 |
+| **P2** | 임베딩 모델 버전 고정 (14.1) | 낮음 | 중간 |
+| **P2** | 프롬프트 변경 추적 (13.1) | 낮음 | 중간 |
+| **P2** | 테스트 커버리지 기준 (15.2) | 낮음 | 중간 |
+| **P2** | RTO/RPO 정의 (16.2) | 낮음 | 중간 |
 | **P3** | DB 마이그레이션 도구 (8.4) | 중간 | 낮음 |
 | **P3** | Circuit Breaker (1.4) | 중간 | 낮음 |
 | **P3** | 결과 스트리밍 (7.3) | 중간 | 낮음 |
 | **P3** | WebSocket 연결 수 제한 (10.3) | 낮음 | 낮음 |
 | **P3** | 설정 검증 CLI (9.3) | 낮음 | 낮음 |
+| **P3** | 그래프 싱글턴 패턴 (12.1) | 낮음 | 낮음 |
+| **P3** | 벡터 호환성 검증 (14.2) | 낮음 | 낮음 |
+| **P3** | 프롬프트 롤백 (13.2) | 낮음 | 낮음 |
+| **P3** | API 버전 관리 (17.1) | 낮음 | 낮음 |
+| **P3** | DB 페일오버 (16.4) | 중간 | 중간 |
+| **P3** | 장애 복구 절차서 (16.3) | 낮음 | 중간 |
+| **P3** | 프론트엔드 빌드 설정 (18.1) | 중간 | 중간 |
+| **P3** | 폐쇄망 npm 의존성 (18.2) | 중간 | 중간 |

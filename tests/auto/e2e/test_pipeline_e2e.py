@@ -16,10 +16,13 @@ import pytest
 
 from src.agents.models.normalization import NormalizedQuery
 from src.agents.state.state import IntentType, PipelineState, QueryStatus
-from src.services.history_resolver import HistoryDecision
-from src.services.intent_resolver import _parse_intent_response
+from src.models.enums import HistoryDecision
+
+# v4에서 intent_resolver가 intent_classifier로 리팩터링되면서
+# _parse_intent_response가 삭제됨. 이 함수에 의존하는 테스트는 skip 처리한다.
+_parse_intent_response = None  # import 에러 방지용 placeholder
 from src.services.sql_safety_checker import validate_sql_safety
-from src.agents.nodes.interpret.context_classifier import context_classifier_node
+from src.agents.nodes.interpret.intent_classifier import intent_classifier_node
 from src.agents.nodes.interpret.query_normalizer import normalize_query_node
 from src.services.input_sanitizer import sanitize
 
@@ -35,7 +38,7 @@ def _make_gate_mock(
     reason: str = "테스트",
     resolution: str = "SKIP",
 ) -> AsyncMock:
-    """context_classifier 서비스용 llm_call_with_parse_retry mock.
+    """intent_classifier 서비스용 llm_call_with_parse_retry mock.
 
     반환값: (raw_text, parsed_dict) — _parse_response 결과를 직접 반환.
     parsed_dict의 resolution은 HistoryDecision enum으로 변환된 상태.
@@ -67,9 +70,10 @@ def _make_legacy_mock(
     intent_text: str = "data_extraction",
     confidence: float = 0.85,
 ) -> AsyncMock:
-    """Legacy 의도분류용 llm_call_with_parse_retry mock (레거시 호환)."""
+    """Legacy 의도분류용 mock — _parse_intent_response 삭제로 stub 처리."""
     raw = f"INTENT: {intent_text}\nCONFIDENCE: {confidence}"
-    parsed = _parse_intent_response(raw)
+    # _parse_intent_response가 v4에서 삭제되어 stub으로 대체
+    parsed = {"intent": intent_text, "confidence": confidence}
     return AsyncMock(return_value=(raw, parsed))
 
 
@@ -109,7 +113,7 @@ def _make_normalization_mock(
 # 공통 mock 경로 상수
 # ---------------------------------------------------------------------------
 
-_INTENT_LLM = "src.services.context_classifier.llm_call_with_parse_retry"
+_INTENT_LLM = "src.services.intent_classifier.llm_call_with_parse_retry"
 _NORM_LLM = "src.services.query_normalizer.llm_call_with_parse_retry"
 _NORM_RECORD = "src.services.query_normalizer.record_prompt_variables"
 _DISPATCH = "src.utils.tracker.dispatch.dispatch_tracking_event"
@@ -145,7 +149,7 @@ class TestPreprocessToIntent:
             )),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.DATA_EXTRACTION
         assert intent_result["query_category"] == "DATA_QUERY"
@@ -172,7 +176,7 @@ class TestPreprocessToIntent:
             )),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
 
         # "추이", "분석" 키워드 → DATA_ANALYSIS
         assert intent_result["intent"] == IntentType.DATA_ANALYSIS
@@ -194,7 +198,7 @@ class TestPreprocessToIntent:
             )),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.CASUAL_TALK
         assert intent_result["query_category"] == "CASUAL_TALK"
@@ -216,7 +220,7 @@ class TestPreprocessToIntent:
             )),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.META_QUESTION
 
@@ -237,7 +241,7 @@ class TestPreprocessToIntent:
             )),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
 
         assert intent_result["intent"] == IntentType.CLARIFICATION_NEEDED
 
@@ -250,7 +254,7 @@ class TestPreprocessToIntent:
     async def test_llm_error_falls_back_to_rules(self):
         """LLM 실패 시 규칙 기반 분류로 폴백한다.
 
-        context_classifier의 _fallback은 이력이 없으면 LLM 호출 없이
+        intent_classifier의 _fallback은 이력이 없으면 LLM 호출 없이
         classify_by_rules로 규칙 기반 의도 분류를 수행한다.
         "목록" + "조회" 키워드 → DATA_EXTRACTION으로 분류된다.
         """
@@ -267,10 +271,10 @@ class TestPreprocessToIntent:
             patch(_INTENT_LLM, mock_llm),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
 
-        # 규칙 기반 폴백으로 정상 분류 ("목록" + "조회" → DATA_EXTRACTION)
-        assert intent_result["intent"] == IntentType.DATA_EXTRACTION
+        # LLM 실패 시 is_error=True + UNKNOWN 반환 (규칙 기반 폴백 제거됨)
+        assert intent_result["intent"] == IntentType.UNKNOWN
 
 
 # ---------------------------------------------------------------------------
@@ -531,12 +535,12 @@ class TestFullFlowWithNormalization:
             "status": QueryStatus.PREPROCESSING,
         })
 
-        # 2. 의도 분류 (Mock context_classifier)
+        # 2. 의도 분류 (Mock intent_classifier)
         with (
             patch(_INTENT_LLM, _make_gate_mock("DATA_QUERY")),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
         state = state.model_copy(update=intent_result)
         assert state.intent == IntentType.DATA_EXTRACTION
 
@@ -589,7 +593,7 @@ class TestFullFlowWithNormalization:
             patch(_INTENT_LLM, _make_gate_mock("DATA_QUERY")),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
-            intent_result = await context_classifier_node(state)
+            intent_result = await intent_classifier_node(state)
         state = state.model_copy(update=intent_result)
 
         # 정규화
@@ -665,8 +669,9 @@ class TestSQLValidation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="intent_resolver._parse_intent_response 삭제됨 (v4). 새 intent_classifier에 맞게 재작성 필요.")
 class TestIntentParser:
-    """의도 분류 LLM 응답 파서를 검증한다."""
+    """의도 분류 LLM 응답 파서를 검증한다 — intent_resolver 삭제로 비활성."""
 
     def test_parse_data_extraction(self):
         intent, conf = _parse_intent_response(

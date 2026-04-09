@@ -7,7 +7,7 @@
 
 ## 0. 분석 대상
 
-**제안된 방안**: 4개 LLM 노드(knowledge_interpreter, sql_generator, sql_validator, recovery_agent)의 시스템 프롬프트에 테이블/컬럼 명명규칙 참조표를 주입하여, LLM이 테이블 유형코드(M/S/P/L/H/G)와 컬럼 도메인 접미사(_AMT, _RT, _DT 등)를 인지하고 활용하게 한다.
+**제안된 방안**: 4개 LLM 노드(context_interpreter, sql_generator, sql_validator, recovery_agent)의 시스템 프롬프트에 테이블/컬럼 명명규칙 참조표를 주입하여, LLM이 테이블 유형코드(M/S/P/L/H/G)와 컬럼 도메인 접미사(_AMT, _RT, _DT 등)를 인지하고 활용하게 한다.
 
 **명명규칙 요약**:
 - 테이블: `TB_ADW_<주제영역3~4자리><일련번호2~3자리><유형1자리>`
@@ -22,12 +22,12 @@
 
 | 노드 | 명명규칙 필요성 | 이유 |
 |------|:---:|------|
-| knowledge_interpreter | **높음** | 후보 테이블 적합성 판정 시 유형코드(S vs L)가 핵심 판단 근거 |
+| context_interpreter | **높음** | 후보 테이블 적합성 판정 시 유형코드(S vs L)가 핵심 판단 근거 |
 | sql_generator | **중간** | 이미 SELECTED 테이블만 받으므로 유형 선택은 끝났지만, S 테이블에 이중 집계 방지 등 SQL 작성 시 참고 필요 |
 | sql_validator | **낮음** | 검증 대상 SQL이 이미 생성된 상태. 유형 기반 경고는 rule-based로 처리 가능 |
 | recovery_agent | **낮음** | 재계획 시 도구 실행 계획을 수립할 뿐, 테이블 직접 판정은 하지 않음 |
 
-**핵심 판단**: 명명규칙이 가장 큰 가치를 발휘하는 순간은 **테이블 선택**(knowledge_interpreter)과 **SQL 작성**(sql_generator) 단계이다. sql_validator와 recovery_agent에는 넣을 필요가 없으며, 넣더라도 이미 잘못 선택된 테이블을 이 단계에서 바로잡기는 구조적으로 어렵다.
+**핵심 판단**: 명명규칙이 가장 큰 가치를 발휘하는 순간은 **테이블 선택**(context_interpreter)과 **SQL 작성**(sql_generator) 단계이다. sql_validator와 recovery_agent에는 넣을 필요가 없으며, 넣더라도 이미 잘못 선택된 테이블을 이 단계에서 바로잡기는 구조적으로 어렵다.
 
 ---
 
@@ -37,7 +37,7 @@
 
 | 프롬프트 | 정적 템플릿 | 동적 변수 주입 | 합산 추정 |
 |----------|:-----------:|:-----------:|:---------:|
-| knowledge_interpreter_system.txt | ~350줄 | tool_results, table_observations | 3,000~6,000 토큰 |
+| context_interpreter_system.txt | ~350줄 | tool_results, table_observations | 3,000~6,000 토큰 |
 | sql_generator_system.txt | ~185줄 | tables, confirmed_terms, reference_sqls | 2,500~5,000 토큰 |
 
 명명규칙 참조표(6가지 유형 설명 + 8가지 접미사 + 사용 지침)를 추가하면 **약 300~500 토큰** 증가한다.
@@ -141,7 +141,7 @@ IF 질의에 AVG/평균 포함 AND 후보에 S 테이블 존재:
   → CandidateTable에 warning 필드 추가:
     "이 테이블은 S(집계) 유형입니다. 이미 SUM/COUNT된 데이터이므로
      AVG 집계 시 이중 집계 위험이 있습니다. L(내역) 테이블을 우선 검토하세요."
-  → knowledge_interpreter 프롬프트의 table_observations에 경고로 주입
+  → context_interpreter 프롬프트의 table_observations에 경고로 주입
 ```
 
 이렇게 하면 경고가 **해당 테이블의 관찰 데이터 바로 옆에** 위치하므로, LLM이 lost-in-the-middle 문제 없이 참조할 수 있다.
@@ -173,7 +173,7 @@ TABLE_TYPE_MAP = {
 }
 ```
 
-이 상수를 reasoning_preparer, knowledge_interpreter의 Python 코드에서 참조하여 State에 enrichment하는 방식.
+이 상수를 reasoning_preparer, context_interpreter의 Python 코드에서 참조하여 State에 enrichment하는 방식.
 
 ---
 
@@ -193,7 +193,7 @@ reasoning_preparer (rule-based)
 ├── table_type_label 필드 추가 ("S(집계)", "L(내역)" 등)
 └── 질의 집계방식 vs 테이블 유형 충돌 시 warning 생성
 
-knowledge_interpreter (프롬프트 동적 주입)
+context_interpreter (프롬프트 동적 주입)
 ├── _build_table_block()에서 table_type_label 표시
 │   예: "### TB_ADW_LON01S (여신잔액 월별집계) [유형: S(집계)]"
 ├── 유형 충돌 경고가 있으면 테이블 블록에 경고 삽입
@@ -230,10 +230,10 @@ class CandidateTable(BaseModel):
 [reasoning_preparer] ──rule-based──→ table_type_code/label/warning 파싱 및 설정
         │
         ▼
-[knowledge_fetcher] ──도구 실행──→ 후보 테이블 수집 (기존과 동일)
+[context_retriever] ──도구 실행──→ 후보 테이블 수집 (기존과 동일)
         │
         ▼
-[knowledge_interpreter] ──LLM──→ 테이블 블록에 유형 라벨+경고 포함
+[context_interpreter] ──LLM──→ 테이블 블록에 유형 라벨+경고 포함
         │                         (프롬프트 동적 주입)
         │                         "S(집계) 유형" 정보가 판정 근거로 활용됨
         ▼
@@ -247,7 +247,7 @@ class CandidateTable(BaseModel):
 
 1. **reasoning_preparer**: TB_ADW_LON01S의 유형코드 `S`를 파싱, 질의에 "평균" 키워드가 있으므로 `table_type_warning = "S(집계) 유형: 이미 SUM된 데이터, AVG 시 이중 집계 위험"` 설정
 
-2. **knowledge_interpreter**: 테이블 관찰 블록에 경고가 함께 표시됨 → LLM이 S 테이블 대신 L 테이블을 SELECTED할 확률 증가. 또는 S만 있어도 warning이 selection_reason에 기록됨
+2. **context_interpreter**: 테이블 관찰 블록에 경고가 함께 표시됨 → LLM이 S 테이블 대신 L 테이블을 SELECTED할 확률 증가. 또는 S만 있어도 warning이 selection_reason에 기록됨
 
 3. **sql_generator**: SELECTED된 테이블이 여전히 S 유형이면, "이미 집계된 데이터" 주의사항이 프롬프트에 삽입됨
 
@@ -289,7 +289,7 @@ class CandidateTable(BaseModel):
 
 대신 **Hybrid 방식** (Section 8)을 권고한다:
 - reasoning_preparer에서 rule-based로 유형코드를 파싱하고 경고를 생성
-- knowledge_interpreter와 sql_generator 프롬프트에는 파싱된 결과를 **테이블별 인라인 주석**으로 동적 주입
+- context_interpreter와 sql_generator 프롬프트에는 파싱된 결과를 **테이블별 인라인 주석**으로 동적 주입
 - sql_validator에서 유형-집계 충돌을 rule-based로 검증
 
 이 방식은 **결정론적 정확성 + LLM의 맥락 활용 능력**을 결합하며, 모델 성능에 관계없이 핵심 안전장치가 동작한다.

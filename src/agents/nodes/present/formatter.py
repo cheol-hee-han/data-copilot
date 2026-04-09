@@ -1,51 +1,75 @@
 """결과 포맷팅 노드 — 최종 응답을 사용자 친화적 보고서 형태로 정리.
 
-SQL 실행 결과(sql_result)를 LLM 에 전달하여 IT 비전문 사용자가 이해할 수 있는
-보고서 형태의 자연어 응답을 생성한다.
-컨텍스트 소스 수집 실패가 있었다면 경고 문구를 응답 상단에 추가하고,
-파이프라인 전체 추론 과정(trace_log)을 접기(details) 태그로 응답 하단에 첨부한다.
+작성자: 한철희 / 최종수정: 2026-04-07
+
+SQL 실행 결과(sql_result)를 rule-based 로직으로 IT 비전문 사용자가 이해할 수 있는
+핵심 수치 요약 텍스트를 생성한다. LLM 호출 없이 결정론적 포맷팅을 수행한다.
+
+테이블 원본 데이터(result_data)와 조회 과정 요약(process_summary)은
+구조화 dict로 State에 저장하여 stream.end JSON으로 프론트엔드에 전송한다.
 
 핵심 함수:
-    - format_response_node: state.preprocessed_input, state.sql_result,
-      state.context.failed_sources, state.trace_log 를 읽어 포맷팅하고
-      state.formatted_response 에 기록
+    - format_response_node: state.sql_result, state.reason 등을 읽어
+      rule-based 포맷팅을 수행하고 state에 기록
 
 위임 구조:
-    - 비즈니스 로직: services/response_formatter.py (format_response)
-    - 프롬프트: nodes/prompts/system_prompts.py 에서 FORMATTER_SYSTEM,
-      FORMATTER_USER 를 로드하여 서비스에 주입
-
-폴백:
-    - LLM 호출 실패 시 ERR_FORMATTING 에러 메시지를 formatted_response 에 기록하여
-      사용자에게 오류 상황을 안내한다.
+    - 포맷팅 로직: services/response_formatter.py (rule-based 함수들)
+    - 조회 과정 요약: services/process_summary_builder.py
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.agents.models.user_messages import (
     ERR_FORMATTING,
-    format_context_warning,
     format_error,
 )
-from src.agents.nodes.system_prompts import (
-    FORMATTER_USER,
-    FORMATTER_SYSTEM,
-)
 from src.agents.state.state import (
-    CodeMeta,
     PipelineState,
     QueryStatus,
     add_trace,
-    format_trace_summary,
 )
-from src.agents.utils.clarification_context import (
-    build_auto_resolved_notice,
+from src.config import settings
+from src.services.process_summary_builder import (
+    build_process_summary,
 )
-from src.services.response_formatter import format_response
+from src.services.response_formatter import (
+    apply_code_mappings,
+    build_summary_line,
+    detect_column_formats,
+)
 from src.utils.logger import get_logger
-from src.utils.sqlglot_analyzer import extract_select_alias_map
+from src.utils.tracker.dispatch import (
+    dispatch_tracking_event,
+    REASONING_STEP,
+)
 
 logger = get_logger(__name__)
+
+
+def _build_result_data(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    column_formats: dict[str, str],
+) -> dict[str, Any] | None:
+    """UI 전송용 구조화 테이블 데이터를 조립한다.
+
+    코드값 변환이 적용된 rows를 받아 행 제한 후 dict로 반환한다.
+    """
+    if not columns or not rows:
+        return None
+
+    max_rows = settings.ui_result_max_rows
+    truncated = rows[:max_rows]
+
+    return {
+        "columns": columns,
+        "rows": truncated,
+        "column_formats": column_formats,
+        "total_count": len(rows),
+        "displayed_count": len(truncated),
+    }
 
 
 async def format_response_node(
@@ -54,163 +78,110 @@ async def format_response_node(
     """결과를 사용자 친화적 형태로 포맷팅한다."""
     logger.info("결과 포맷팅 시작")
 
-    # code_map에서 SQL 결과 컬럼에 관련된 코드만 필터링
-    code_mappings = _build_code_mappings(
-        code_map=state.reason.code_map,
-        sql=state.reason.validated_sql,
-    )
-
-    try:
-        formatted = await format_response(
-            user_input=state.preprocessed_input,
-            sql_result=state.sql_result,
-            system_prompt=FORMATTER_SYSTEM,
-            user_template=FORMATTER_USER,
-            code_mappings=code_mappings,
-        )
-    except Exception as e:
-        logger.error(
-            "결과 포맷팅 LLM 호출 오류", error=str(e),
-        )
+    # ── 가드: simple_responder가 이미 응답 완성한 경우 ──
+    if state.formatted_response and not (
+        state.sql_result and state.sql_result.rows
+    ):
+        logger.info("경량 응답 통과 — 포맷팅 스킵")
         return {
-            "formatted_response": format_error(
-                ERR_FORMATTING,
-            ),
-            "status": QueryStatus.ERROR,
-            "error_message": ERR_FORMATTING,
+            "trace_log": add_trace(state, "포맷팅", "경량 응답 통과"),
         }
 
-    # INFER 자동추론 항목 안내 (결과 상단)
-    infer_notice = build_auto_resolved_notice(state)
-    if infer_notice:
-        formatted = f"{infer_notice}\n\n{formatted}"
-
-    # inference_notes 면책 고지 (recovery_agent 추론 포함 시)
-    inference_disclaimer = _build_inference_disclaimer(
-        state.reason.inference_notes,
-        state.reason.is_force_generated,
-    )
-    if inference_disclaimer:
-        formatted = f"{inference_disclaimer}\n\n{formatted}"
-
-    # 컨텍스트 소스 실패 경고
-    ctx_warning = format_context_warning(
-        state.context.failed_sources,
-    )
-    if ctx_warning:
-        formatted = f"{ctx_warning}\n\n{formatted}"
-
-    # 조회 과정 요약
-    trace_summary = format_trace_summary(state)
-    if trace_summary:
-        formatted += (
-            "\n\n<details>\n"
-            "<summary>조회 과정 요약</summary>\n\n"
-            f"{trace_summary}\n"
-            "</details>"
+    try:
+        # ── 1. 컬럼 타입 판별 ──
+        column_formats = detect_column_formats(
+            state.reason.validated_sql or "",
         )
+
+        # ── 2. 코드값 변환 (fallback) ──
+        rows = apply_code_mappings(
+            state.sql_result.rows,
+            state.reason.explored_codes,
+            state.reason.validated_sql or "",
+        )
+
+        # ── 3. 핵심 수치 요약 (텍스트만) ──
+        if state.analysis_result and state.analysis_result.summary:
+            summary_line = state.analysis_result.summary
+        else:
+            summary_line = build_summary_line(
+                state.sql_result.columns,
+                rows,
+                column_formats,
+            )
+
+        formatted = summary_line or "(조회 결과 없음)"
+
+        # ── 4. result_data 조립 (구조화 테이블 데이터) ──
+        result_data = _build_result_data(
+            state.sql_result.columns,
+            rows,
+            column_formats,
+        )
+
+    except Exception as e:
+        logger.error("결과 포맷팅 오류", error=str(e))
+        return {
+            "formatted_response": format_error(ERR_FORMATTING),
+            "status": QueryStatus.ERROR,
+            "error_message": ERR_FORMATTING,
+            "trace_log": add_trace(state, "포맷팅", f"오류: {ERR_FORMATTING}"),
+        }
+
+    # ── 5. force-generate 경고 (기존 유지) ──
+    if state.reason.is_force_generated:
+        formatted = (
+            "**참고**: 확인된 정보가 충분하지 않아 "
+            "일부 추론을 포함하여 조회하였습니다. "
+            "결과가 예상과 다를 경우 구체적으로 요청해 주세요."
+            f"\n\n{formatted}"
+        )
+
+    # ── 6. 조회 과정 요약 (구조화 dict) ──
+    process_summary = build_process_summary(state)
 
     logger.info(
         "결과 포맷팅 완료",
         response_length=len(formatted),
     )
 
+    # ── 트래킹 ──
+    try:
+        await dispatch_tracking_event(REASONING_STEP, {
+            "node": "format_response",
+            "phase": "present",
+            "step_type": "rule_based",
+            "round": 0,
+            "hypothesis_id": "",
+            "inputs": {
+                "user_input": state.preprocessed_input,
+                "sql_result": (
+                    f"{state.sql_result.row_count if state.sql_result else 0}건"
+                ),
+            },
+            "output": {
+                "format": "rule-based 구조화 응답",
+                "is_force_generated": state.reason.is_force_generated,
+                "process_summary_included": bool(
+                    process_summary,
+                ),
+                "result_data_included": bool(result_data),
+            },
+            "routing": {
+                "next_node": "(완료)",
+                "reason": "최종 응답 생성 완료",
+            },
+        })
+    except Exception as e:
+        logger.warning("포맷팅 트래킹 이벤트 전송 실패", error=str(e))
+
     return {
         "formatted_response": formatted,
+        "result_data": result_data,
+        "process_summary": process_summary,
         "status": QueryStatus.FORMATTED,
         "trace_log": add_trace(
             state, "포맷팅",
             "보고서 형태로 결과 정리 완료",
         ),
     }
-
-
-def _build_inference_disclaimer(
-    inference_notes: list[str],
-    is_force_generated: bool,
-) -> str:
-    """inference_notes 기반 면책 고지를 생성한다."""
-    if not inference_notes:
-        return ""
-
-    if is_force_generated:
-        header = "**참고**: 일부 추론을 포함하여 조회하였습니다."
-    elif len(inference_notes) >= 3:
-        header = "**참고**: 아래 항목은 추론에 기반합니다."
-    else:
-        header = "**참고**:"
-
-    items = "\n".join(
-        f"- {note}" for note in inference_notes
-    )
-    return f"{header}\n{items}"
-
-
-_NO_CODE_MAPPINGS = "해당 없음"
-
-
-def _build_code_mappings(
-    code_map: dict[str, CodeMeta],
-    sql: str | None,
-) -> str:
-    """SQL SELECT 컬럼과 관련된 코드값만 필터링하여 프롬프트 텍스트로 직렬화한다."""
-    if not code_map or not sql:
-        return _NO_CODE_MAPPINGS
-
-    # SELECT alias → 원본 컬럼명 매핑 추출
-    alias_map = extract_select_alias_map(sql)
-
-    # SELECT * 등으로 alias 추출 불가 시 code_map 전체를 폴백 직렬화
-    if not alias_map:
-        return _serialize_code_map(code_map)
-
-    # alias_map에서 원본 컬럼명 수집 (대소문자 무시)
-    result_columns: dict[str, str] = {}  # upper(원본컬럼) → alias
-    for alias, orig_col in alias_map.items():
-        if orig_col:
-            result_columns[orig_col.upper()] = alias
-
-    # code_map에서 결과 컬럼과 매칭되는 것만 필터
-    filtered: dict[str, CodeMeta] = {}
-    for col_name, meta in code_map.items():
-        if not meta.codes:
-            continue
-        if col_name.upper() in result_columns:
-            filtered[col_name] = meta
-
-    if not filtered:
-        return _NO_CODE_MAPPINGS
-
-    return _serialize_code_map(filtered, result_columns)
-
-
-def _serialize_code_map(
-    code_map: dict[str, CodeMeta],
-    display_names: dict[str, str] | None = None,
-) -> str:
-    """code_map을 프롬프트용 텍스트로 직렬화한다.
-
-    Args:
-        code_map: 컬럼명 → CodeMeta 매핑.
-        display_names: upper(원본컬럼) → 출력alias 매핑. None이면 컬럼명을 그대로 사용.
-
-    Returns:
-        "- 대출구분(LOAN_DCD): 01=정상, 02=연체" 형태의 줄 구분 문자열.
-        코드가 없으면 "해당 없음".
-    """
-    lines: list[str] = []
-    for col_name, meta in code_map.items():
-        if not meta.codes:
-            continue
-        display = col_name
-        if display_names:
-            display = display_names.get(
-                col_name.upper(), col_name,
-            )
-        pairs = ", ".join(
-            f"{k}={v}"
-            for k, v in list(meta.codes.items())[:20]
-        )
-        lines.append(f"- {display}({col_name}): {pairs}")
-
-    return "\n".join(lines) if lines else _NO_CODE_MAPPINGS

@@ -39,13 +39,13 @@ SET cd.code_name = row.code_name
 
 // SEED_P1_CODE_PARENT: 동일 code_field 내 계층 (PARENT_OF는 Phase 2에서 추론)
 
-// SEED_P1_GLOSSARY: glossary → (:DomainConcept) 초기 노드
+// SEED_P1_GLOSSARY: biz_term → (:DomainConcept) 초기 노드
 // params: $batch = [{name, definition, synonyms, table_name}]
 UNWIND $batch AS row
 MERGE (d:DomainConcept {name: row.name})
 SET d.definition = coalesce(row.definition, ''),
     d.synonyms = coalesce(row.synonyms, []),
-    d.category = 'glossary',
+    d.category = 'biz_term',
     d.source = 'mongodb_seed'
 WITH d, row
 WHERE row.table_name IS NOT NULL AND row.table_name <> ''

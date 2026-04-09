@@ -22,7 +22,7 @@ DATA_ANALYSIS 유형에서 "차트로 보여줘", "분석해줘" 같은 표현 �
 | reason | `reasoning_preparer` | `reasoning_preparer.py:60` | 쿼리 분해, searched_queries 초기화 |
 | reason | `sql_generator` | `sql_generator.py:211,216,309` | `{original_query}` 템플릿 치환 |
 | reason | `sql_validator` | `sql_validator.py:102` | SQL 검증 시 원본 질의 참조 |
-| reason | `knowledge_interpreter` | `knowledge_interpreter.py:111` | 지식 해석 시 원본 질의 참조 |
+| reason | `context_interpreter` | `context_interpreter.py:111` | 지식 해석 시 원본 질의 참조 |
 | present | `formatter` | `formatter.py:65` | DATA_EXTRACTION 결과 포맷팅 |
 | present | `analyzer` | `analyzer.py:58` | DATA_ANALYSIS 분석/시각화 |
 
@@ -52,7 +52,7 @@ analysis_query     = "이번년도 예금신규 top 10 지점 차트로 보여�
 2. **`analysis_query`를 새로 추가** — DATA_ANALYSIS 전용, 본래 목적(분석/시각화)을 보존하여 present 계층에 전달
 3. **`rewritten_query`는 역할 변경 없음** — preprocessed_input(추출 중심)의 정규화 보조
 4. **DATA_EXTRACTION은 완전 무변경** — analysis_query 미사용, preprocessed_input도 기존과 동일 (표현 지시어 없음)
-5. **CONTINUE 케이스에서도 동일 적용** — context_classifier가 맥락 반영 + 분리를 동시 수행
+5. **CONTINUE 케이스에서도 동일 적용** — intent_classifier가 맥락 반영 + 분리를 동시 수행
 
 ### `rewritten_query`를 reason 계층 primary로 격상하지 않는 이유
 
@@ -65,13 +65,13 @@ analysis_query     = "이번년도 예금신규 top 10 지점 차트로 보여�
 → reason 계층은 원문 어투를 유지한 `preprocessed_input`(표현 지시어만 제거)을 직접 읽는 게 가장 안전하다.
 → `rewritten_query`는 보조 참조로 유지한다.
 
-## 3. 생성 시점: `context_classifier`
+## 3. 생성 시점: `intent_classifier`
 
-context_classifier가 이미 **의도 분류**(DATA_ANALYSIS 판정)와 **맥락 해석**(continue_context)을 수행하므로,
+intent_classifier가 이미 **의도 분류**(DATA_ANALYSIS 판정)와 **맥락 해석**(continue_context)을 수행하므로,
 추출/분석 분리까지 담당하는 것이 가장 자연스럽다.
 한국어 조사 변형("차트로", "차트를", "차트로도")까지 유연하게 처리하려면 LLM 기반이 적합하다.
 
-### 3.1 context_classifier 출력 스키마 변경
+### 3.1 intent_classifier 출력 스키마 변경
 
 DATA_ANALYSIS일 때만 `extraction_focus` 필드를 추가 출력한다.
 
@@ -96,7 +96,7 @@ DATA_ANALYSIS일 때만 `extraction_focus` 필드를 추가 출력한다.
 - DATA_EXTRACTION/CASUAL_TALK/META_QUESTION에서는 빈 문자열 `""`
 - CONTINUE + DATA_ANALYSIS에서는 맥락 반영 + 지시어 제거된 추출 질의
 
-### 3.2 프롬프트 변경: `context_classifier_system.txt`
+### 3.2 프롬프트 변경: `intent_classifier_system.txt`
 
 출력 형식 섹션에 추가:
 
@@ -272,10 +272,10 @@ DATA_ANALYSIS일 때만 작성합니다. 그 외 의도에서는 빈 문자열 "
 
 → DATA_EXTRACTION이므로 extraction_focus 빈 문자열. preprocessed_input은 기존 그대로.
 
-## 4. context_classifier_node 코드 변경
+## 4. intent_classifier_node 코드 변경
 
 ```python
-# context_classifier_node 내부 — 정상 경로 (SKIP / NEW / CONTINUE)
+# intent_classifier_node 내부 — 정상 경로 (SKIP / NEW / CONTINUE)
 
 updates: dict = {
     "intent": result.intent,
@@ -304,20 +304,20 @@ if result.intent == IntentType.DATA_ANALYSIS:
         updates["preprocessed_input"] = extraction
 ```
 
-### context_classifier 서비스 파싱 변경
+### intent_classifier 서비스 파싱 변경
 
-`_parse_response` (context_classifier.py)에서 `extraction_focus` 파싱 추가:
+`_parse_response` (intent_classifier.py)에서 `extraction_focus` 파싱 추가:
 
 ```python
 # 기존 파싱 로직 끝부분에 추가
 result["extraction_focus"] = data.get("extraction_focus", "")
 ```
 
-`ContextClassifyResult`에 필드 추가:
+`IntentClassifyResult`에 필드 추가:
 
 ```python
 @dataclass
-class ContextClassifyResult:
+class IntentClassifyResult:
     resolution: HistoryDecision
     intent: IntentType = IntentType.UNKNOWN
     confidence: float = 0.0
@@ -365,7 +365,7 @@ user_input=state.analysis_query or state.preprocessed_input,
 
 runner.py: preprocessed_input = sanitized.text
     ↓
-context_classifier_node:
+intent_classifier_node:
     intent=DATA_EXTRACTION, extraction_focus="" → preprocessed_input 변경 없음
     analysis_query="" (미설정)
     (CONTINUE 시) preprocessed_input = continue_context
@@ -382,7 +382,7 @@ formatter: preprocessed_input 소비 (기존과 완전 동일)
 runner.py: preprocessed_input = sanitized.text
     예: "이번년도 예금신규 top 10 지점 차트로 보여줘"
     ↓
-context_classifier_node:
+intent_classifier_node:
     intent=DATA_ANALYSIS
     extraction_focus = "이번년도 예금신규 top 10 지점"          (LLM 생성)
     ↓
@@ -402,7 +402,7 @@ analyzer: analysis_query 소비 → 분석/시각화 (본래 목적 참조)
 이전 대화: "최근 6개월 수신잔액 추이 알려줘" → (표)
 현재 입력: "차트로 보여줘"
     ↓
-context_classifier_node:
+intent_classifier_node:
     CONTINUE + DATA_ANALYSIS
     continue_context   = "최근 6개월 수신잔액 추이를 차트로 보여줘"    (맥락 반영)
     extraction_focus   = "최근 6개월 수신잔액 추이"                    (맥락 반영 + 지시어 제거)
@@ -433,7 +433,7 @@ context_classifier_node:
 
 ### extraction_focus 생성 실패 시
 
-context_classifier LLM이 `extraction_focus`를 빈 문자열로 반환하거나 파싱 실패 시:
+intent_classifier LLM이 `extraction_focus`를 빈 문자열로 반환하거나 파싱 실패 시:
 - preprocessed_input은 기존 로직 그대로 (원본 또는 continue_context)
 - analysis_query도 설정하지 않음
 - 기존과 완전히 동일한 동작으로 폴백
@@ -442,9 +442,9 @@ context_classifier LLM이 `extraction_focus`를 빈 문자열로 반환하거나
 
 | 구분 | 변경 내용 | 난이도 |
 |------|----------|--------|
-| `context_classifier_system.txt` | extraction_focus 작성 규칙 + few-shot 6개 추가 | 중 |
-| `context_classifier.py` | `ContextClassifyResult.extraction_focus` 필드, `_parse_response` 파싱 | 저 |
-| `context_classifier_node` | DATA_ANALYSIS 시 preprocessed_input/analysis_query 할당 | 저 |
+| `intent_classifier_system.txt` | extraction_focus 작성 규칙 + few-shot 6개 추가 | 중 |
+| `intent_classifier.py` | `IntentClassifyResult.extraction_focus` 필드, `_parse_response` 파싱 | 저 |
+| `intent_classifier_node` | DATA_ANALYSIS 시 preprocessed_input/analysis_query 할당 | 저 |
 | `state.py` | `analysis_query: str = ""` 필드 추가 | 1줄 |
 | `analyzer.py:58` | `state.analysis_query or state.preprocessed_input` | 1줄 |
 | reason 계층 | **변경 없음** | - |

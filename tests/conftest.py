@@ -104,6 +104,16 @@ def _truncate(obj: object, max_len: int = 500) -> str:
     return s
 
 
+@pytest.fixture(autouse=True)
+def _reset_cancel_store():
+    """각 테스트 전후로 cancel store 싱글턴을 초기화한다."""
+    from src.agents.graph.cancel import reset_cancel_store
+
+    reset_cancel_store()
+    yield
+    reset_cancel_store()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def ensure_log_dir():
     """로그 디렉토리가 존재하는지 확인한다."""

@@ -6,14 +6,15 @@
     from src.agents.state import (
         PipelineState,
         ReasoningState,
-        CandidateTable,
+        TableMeta,
         KeyDateColumn,
         ObservedDateColumn,
     )
 """
 
 from src.agents.state.state import (  # noqa: F401
-    CandidateTable,
+    TableMeta,
+    UseCaseEntry,
     CodeMeta,
     ConfidenceStatus,
     DeadEnd,

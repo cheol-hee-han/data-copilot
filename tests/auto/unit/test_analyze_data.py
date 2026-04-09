@@ -56,7 +56,7 @@ _SKIP_LLM = pytest.mark.skipif(
 
 def _make_state_with_result(rows: list[dict], user_input: str = "데이터 분석해줘"):
     """테스트용 PipelineState 를 생성한다."""
-    from src.agents.state.state import ContextInfo, PipelineState, SQLResult
+    from src.agents.state.state import PipelineState, SQLResult
 
     columns = list(rows[0].keys()) if rows else []
     result = SQLResult(
@@ -69,7 +69,6 @@ def _make_state_with_result(rows: list[dict], user_input: str = "데이터 분�
         user_input=user_input,
         preprocessed_input=user_input,
         sql_result=result,
-        context=ContextInfo(),
     )
 
 

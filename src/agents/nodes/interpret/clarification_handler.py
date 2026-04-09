@@ -1,6 +1,23 @@
 """Unified Clarification 노드 — 모든 명확화의 단일 진입점.
 
-2계층 판정: 가드레일 적용 → ASK/INFER 분리 → ASK 시 interrupt() 1회만 호출.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+파이프라인의 모든 명확화(AmbiguitySignal)를 단일 노드에서 처리한다.
+여러 노드(intent_classifier, normalize_query 등)가 생성한 시그널이
+pending_signals에 누적되면, 이 노드가 한 곳에서 ASK/INFER를 판정한다.
+
+핵심 전략:
+    1. 가드레일 보정: INFER→ASK 단방향만 허용하여 안전 방향으로만 보정한다.
+       금융 산출식(FORMULA) 등 추론 금지 영역은 무조건 ASK로 전환한다.
+    2. 우선순위 선택: ASK 시그널이 여러 개일 때 의존 관계를 반영한
+       _PRIORITY 맵에 따라 가장 먼저 해소해야 할 1개만 interrupt로 질문한다.
+    3. LangGraph interrupt 규칙 준수: interrupt()는 노드 내에서
+       항상 동일 순서로 1회만 호출해야 하므로, 조건 분기 후 단일 호출한다.
+
+설계 결정:
+    - ASK→INFER 역방향 보정을 금지하여 사용자 확인 없이 추론하는 위험을 방지한다.
+    - interrupt 후 resume 시 validate_answer로 응답을 검증하되,
+      검증 실패 시에도 원문을 그대로 사용하여 대화 흐름이 끊기지 않도록 한다.
 
 LangGraph 공식 규칙:
     "interrupt calls should happen in the same order every time,

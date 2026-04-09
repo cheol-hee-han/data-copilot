@@ -213,11 +213,17 @@ GRANT SELECT ON ALL TABLES IN SCHEMA biz_schema TO readonly_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA biz_schema GRANT SELECT ON TABLES TO readonly_user;
 
 -- ============================================================
--- SQL 이력 DB (sys_schema)
+-- SQL 이력 DB (sys_schema + bdptbl)
 -- ============================================================
 \connect history_db;
 
 CREATE SCHEMA IF NOT EXISTS sys_schema;
+
+-- 체크포인터 + Data Copilot 커스텀 테이블 스키마
+CREATE SCHEMA IF NOT EXISTS bdptbl;
+GRANT USAGE, CREATE ON SCHEMA bdptbl TO history_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA bdptbl GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO history_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA bdptbl GRANT USAGE, SELECT ON SEQUENCES TO history_user;
 
 CREATE TABLE sys_schema.sql_exec_log (
     LOG_ID       SERIAL       PRIMARY KEY,

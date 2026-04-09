@@ -1,8 +1,15 @@
 """인메모리(dict) 세션 스토어 — 개발/테스트용.
 
-서버 프로세스 메모리에 대화 이력과 명확화 상태를 저장한다.
-서버 재시작 시 모든 세션 데이터가 소실된다.
-max_sessions 초과 시 FIFO 방식으로 가장 오래된 세션을 제거한다.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+서버 프로세스 메모리에 대화 이력을 저장한다.
+서버 재시작 시 모든 세션 데이터가 소실되므로 운영에서는 RedisSessionStore를 사용한다.
+max_sessions 초과 시 dict 삽입 순서(Python 3.7+)를 활용한 FIFO 방식으로
+가장 오래된 세션을 제거하여 메모리 사용량을 제한한다.
+
+connect/disconnect는 no-op이며, health_check는 항상 True를 반환한다.
+이를 통해 SessionStore 인터페이스와의 호환성을 유지하면서
+외부 의존 없이 즉시 사용 가능하다.
 """
 
 from __future__ import annotations

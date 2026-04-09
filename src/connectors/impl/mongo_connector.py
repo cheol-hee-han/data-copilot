@@ -1,9 +1,11 @@
 """MongoDB 커넥터 — 테이블 메타·코드 메타·용어사전 조회 게이트웨이.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 5개의 MongoDB 컬렉션에 대한 조회를 통합 제공한다:
   - dpasset_table + dpasset_column: 테이블/컬럼 메타 (aggregation $lookup)
   - standard_code + standard_code_value: 코드값 정의 (aggregation $lookup)
-  - glossary: 업무 용어사전 (dpasset_table과 $lookup)
+  - biz_term: 업무 용어사전 (dpasset_table과 $lookup)
 
 파이프라인 템플릿: resources/connectors/mongo/pipeline_*.json 에서 로드.
 $match 단계는 입력 조건에 따라 코드에서 동적으로 구성한다.
@@ -35,6 +37,9 @@ logger = get_logger(__name__)
 
 # ── MongoDB 연산자 상수 ──
 _MATCH = "$match"
+_SORT = "$sort"
+_SKIP = "$skip"
+_LIMIT = "$limit"
 
 # ── 파이프라인 템플릿 로드 (모듈 초기화 시 1회) ──
 _TPL_TABLE_META = load_mongo_pipeline(
@@ -43,8 +48,8 @@ _TPL_TABLE_META = load_mongo_pipeline(
 _TPL_CODE_META = load_mongo_pipeline(
     "connectors/mongo/pipeline_code_meta.json",
 )
-_TPL_GLOSSARY = load_mongo_pipeline(
-    "connectors/mongo/pipeline_glossary.json",
+_TPL_BIZ_TERM = load_mongo_pipeline(
+    "connectors/mongo/pipeline_biz_term.json",
 )
 
 
@@ -135,15 +140,17 @@ class MongoConnector(SearchConnector):
         self._db: Any = None
 
     async def connect(self) -> None:
-        """MongoDB 연결 초기화."""
+        """MongoDB 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("MongoDB Dummy 모드로 초기화")
             return
 
+        from urllib.parse import quote_plus
+
         from motor.motor_asyncio import AsyncIOMotorClient
 
         connection_uri = (
-            f"mongodb://{settings.mongo_user}:{settings.mongo_password}"
+            f"mongodb://{quote_plus(settings.mongo_user)}:{quote_plus(settings.mongo_password)}"
             f"@{settings.mongo_host}:{settings.mongo_port}"
             f"/{settings.mongo_database}?authSource=admin"
         )
@@ -155,32 +162,33 @@ class MongoConnector(SearchConnector):
         logger.info("MongoDB 연결 완료", database=settings.mongo_database)
 
     async def disconnect(self) -> None:
-        """MongoDB 연결 종료."""
+        """MongoDB 연결을 종료한다."""
         if self._client:
             self._client.close()
             logger.info("MongoDB 연결 종료")
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         try:
             await self._client.admin.command("ping")
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     async def search(
         self, query: str, **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """통합 검색."""
+        """search_type 파라미터에 따라 적절한 검색 메서드로 디스패치한다."""
         search_type = kwargs.get("search_type", "table_meta")
         if search_type == "table_meta":
             return await self.search_table_meta(query, **kwargs)
         elif search_type == "code_meta":
             return await self.search_code_meta(query, **kwargs)
-        elif search_type == "glossary":
-            return await self.search_glossary(query, **kwargs)
+        elif search_type == "biz_term":
+            return await self.search_biz_terms(query, **kwargs)
         return []
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -208,6 +216,8 @@ class MongoConnector(SearchConnector):
 
         table_names: list[str] = kwargs.get("table_names", [])
         limit = kwargs.get("limit", settings.mongo_table_meta_size)
+        page: int = kwargs.get("page", 1)
+        skip = (page - 1) * limit
         _start = _time.perf_counter()
 
         if table_names:
@@ -228,12 +238,23 @@ class MongoConnector(SearchConnector):
             query, fields=["alt_name", "desc", "name"],
         ) if not table_names else []
 
+        # $sort 안정화: _id tiebreaker 추가 (SERVER-51498 대응)
+        # 순서 핵심: sort → skip → limit → project
+        # $project에서 _id: 0으로 제거하므로, 정렬/페이징은 반드시 project 이전에 수행
+        sort_stage = (
+            {_SORT: {"_keyword_score": -1, "_id": 1}}
+            if score_stages
+            else {_SORT: {"_id": 1}}
+        )
+
         pipeline = [
             match_stage,
             *score_stages,
             lookup,
+            sort_stage,
+            {_SKIP: skip},
+            {_LIMIT: limit},
             _TPL_TABLE_META["project"],
-            {"$limit": limit},
         ]
 
         collection = self._db[settings.mongo_table_meta_collection]
@@ -265,6 +286,8 @@ class MongoConnector(SearchConnector):
 
         code_names: list[str] = kwargs.get("code_names", [])
         limit = kwargs.get("limit", settings.mongo_code_meta_size)
+        page: int = kwargs.get("page", 1)
+        skip = (page - 1) * limit
         _start = _time.perf_counter()
 
         if code_names:
@@ -281,8 +304,10 @@ class MongoConnector(SearchConnector):
         pipeline = [
             match_stage,
             lookup,
+            {_SORT: {"_id": 1}},
+            {_SKIP: skip},
+            {_LIMIT: limit},
             _TPL_CODE_META["project"],
-            {"$limit": limit},
         ]
 
         collection = self._db[settings.mongo_code_meta_collection]
@@ -310,32 +335,35 @@ class MongoConnector(SearchConnector):
         return results
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # 용어사전 검색 (glossary + dpasset_table $lookup)
+    # 비즈니스 용어 검색 (biz_term + dpasset_table $lookup)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    async def search_glossary(
+    async def search_biz_terms(
         self, query: str, **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """업무 용어사전을 검색한다.
+        """비즈니스 용어사전을 검색한다.
 
         반환 형식:
-          [{"name", "synonyms", "glossary_definition", "table_name", "table_description"}]
+          [{"name", "synonyms", "biz_term_definition", "table_name", "table_description"}]
         """
         if self._use_dummy:
             return search_dummy_table_meta(query)  # 임시 fallback
 
         term_names: list[str] = kwargs.get("term_names", [])
+        limit = kwargs.get("limit", settings.mongo_biz_term_size)
+        page: int = kwargs.get("page", 1)
+        skip = (page - 1) * limit
         _start = _time.perf_counter()
 
         if term_names:
             match_stage = {_MATCH: {"name": {"$in": term_names}}}
         else:
             match_stage = {_MATCH: _build_regex_match(
-                query, fields=["name", "glossary_definition"],
+                query, fields=["name", "biz_term_definition"],
             )}
 
         lookup = _resolve_collection_ref(
-            _TPL_GLOSSARY["lookup"],
+            _TPL_BIZ_TERM["lookup"],
             "${table_meta_collection}",
             settings.mongo_table_meta_collection,
         )
@@ -343,16 +371,19 @@ class MongoConnector(SearchConnector):
         pipeline = [
             match_stage,
             lookup,
-            _TPL_GLOSSARY["unwind"],
-            _TPL_GLOSSARY["project"],
+            _TPL_BIZ_TERM["unwind"],
+            {_SORT: {"_id": 1, "name": 1}},
+            {_SKIP: skip},
+            {_LIMIT: limit},
+            _TPL_BIZ_TERM["project"],
         ]
 
-        collection = self._db[settings.mongo_glossary_collection]
+        collection = self._db[settings.mongo_biz_term_collection]
         results = await collection.aggregate(pipeline).to_list(length=None)
         _elapsed = (_time.perf_counter() - _start) * 1000
 
         logger.info(
-            "MongoDB 용어사전 검색",
+            "MongoDB 비즈니스 용어 검색",
             query=truncate_log(query) if not term_names else str(term_names),
             count=len(results),
             latency_ms=round(_elapsed, 1),

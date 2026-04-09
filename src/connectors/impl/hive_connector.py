@@ -1,5 +1,7 @@
 """Hive 커넥터 — Cloudera CDP 7.1.9 Hive 3.1.3 읽기 전용 쿼리 실행.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 Cloudera CDP 7.1.9 환경의 HiveServer2에 Thrift 프로토콜로 연결한다.
 Impala 커넥터와 동일하게 impyla 라이브러리를 사용하며,
 HiveServer2 포트(기본 10000)로 연결하는 점이 다르다.
@@ -24,7 +26,7 @@ import re
 from typing import Any
 
 from src.config import settings
-from src.connectors.interfaces import DatabaseConnector
+from src.connectors.interfaces import DatabaseConnector, sanitize_row
 from src.connectors.dummy_data import generate_dummy_data
 from src.utils.logger import get_logger
 from src.utils.truncate import truncate_log
@@ -52,7 +54,7 @@ class HiveConnector(DatabaseConnector):
         self._conn: Any = None
 
     async def connect(self) -> None:
-        """Hive 연결 초기화."""
+        """Hive 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("Hive Dummy 모드로 초기화")
             return
@@ -82,13 +84,13 @@ class HiveConnector(DatabaseConnector):
         )
 
     async def disconnect(self) -> None:
-        """Hive 연결 종료."""
+        """Hive 연결을 종료한다."""
         if self._conn:
             await asyncio.to_thread(self._conn.close)
             self._conn = None
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         try:
@@ -100,7 +102,8 @@ class HiveConnector(DatabaseConnector):
                 return True
 
             return await asyncio.to_thread(_ping)
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     async def execute_query(
@@ -129,7 +132,7 @@ class HiveConnector(DatabaseConnector):
                 desc[0] for desc in cursor.description
             ]
             rows = [
-                dict(zip(columns, row))
+                sanitize_row(dict(zip(columns, row)))
                 for row in cursor.fetchall()
             ]
             cursor.close()

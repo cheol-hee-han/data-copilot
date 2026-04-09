@@ -103,7 +103,7 @@
       "cases": [
         {"id": "E06-001", "query": "잔액 알려줘", "ambiguity": "예금 잔액? 대출 잔액? 어떤 테이블?", "expected_action": "clarification", "difficulty": "easy"},
         {"id": "E06-002", "query": "고객 정보 뽑아줘", "ambiguity": "어떤 고객 정보? 전체 목록? 특정 조건?", "expected_action": "clarification", "difficulty": "easy"},
-        {"id": "E06-003", "query": "VIP 현황 보여줘", "ambiguity": "CUS_GRD_CD VIP? MKT_GRD_CD VIP? 용어사전 참조 필요", "expected_action": "explore_glossary", "difficulty": "medium"},
+        {"id": "E06-003", "query": "VIP 현황 보여줘", "ambiguity": "CUS_GRD_CD VIP? MKT_GRD_CD VIP? 용어사전 참조 필요", "expected_action": "explore_biz_terms", "difficulty": "medium"},
         {"id": "E06-004", "query": "연체 현황", "ambiguity": "연체 건수? 연체율? 연체금액? 어떤 관점?", "expected_action": "clarification", "difficulty": "medium"},
         {"id": "E06-005", "query": "실적 좀 알려줘", "ambiguity": "어떤 실적? 대출실적? 카드실적? 기간?", "expected_action": "clarification", "difficulty": "medium"},
         {"id": "E06-006", "query": "등급별로 분석해줘", "ambiguity": "고객등급? 연체등급? 신용등급? 마케팅등급?", "expected_action": "clarification", "difficulty": "medium"},
@@ -160,7 +160,7 @@
       "expected_path": "각 턴마다 독립적 AgenticCoreState 생성 검증",
       "cases": [
         {"id": "E09-001", "scenario": "새 세션에서 첫 질의", "query": "고객 수 알려줘", "expected": "깨끗한 AgenticCoreState", "verify": "dead_ends=[], knowledge_items=[]"},
-        {"id": "E09-002", "scenario": "같은 세션 두 번째 독립 질의", "query": "대출 현황 알려줘", "expected": "이전 질의 상태 미유출", "verify": "dead_ends=[], candidate_tables=[]"},
+        {"id": "E09-002", "scenario": "같은 세션 두 번째 독립 질의", "query": "대출 현황 알려줘", "expected": "이전 질의 상태 미유출", "verify": "dead_ends=[], explored_tables=[]"},
         {"id": "E09-003", "scenario": "명확화 후 재진입 (같은 turn_id)", "query": "잔액 → 예금 잔액", "expected": "이전 탐색 상태 유지", "verify": "knowledge_items 보존"},
         {"id": "E09-004", "scenario": "명확화 왕복 2회 후 자동 진행", "query": "데이터 → 모호 → 모호", "expected": "max turns 후 강제 진행", "verify": "clarification_turns >= 2"},
         {"id": "E09-005", "scenario": "긴 대화 이력 (20턴)", "query": "그거 다시 뽑아줘", "expected": "conversation_history 20건 전달", "verify": "len(history) == 20"},

@@ -1,5 +1,7 @@
 """추출된 데이터에 대한 LLM 분석 및 시각화 생성 서비스.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 SQL 실행 결과를 LLM에 전달하여 요약(summary), 인사이트(insights),
 통계(statistics)를 포함하는 구조화된 분석 결과를 생성한다.
 분석 후 시각화 파이프라인을 통해 차트를 추가한다:
@@ -26,6 +28,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Awaitable, Callable
 
 from src.config import settings
 from src.models.enums import VisualizationType
@@ -170,6 +173,7 @@ async def generate_svg_via_llm(
 
     text = response.content[0].text.strip()
 
+    # LLM이 코드 블록으로 감싸는 경우 내부 내용만 추출
     if "```svg" in text:
         text = (
             text.split("```svg")[1].split("```")[0].strip()
@@ -203,15 +207,17 @@ async def build_visualization(
     viz_judgment_user: str,
     viz_svg_system: str,
     viz_svg_user: str,
+    is_cancelled: Callable[[], Awaitable[bool]] | None = None,
 ) -> VisualizationData:
     """SQL 결과로부터 시각화 데이터를 생성한다."""
     from src.services.response_formatter import (
-        rows_to_markdown_table,
+        format_report_table,
     )
 
-    data_summary = rows_to_markdown_table(
+    data_summary = format_report_table(
         result.columns,
         result.rows,
+        column_formats={},
         max_rows=settings.analysis_max_rows,
     )
 
@@ -221,6 +227,9 @@ async def build_visualization(
         user_template=viz_judgment_user,
     )
     if chart_type == VisualizationType.NONE:
+        return VisualizationData()
+
+    if is_cancelled and await is_cancelled():
         return VisualizationData()
 
     logger.info(
@@ -271,6 +280,7 @@ async def analyze_data(
     viz_svg_system: str,
     viz_svg_user: str,
     min_rows_for_viz: int,
+    is_cancelled: Callable[[], Awaitable[bool]] | None = None,
 ) -> tuple[AnalysisResult, VisualizationData]:
     """추출 데이터를 분석하고 시각화를 생성한다.
 
@@ -301,12 +311,13 @@ async def analyze_data(
         )
 
     from src.services.response_formatter import (
-        rows_to_markdown_table,
+        format_report_table,
     )
 
-    query_result_str = rows_to_markdown_table(
+    query_result_str = format_report_table(
         sql_result.columns,
         sql_result.rows,
+        column_formats={},
         max_rows=settings.analysis_max_rows,
     )
     user_message = user_template.format(
@@ -347,12 +358,15 @@ async def analyze_data(
 
     viz = VisualizationData()
     if sql_result.row_count >= min_rows_for_viz:
+        if is_cancelled and await is_cancelled():
+            return analysis, viz
         viz = await build_visualization(
             sql_result,
             viz_judgment_prompt=viz_judgment_prompt,
             viz_judgment_user=viz_judgment_user,
             viz_svg_system=viz_svg_system,
             viz_svg_user=viz_svg_user,
+            is_cancelled=is_cancelled,
         )
 
     return analysis, viz

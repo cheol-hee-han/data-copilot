@@ -1,12 +1,15 @@
 """biz_manual + sql_history 데이터 생성기.
 
 biz_manual: 500+ 업무 매뉴얼 (비즈니스 용어로만, IT용어 금지)
-sql_history: 10,000+ SQL + description 쌍
+sql_history: 25,000+ SQL + description 쌍 (572 테이블 전체 커버)
 """
 from __future__ import annotations
 
+import re
 import random
 from datetime import date, timedelta
+from pathlib import Path
+from typing import NamedTuple
 
 random.seed(42)
 
@@ -337,356 +340,1582 @@ def generate_biz_manual_data() -> list[dict]:
 
 
 # ══════════════════════════════════════════════════════════════
-# sql_history 생성 (10,000+)
+# sql_history 생성 (25,000+) — 572 테이블 전체 커버
 # ══════════════════════════════════════════════════════════════
 
-# 주요 테이블-컬럼 매핑 (SQL 생성에 사용)
-_TABLES = {
+# 설정 가능한 스키마명 (폐쇄망 배포 시 변경)
+_SCHEMA = "ADWOWN"
+# 테스트 기준일 (seed_postgres.py의 TODAY와 동일)
+_REF_DATE = date(2026, 3, 21)
+_REF_DATE_STR = _REF_DATE.isoformat()
+
+
+class _TblDef(NamedTuple):
+    """테이블 정의."""
+    name: str
+    pk: list[str]
+    cols: list[str]
+    std_dt: str | None  # 기준일 컬럼명 (없으면 None)
+    domain: str
+    ttype: str  # M, D, L, H, S, P, G, C
+
+
+# ── Star 테이블 (22개) — 실제 PostgreSQL DDL 기반 정확한 컬럼 ──
+
+_STAR: dict[str, _TblDef] = {}
+
+
+def _s(name: str, pk: str, cols: str, std_dt: str | None,
+       domain: str, ttype: str) -> None:
+    _STAR[name] = _TblDef(
+        name=name, pk=pk.split(", "), cols=cols.split(", "),
+        std_dt=std_dt, domain=domain, ttype=ttype)
+
+
+# 공통
+_s("TB_ADW_COM001M", "BLNG_BRCD",
+   "BR_NM, RGN_CD, RGN_NM, BR_DCD", None, "COM", "M")
+_s("TB_ADW_COM002M", "GRD_CD",
+   "GRD_NM, GRD_DESC", None, "COM", "M")
+# 고객
+_s("TB_ADW_CSC101M", "EDPS_CSN, STD_DT",
+   "CSM, CUS_DCD, JOIN_DT, BLNG_BRCD, GNDR_DCD, AGE_GRP_CD, "
+   "CUS_GRD_CD, TEL_NO, EMAIL_ADR", "STD_DT", "CUS", "M")
+_s("TB_ADW_CSC102H", "EDPS_CSN, STD_DT",
+   "CSM, CUS_DCD, RGST_DT, BLNG_BRCD, GNDR_DCD, AGE_GRP_CD, "
+   "CUS_GRD_CD, CUS_ADR, PHONE_NO", "STD_DT", "CUS", "H")
+_s("TB_ADW_CSP103M", "EDPS_CSN",
+   "CSM, CUS_DCD, MKT_GRD_CD, BLNG_BRCD, AGE_GRP_CD, "
+   "GNDR_DCD, PREF_CHN_DCD", None, "CUS", "M")
+# 수신
+_s("TB_ADW_DEP201P", "ACN, STD_DT",
+   "EDPS_CSN, ACT_DCD, BAL_AMT, OPEN_DT, BLNG_BRCD, "
+   "PD_CD, PD_NM, APLY_RT, ACT_STCD", "STD_DT", "DEP", "P")
+_s("TB_ADW_DEP202S", "ACN, BASE_DT",
+   "EDPS_CSN, ACT_DCD, TOT_BAL_AMT, OPEN_DT, BLNG_BRCD, "
+   "PD_CD", "BASE_DT", "DEP", "S")
+# 여신
+_s("TB_ADW_LNB301M", "LN_NO, STD_DT",
+   "EDPS_CSN, LN_EXC_AMT, LN_BAL_AMT, LN_DT, MTRTY_DT, "
+   "APLY_RT, LN_DCD, LN_STCD, OVDU_GRD_CD, OVDU_DY_CN, "
+   "OVDU_AMT, BLNG_BRCD", "STD_DT", "LN", "M")
+_s("TB_ADW_LNB302M", "LN_NO",
+   "EDPS_CSN, LN_APR_AMT, APPR_DT, LN_DCD, LN_PUSE_CD, "
+   "CLTR_DCD, APLY_RT, MTRTY_DT, BLNG_BRCD", None, "LN", "M")
+# 카드
+_s("TB_ADW_CRD401M", "CRD_NO, STD_DT",
+   "EDPS_CSN, CRD_DCD, ISS_DT, EXPR_DT, MON_USE_AMT, "
+   "FLG_YN, BLNG_BRCD", "STD_DT", "CRD", "M")
+# 외환
+_s("TB_ADW_FXD501L", "DL_NO",
+   "FX_DL_DCD, CCY_CD, DL_AMT, DL_RT, SETL_DT, "
+   "EDPS_CSN, BLNG_BRCD", None, "FX", "L")
+_s("TB_ADW_FXB502M", "CCY_CD, BASE_DT",
+   "BASE_RT, BUY_RT, SELL_RT", "BASE_DT", "FX", "M")
+# 펀드
+_s("TB_ADW_FND601P", "FND_ACN, STD_DT",
+   "EDPS_CSN, FUND_CD, BAL_AMT, ORGNL_AMT, FND_DCD, "
+   "RSK_GRD_CD, BLNG_BRCD", "STD_DT", "FND", "P")
+_s("TB_ADW_FND602P", "FND_ACN, STD_DT",
+   "EDPS_CSN, FUND_CD, EVAL_AMT, ERNS_RT, FND_DCD, "
+   "BLNG_BRCD", "STD_DT", "FND", "P")
+# 거래
+_s("TB_ADW_TRX701L", "TR_ID, TR_DT",
+   "ACN, TR_TM, TR_AMT, TR_DCD, BLNG_BRCD, CHN_CD",
+   "TR_DT", "TRX", "L")
+# 보험
+_s("TB_ADW_INS803M", "INS_NO",
+   "EDPS_CSN, INS_DCD, INS_PD_CD, INS_STCD, CNTR_DT, "
+   "EFF_DT, EXP_DT, INS_AMT, BLNG_BRCD", None, "INS", "M")
+# 연금
+_s("TB_ADW_PNB904P", "PLAN_NO, EDPS_CSN, STD_DT",
+   "TOT_BAL_AMT, PN_DCD, EMPLOYER_NO, BLNG_BRCD",
+   "STD_DT", "PN", "P")
+# 리스크
+_s("TB_ADW_RSK1101M", "IND_CD, STD_DT",
+   "IND_NM, IND_VAL, IND_UNIT, LIMIT_VAL, CALC_DT",
+   "STD_DT", "RSK", "M")
+# 마케팅
+_s("TB_ADW_MKT1201M", "CAMP_CD",
+   "CAMP_NM, CAMP_STCD, CAMP_TGT_DCD, START_DT, END_DT, "
+   "BUDGET_AMT, BLNG_BRCD", None, "MKT", "M")
+_s("TB_ADW_MKT1202M", "CAMP_CD, EDPS_CSN",
+   "RESP_YN, CONTACT_DT, CONTACT_CHN_CD", None, "MKT", "M")
+# 재무
+_s("TB_ADW_FIN1306S", "BLNG_BRCD, BASE_YM, PL_ITEM_CD",
+   "AMT, PL_ITEM_NM, CALC_DT", None, "FIN", "S")
+# WM
+_s("TB_ADW_WMB1401M", "EDPS_CSN",
+   "CSM, WM_GRD_CD, INVEST_PRFL_CD, PB_EMN, TOT_ASSET_AMT, "
+   "BLNG_BRCD", None, "WM", "M")
+
+
+# ── 코드값 매핑 (CODE_META_DOCS 기반, 정확한 값) ────────────
+
+_CODES: dict[str, dict[str, str]] = {
+    "CUS_DCD": {"01": "개인", "02": "법인", "03": "개인사업자"},
+    "CUS_GRD_CD": {
+        "01": "VIP", "02": "우수", "03": "일반",
+        "04": "잠재", "05": "관리",
+    },
+    "MKT_GRD_CD": {
+        "A": "최우수", "B": "우수", "C": "일반",
+        "D": "관심", "E": "휴면",
+    },
+    "ACT_DCD": {
+        "01": "보통예금", "02": "정기예금",
+        "03": "적금", "04": "MMF",
+    },
+    "ACT_STCD": {"01": "정상", "02": "해지", "03": "휴면"},
+    "LN_DCD": {
+        "01": "신용대출", "02": "담보대출", "03": "보증대출",
+    },
+    "LN_STCD": {
+        "01": "정상", "02": "기한이익상실", "03": "연체",
+        "04": "대위변제", "05": "상각",
+    },
+    "OVDU_GRD_CD": {
+        "A": "정상", "B": "요주의", "C": "고정",
+        "D": "회수의문", "E": "추정손실",
+    },
+    "LN_PUSE_CD": {
+        "01": "주택구입", "02": "전세자금", "03": "사업자금",
+        "04": "생활자금", "05": "기타",
+    },
+    "CLTR_DCD": {
+        "01": "부동산", "02": "유가증권",
+        "03": "예적금", "04": "무담보",
+    },
+    "CRD_DCD": {
+        "01": "신용카드", "02": "체크카드", "03": "선불카드",
+    },
+    "CHN_CD": {
+        "01": "영업점", "02": "인터넷뱅킹",
+        "03": "모바일뱅킹", "04": "ATM",
+    },
+    "FX_DL_DCD": {
+        "01": "현물매입", "02": "현물매도",
+        "03": "선물환", "04": "스왑", "05": "옵션",
+    },
+    "CCY_CD": {
+        "USD": "미국달러", "EUR": "유로", "JPY": "일본엔",
+        "GBP": "영국파운드", "CNY": "중국위안",
+    },
+    "FND_DCD": {
+        "01": "주식형", "02": "채권형",
+        "03": "혼합형", "04": "MMF",
+    },
+    "RSK_GRD_CD": {
+        "1": "매우높은위험", "2": "높은위험",
+        "3": "다소높은위험", "4": "보통위험", "5": "낮은위험",
+    },
+    "INS_DCD": {
+        "L": "생명보험", "N": "손해보험", "H": "건강보험",
+    },
+    "INS_STCD": {
+        "01": "유지", "02": "실효", "03": "해지", "04": "만기",
+    },
+    "PAY_STCD": {
+        "01": "정상납입", "02": "미납", "03": "완납",
+    },
+    "PN_DCD": {
+        "DB": "확정급여형", "DC": "확정기여형",
+        "IRP": "개인형퇴직연금",
+    },
+    "CAMP_STCD": {"01": "계획", "02": "실행", "03": "종료"},
+    "WM_GRD_CD": {
+        "WM_VIP": "WM VIP", "WM_PREMIUM": "WM프리미엄",
+        "WM_GOLD": "WM골드", "WM_STANDARD": "WM일반",
+    },
+    "INVEST_PRFL_CD": {
+        "1": "안정형", "2": "안정추구형", "3": "위험중립형",
+        "4": "적극투자형", "5": "공격투자형",
+    },
+    "GNDR_DCD": {"M": "남성", "F": "여성"},
+    "AGE_GRP_CD": {
+        "20": "20대", "30": "30대", "40": "40대",
+        "50": "50대", "60": "60대이상",
+    },
+    "BR_DCD": {"01": "본점", "02": "지점", "03": "출장소"},
+    "ALERT_LVL_CD": {"H": "높음", "M": "중간", "L": "낮음"},
+    "RESP_YN": {"Y": "응답", "N": "미응답"},
+    "FLG_YN": {"Y": "해당", "N": "미해당"},
+    "STS_DCD": {"01": "활성", "02": "비활성", "03": "정지"},
+    "CRSC_GRD_CD": {
+        "AAA": "최우량", "AA": "우량", "A": "양호",
+        "BBB": "보통", "BB": "주의", "B": "취약",
+    },
+    "RSK_STAGE_CD": {
+        "1": "Stage1-정상", "2": "Stage2-유의적증가",
+        "3": "Stage3-신용손상",
+    },
+    "PL_ITEM_CD": {
+        "NII": "순이자이익", "NFI": "비이자이익",
+        "OPEX": "판매관리비", "PROV": "충당금전입",
+        "PRETAX": "세전이익", "NET": "당기순이익",
+    },
+    "IND_CD": {
+        "BIS_RATIO": "BIS자기자본비율", "LCR": "유동성커버리지비율",
+        "NIM": "순이자마진", "ROA": "총자산순이익률",
+        "NPL_RATIO": "부실채권비율",
+    },
+    "RGN_CD": {
+        "01": "서울", "02": "경기", "03": "인천",
+        "04": "대전", "05": "대구", "06": "부산",
+    },
+}
+
+
+def _cd(code_field: str) -> str:
+    """코드 필드에서 랜덤 값 하나."""
+    return random.choice(list(_CODES[code_field].keys()))
+
+
+def _cd_label(code_field: str, val: str) -> str:
+    """코드값 → 한글 라벨."""
+    return _CODES.get(code_field, {}).get(val, val)
+
+
+def _tbl(name: str) -> str:
+    """스키마 접두사 포함 테이블명."""
+    return f"{_SCHEMA}.{name}"
+
+
+def _rnd_date_str(days_back: int = 365) -> str:
+    """기준일로부터 days_back 이내 랜덤 날짜."""
+    d = _REF_DATE - timedelta(days=random.randint(0, days_back))
+    return d.isoformat()
+
+
+def _rnd_amt() -> tuple[int, str]:
+    """랜덤 금액 + 설명 텍스트."""
+    amt = random.choice([
+        1_000_000, 5_000_000, 10_000_000,
+        50_000_000, 100_000_000, 500_000_000,
+    ])
+    if amt >= 100_000_000:
+        desc = f"{amt // 100_000_000}억원"
+    else:
+        desc = f"{amt // 10_000:,}만원"
+    return amt, desc
+
+
+def _rnd_period() -> tuple[str, str]:
+    """랜덤 시작~종료 날짜."""
+    sd = _REF_DATE - timedelta(days=random.randint(30, 365))
+    ed = sd + timedelta(days=random.randint(30, 180))
+    if ed > _REF_DATE:
+        ed = _REF_DATE
+    return sd.isoformat(), ed.isoformat()
+
+
+# ── Non-star 테이블 도메인-타입 매핑 ──────────────────────────
+# seed_postgres.py의 _DOMAIN_GROUP과 동기화
+
+_DOMAIN_GROUP: dict[str, str] = {
+    "COM": "COM",
+    "CSC": "CUS", "CSP": "CUS", "CUS": "CUS",
+    "DEP": "DEP", "DEA": "DEP", "DEPS": "DEP",
+    "LNB": "LN", "LNR": "LN", "LNA": "LN",
+    "LNC": "LN", "LNCL": "LN",
+    "CRD": "CRD", "CRU": "CRD", "CRDB": "CRD",
+    "FXD": "FX", "FXB": "FX", "TRD": "FX",
+    "FND": "FND", "TRS": "FND", "ELS": "FND", "BND": "FND",
+    "TRX": "TRX", "TXP": "TRX",
+    "INS": "INS", "INSP": "INS",
+    "PNB": "PN", "PNI": "PN",
+    "DGB": "DG", "DGA": "DG", "MYDT": "DG",
+    "RSK": "RSK", "AML": "AML", "FDS": "RSK", "CMP": "RSK",
+    "MKT": "MKT", "CRM": "MKT",
+    "FIN": "FIN", "GLB": "FIN", "BUDG": "FIN",
+    "WMB": "WM", "WMR": "WM",
+}
+
+# 도메인별 주요 비즈니스 컬럼 (non-star SQL 생성에 사용)
+_DOMAIN_COLS: dict[str, dict] = {
     "CUS": {
-        "TB_ADW_CSC101M": {"pk": "EDPS_CSN, STD_DT", "cols": ["CSM", "CUS_DCD", "JOIN_DT", "BLNG_BRCD", "GENDER_CD", "AGE_GRP_CD", "CUS_GRD_CD"], "std_dt": "STD_DT"},
-        "TB_ADW_CSC102H": {"pk": "EDPS_CSN, STD_DT", "cols": ["CSM", "CUS_DCD", "RGST_DT", "BLNG_BRCD", "GENDER_CD", "AGE_GRP_CD", "CUS_GRD_CD", "ADDR"], "std_dt": "STD_DT"},
-        "TB_ADW_CSP103M": {"pk": "EDPS_CSN", "cols": ["CSM", "CUS_DCD", "MKT_GRD_CD", "BLNG_BRCD", "AGE_GRP_CD", "GENDER_CD", "PREF_CHANNEL"], "std_dt": None},
+        "entity_id": "EDPS_CSN",
+        "codes": ["CUS_DCD", "CUS_GRD_CD", "GNDR_DCD",
+                  "AGE_GRP_CD", "STS_DCD"],
+        "amounts": [],
+        "dates": ["JOIN_DT"],
+        "names": ["CSM"],
+        "desc_ko": "고객",
     },
     "DEP": {
-        "TB_ADW_DEP201P": {"pk": "ACN, STD_DT", "cols": ["EDPS_CSN", "ACT_DCD", "BAL_AMT", "OPEN_DT", "BLNG_BRCD", "PD_CD", "PD_NM", "INT_RT", "ACT_STCD"], "std_dt": "STD_DT"},
-        "TB_ADW_DEP202S": {"pk": "ACN, BASE_DT", "cols": ["EDPS_CSN", "ACT_DCD", "TOT_BAL_AMT", "OPEN_DT", "BLNG_BRCD", "PD_CD"], "std_dt": "BASE_DT"},
+        "entity_id": "ACN",
+        "codes": ["ACT_DCD", "ACT_STCD"],
+        "amounts": ["BAL_AMT"],
+        "dates": ["OPEN_DT", "MAT_DT"],
+        "names": ["PD_NM"],
+        "desc_ko": "수신",
     },
-    "LON": {
-        "TB_ADW_LNB301M": {"pk": "LN_NO, STD_DT", "cols": ["EDPS_CSN", "LN_EXC_AMT", "LN_BAL_AMT", "LN_DT", "MTRTY_DT", "INT_RT", "LN_DCD", "LN_STCD", "OVDU_GRD_CD", "OVDU_DAYS", "OVDU_AMT", "BLNG_BRCD"], "std_dt": "STD_DT"},
-        "TB_ADW_LNB302M": {"pk": "LN_NO", "cols": ["EDPS_CSN", "LN_APR_AMT", "LN_APR_DT", "LN_DCD", "LN_PUSE_CD", "CLTR_DCD", "INT_RT", "MTRTY_DT", "BLNG_BRCD"], "std_dt": None},
+    "LN": {
+        "entity_id": "LN_NO",
+        "codes": ["LN_DCD", "LN_STCD", "OVDU_GRD_CD",
+                  "CLTR_DCD", "LN_PUSE_CD"],
+        "amounts": ["LN_BAL_AMT"],
+        "dates": [],
+        "names": [],
+        "desc_ko": "여신",
     },
     "CRD": {
-        "TB_ADW_CRD401M": {"pk": "CRD_NO, STD_DT", "cols": ["EDPS_CSN", "CRD_DCD", "ISS_DT", "EXPR_DT", "MON_USE_AMT", "FLG_YN", "BLNG_BRCD"], "std_dt": "STD_DT"},
+        "entity_id": "CRD_NO",
+        "codes": ["CRD_DCD", "STS_DCD"],
+        "amounts": ["USE_AMT", "CRD_LIMIT_AMT"],
+        "dates": ["ISSUE_DT"],
+        "names": [],
+        "desc_ko": "카드",
+    },
+    "FX": {
+        "entity_id": "DL_NO",
+        "codes": ["CCY_CD", "FX_DL_DCD"],
+        "amounts": ["DL_AMT"],
+        "dates": ["DL_DT", "SETL_DT"],
+        "names": [],
+        "desc_ko": "외환",
+    },
+    "FND": {
+        "entity_id": "FND_ACN",
+        "codes": ["FND_DCD", "RSK_GRD_CD"],
+        "amounts": ["INV_AMT", "EVAL_AMT"],
+        "dates": [],
+        "names": [],
+        "desc_ko": "펀드",
     },
     "TRX": {
-        "TB_ADW_TRX701L": {"pk": "TR_ID, TR_DT", "cols": ["ACN", "TR_TM", "TR_AMT", "TR_DCD", "BLNG_BRCD", "CHN_CD"], "std_dt": "TR_DT"},
+        "entity_id": "ACN",
+        "codes": ["TR_DCD", "CHN_CD"],
+        "amounts": ["TR_AMT"],
+        "dates": ["TR_DT"],
+        "names": [],
+        "desc_ko": "거래",
+    },
+    "INS": {
+        "entity_id": "INS_NO",
+        "codes": ["INS_DCD", "PAY_STCD"],
+        "amounts": ["PREM_AMT", "COV_AMT"],
+        "dates": ["INS_ST_DT", "INS_END_DT"],
+        "names": [],
+        "desc_ko": "보험",
+    },
+    "PN": {
+        "entity_id": "PLAN_NO",
+        "codes": ["PN_DCD"],
+        "amounts": ["CONTR_AMT", "BAL_AMT"],
+        "dates": [],
+        "names": ["EMPLOYER_NM"],
+        "desc_ko": "퇴직연금",
+    },
+    "DG": {
+        "entity_id": "EDPS_CSN",
+        "codes": ["CHN_CD", "STS_DCD"],
+        "amounts": [],
+        "dates": ["LOGIN_DT"],
+        "names": [],
+        "desc_ko": "디지털뱅킹",
+    },
+    "RSK": {
+        "entity_id": "IND_CD",
+        "codes": [],
+        "amounts": ["IND_VAL"],
+        "dates": ["EVAL_DT"],
+        "names": ["IND_NM"],
+        "desc_ko": "리스크",
+    },
+    "AML": {
+        "entity_id": "EDPS_CSN",
+        "codes": ["ALERT_LVL_CD", "STS_DCD"],
+        "amounts": ["TR_AMT"],
+        "dates": ["DETECT_DT", "REVIEW_DT"],
+        "names": [],
+        "desc_ko": "자금세탁방지",
+    },
+    "MKT": {
+        "entity_id": "CAMP_CD",
+        "codes": ["CAMP_STCD", "CHN_CD", "RESP_YN"],
+        "amounts": ["OFFER_AMT"],
+        "dates": ["CONTACT_DT"],
+        "names": [],
+        "desc_ko": "마케팅",
+    },
+    "FIN": {
+        "entity_id": "BLNG_BRCD",
+        "codes": [],
+        "amounts": ["AMT", "PREV_AMT", "BUDGET_AMT"],
+        "dates": [],
+        "names": ["PL_ITEM_NM"],
+        "desc_ko": "재무",
+    },
+    "WM": {
+        "entity_id": "EDPS_CSN",
+        "codes": ["WM_GRD_CD", "INVEST_PRFL_CD"],
+        "amounts": ["TOT_ASSET_AMT"],
+        "dates": [],
+        "names": [],
+        "desc_ko": "자산관리",
+    },
+    "COM": {
+        "entity_id": "BLNG_BRCD",
+        "codes": ["USE_YN", "BR_DCD"],
+        "amounts": [],
+        "dates": ["RGST_DT"],
+        "names": ["NM"],
+        "desc_ko": "공통",
     },
 }
 
-_BRANCH = "TB_ADW_COM001M"
-
-# 도메인별 복잡도별 SQL 템플릿 + description 템플릿
-def _gen_simple(domain: str) -> tuple[str, str, list[str], str]:
-    """단일 테이블 단순 조회."""
-    templates = {
-        "CUS": [
-            ("SELECT EDPS_CSN, CSM, CUS_DCD, CUS_GRD_CD FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND CUS_DCD = '{ct}'",
-             "{ct_nm} 고객의 기본 정보(고객번호, 성명, 유형, 등급) 목록",
-             ["TB_ADW_CSC101M"]),
-            ("SELECT EDPS_CSN, CSM, MKT_GRD_CD, PREF_CHANNEL FROM biz_schema.TB_ADW_CSP103M WHERE MKT_GRD_CD = '{mg}'",
-             "마케팅등급 {mg} 고객의 선호채널 및 프로필 정보",
-             ["TB_ADW_CSP103M"]),
-            ("SELECT EDPS_CSN, CSM, AGE_GRP_CD, GENDER_CD FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND AGE_GRP_CD = '{ag}'",
-             "{ag}대 고객의 성별 분포 기초 데이터",
-             ["TB_ADW_CSC101M"]),
-        ],
-        "DEP": [
-            ("SELECT ACN, EDPS_CSN, BAL_AMT, PD_NM FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_STCD = '01' AND BAL_AMT >= {amt}",
-             "정상 계좌 중 잔액 {amt_desc} 이상 계좌 목록",
-             ["TB_ADW_DEP201P"]),
-            ("SELECT ACN, EDPS_CSN, TOT_BAL_AMT FROM biz_schema.TB_ADW_DEP202S WHERE BASE_DT = CURRENT_DATE - INTERVAL '1 day' AND ACT_DCD = '{at}'",
-             "전일 기준 {at_nm} 계좌의 잔액 목록",
-             ["TB_ADW_DEP202S"]),
-        ],
-        "LON": [
-            ("SELECT LN_NO, EDPS_CSN, LN_BAL_AMT, INT_RT, LN_DCD FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '{lt}'",
-             "{lt_nm} 대출 건별 잔액 및 금리 현황",
-             ["TB_ADW_LNB301M"]),
-            ("SELECT LN_NO, EDPS_CSN, LN_APR_AMT, LN_APR_DT FROM biz_schema.TB_ADW_LNB302M WHERE LN_DCD = '{lt}' AND LN_APR_DT >= '{dt}'",
-             "{dt} 이후 승인된 {lt_nm} 대출 승인 내역",
-             ["TB_ADW_LNB302M"]),
-        ],
-        "CRD": [
-            ("SELECT CRD_NO, EDPS_CSN, CRD_DCD, MON_USE_AMT FROM biz_schema.TB_ADW_CRD401M WHERE STD_DT = CURRENT_DATE AND MON_USE_AMT >= {amt}",
-             "월 이용금액 {amt_desc} 이상 카드 목록",
-             ["TB_ADW_CRD401M"]),
-        ],
-        "TRX": [
-            ("SELECT TR_ID, ACN, TR_AMT, TR_DCD, CHN_CD FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= '{sd}' AND TR_DT <= '{ed}' AND TR_AMT >= {amt}",
-             "{sd}~{ed} 기간 {amt_desc} 이상 거래 내역",
-             ["TB_ADW_TRX701L"]),
-        ],
-    }
-
-    ct = random.choice(["01", "02", "03"])
-    ct_map = {"01": "개인", "02": "기업", "03": "개인사업자"}
-    mg = random.choice(["A", "B", "C", "D", "E"])
-    ag = random.choice(["20", "30", "40", "50", "60"])
-    lt = random.choice(["01", "02", "03"])
-    lt_map = {"01": "신용", "02": "담보", "03": "보증"}
-    at = random.choice(["01", "02", "03", "04"])
-    at_map = {"01": "보통예금", "02": "정기예금", "03": "적금", "04": "MMF"}
-    amt = random.choice([1000000, 5000000, 10000000, 50000000, 100000000])
-    amt_desc = f"{amt//10000}만원" if amt < 100000000 else f"{amt//100000000}억원"
-    dt = (date(2025, 4, 1) + timedelta(days=random.randint(0, 350))).isoformat()
-    sd = (date(2025, 4, 1) + timedelta(days=random.randint(0, 300))).isoformat()
-    ed = (date.fromisoformat(sd) + timedelta(days=random.randint(7, 60))).isoformat()
-
-    dom = domain if domain in templates else random.choice(list(templates.keys()))
-    tpl = random.choice(templates[dom])
-    sql = tpl[0].format(ct=ct, mg=mg, ag=ag, lt=lt, at=at, amt=amt, sd=sd, ed=ed, dt=dt)
-    desc = tpl[1].format(ct_nm=ct_map.get(ct, ct), mg=mg, ag=ag, lt_nm=lt_map.get(lt, lt),
-                          at_nm=at_map.get(at, at), amt_desc=amt_desc, sd=sd, ed=ed, dt=dt)
-    return sql, desc, tpl[2], dom
-
-
-def _gen_aggregation(domain: str) -> tuple[str, str, list[str], str]:
-    """집계 쿼리."""
-    templates = [
-        ("SELECT CUS_DCD, COUNT(*) AS cnt FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE GROUP BY CUS_DCD",
-         "고객유형별 고객 수 집계", ["TB_ADW_CSC101M"], "CUS"),
-        ("SELECT AGE_GRP_CD, GENDER_CD, COUNT(*) AS cnt FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND CUS_DCD = '01' GROUP BY AGE_GRP_CD, GENDER_CD ORDER BY AGE_GRP_CD",
-         "개인 고객의 연령대별, 성별 인원수 분포", ["TB_ADW_CSC101M"], "CUS"),
-        ("SELECT CUS_GRD_CD, COUNT(*) AS cnt, AVG(BAL_AMT) AS avg_bal FROM biz_schema.TB_ADW_CSC101M ci JOIN biz_schema.TB_ADW_DEP201P ab ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE WHERE ci.STD_DT = CURRENT_DATE GROUP BY CUS_GRD_CD",
-         "고객등급별 고객 수 및 평균 잔액", ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "CUS"),
-        ("SELECT ACT_DCD, COUNT(*) AS cnt, SUM(BAL_AMT) AS total_bal FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE GROUP BY ACT_DCD ORDER BY total_bal DESC",
-         "계좌유형별 계좌 수 및 총 잔액", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT PD_CD, PD_NM, COUNT(*) AS cnt, SUM(BAL_AMT) AS total, ROUND(AVG(INT_RT)::NUMERIC, 4) AS avg_rate FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_STCD = '01' GROUP BY PD_CD, PD_NM ORDER BY total DESC",
-         "정상 계좌의 상품별 계좌수, 총잔액, 평균금리", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT ACT_STCD, COUNT(*) AS cnt, SUM(BAL_AMT) AS total FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE GROUP BY ACT_STCD",
-         "계좌상태별(정상/해지/휴면) 계좌수 및 잔액 합계", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT LN_DCD, COUNT(*) AS cnt, SUM(LN_BAL_AMT) AS total_bal, ROUND(AVG(INT_RT), 2) AS avg_rate FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE GROUP BY LN_DCD",
-         "대출유형별 대출건수, 총잔액, 평균금리", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT OVDU_GRD_CD, COUNT(*) AS cnt, SUM(OVDU_AMT) AS total_ovdu FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND OVDU_GRD_CD IS NOT NULL GROUP BY OVDU_GRD_CD ORDER BY OVDU_GRD_CD",
-         "연체등급별 연체 건수 및 연체금액 합계", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT LN_STCD, COUNT(*) AS cnt, SUM(LN_BAL_AMT) AS total FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE GROUP BY LN_STCD ORDER BY cnt DESC",
-         "대출상태별 대출건수 및 잔액", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT CRD_DCD, COUNT(*) AS cnt, SUM(MON_USE_AMT) AS total_use FROM biz_schema.TB_ADW_CRD401M WHERE STD_DT = CURRENT_DATE GROUP BY CRD_DCD",
-         "카드유형별 카드수 및 월이용금액 합계", ["TB_ADW_CRD401M"], "CRD"),
-        ("SELECT TR_DCD, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' GROUP BY TR_DCD ORDER BY cnt DESC",
-         "최근 30일 거래유형별 거래건수 및 거래금액", ["TB_ADW_TRX701L"], "TRX"),
-        ("SELECT CHN_CD, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' GROUP BY CHN_CD ORDER BY cnt DESC",
-         "최근 30일 채널별 거래건수 및 거래금액", ["TB_ADW_TRX701L"], "TRX"),
-        ("SELECT ACN, COUNT(*) AS trx_cnt FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY ACN HAVING COUNT(*) >= 10 ORDER BY trx_cnt DESC",
-         "이번 달 거래 10건 이상 활성 계좌 목록", ["TB_ADW_TRX701L"], "TRX"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_multi_join(domain: str) -> tuple[str, str, list[str], str]:
-    """2~3 테이블 조인 쿼리."""
-    templates = [
-        ("SELECT b.BR_NM, COUNT(ci.EDPS_CSN) AS cust_cnt FROM biz_schema.TB_ADW_CSC101M ci JOIN biz_schema.TB_ADW_COM001M b ON ci.BLNG_BRCD = b.BLNG_BRCD WHERE ci.STD_DT = CURRENT_DATE GROUP BY b.BR_NM ORDER BY cust_cnt DESC LIMIT 10",
-         "지점별 고객수 상위 10개 지점", ["TB_ADW_CSC101M", "TB_ADW_COM001M"], "CUS"),
-        ("SELECT ci.EDPS_CSN, ci.CSM, ci.CUS_GRD_CD, SUM(ab.BAL_AMT) AS total_dep FROM biz_schema.TB_ADW_CSC101M ci JOIN biz_schema.TB_ADW_DEP201P ab ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE WHERE ci.STD_DT = CURRENT_DATE AND ci.CUS_GRD_CD = '01' GROUP BY ci.EDPS_CSN, ci.CSM, ci.CUS_GRD_CD ORDER BY total_dep DESC LIMIT 20",
-         "최우수 등급 고객의 예금 총잔액 상위 20명", ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "CUS"),
-        ("SELECT b.BR_NM, SUM(li.LN_BAL_AMT) AS total_bal, COUNT(li.LN_NO) AS cnt FROM biz_schema.TB_ADW_LNB301M li JOIN biz_schema.TB_ADW_COM001M b ON li.BLNG_BRCD = b.BLNG_BRCD WHERE li.STD_DT = CURRENT_DATE GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10",
-         "지점별 여신 잔액 상위 10개 지점의 대출건수와 총잔액", ["TB_ADW_LNB301M", "TB_ADW_COM001M"], "LON"),
-        ("SELECT ci.EDPS_CSN, ci.CSM, li.LN_NO, li.LN_BAL_AMT, li.OVDU_GRD_CD, li.OVDU_AMT FROM biz_schema.TB_ADW_LNB301M li JOIN biz_schema.TB_ADW_CSC101M ci ON li.EDPS_CSN = ci.EDPS_CSN AND ci.STD_DT = CURRENT_DATE WHERE li.STD_DT = CURRENT_DATE AND li.OVDU_GRD_CD IN ('C','D','E') ORDER BY li.OVDU_AMT DESC",
-         "연체등급 고정 이상(C,D,E) 고객의 연체 대출 상세", ["TB_ADW_LNB301M", "TB_ADW_CSC101M"], "LON"),
-        ("SELECT ci.EDPS_CSN, ci.CSM, COALESCE(SUM(ab.BAL_AMT),0) AS dep_total, COALESCE(SUM(li.LN_BAL_AMT),0) AS loan_total FROM biz_schema.TB_ADW_CSC101M ci LEFT JOIN biz_schema.TB_ADW_DEP201P ab ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE LEFT JOIN biz_schema.TB_ADW_LNB301M li ON ci.EDPS_CSN = li.EDPS_CSN AND li.STD_DT = CURRENT_DATE WHERE ci.STD_DT = CURRENT_DATE GROUP BY ci.EDPS_CSN, ci.CSM ORDER BY dep_total DESC LIMIT 50",
-         "고객별 예금총잔액, 대출총잔액 종합 현황 상위 50명", ["TB_ADW_CSC101M", "TB_ADW_DEP201P", "TB_ADW_LNB301M"], "CUS"),
-        ("SELECT ci.EDPS_CSN, ci.CSM, ab.ACN, ab.BAL_AMT, li.LN_NO, li.LN_BAL_AMT, cd.CRD_NO, cd.MON_USE_AMT FROM biz_schema.TB_ADW_CSC101M ci LEFT JOIN biz_schema.TB_ADW_DEP201P ab ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE LEFT JOIN biz_schema.TB_ADW_LNB301M li ON ci.EDPS_CSN = li.EDPS_CSN AND li.STD_DT = CURRENT_DATE LEFT JOIN biz_schema.TB_ADW_CRD401M cd ON ci.EDPS_CSN = cd.EDPS_CSN AND cd.STD_DT = CURRENT_DATE WHERE ci.STD_DT = CURRENT_DATE AND ci.CUS_GRD_CD = '01'",
-         "최우수 고객의 예금, 대출, 카드 보유 현황 종합", ["TB_ADW_CSC101M", "TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_CRD401M"], "CUS"),
-        ("SELECT b.BR_NM, li.LN_DCD, COUNT(*) AS cnt, SUM(li.LN_BAL_AMT) AS total, ROUND(AVG(li.INT_RT), 2) AS avg_rate FROM biz_schema.TB_ADW_LNB301M li JOIN biz_schema.TB_ADW_COM001M b ON li.BLNG_BRCD = b.BLNG_BRCD WHERE li.STD_DT = CURRENT_DATE GROUP BY b.BR_NM, li.LN_DCD ORDER BY b.BR_NM, total DESC",
-         "지점별, 대출유형별 대출건수, 잔액합계, 평균금리", ["TB_ADW_LNB301M", "TB_ADW_COM001M"], "LON"),
-        ("SELECT ci.EDPS_CSN, ci.CSM, ci.CUS_GRD_CD, cp.MKT_GRD_CD FROM biz_schema.TB_ADW_CSC101M ci JOIN biz_schema.TB_ADW_CSP103M cp ON ci.EDPS_CSN = cp.EDPS_CSN WHERE ci.STD_DT = CURRENT_DATE AND ci.CUS_GRD_CD != cp.MKT_GRD_CD",
-         "영업등급과 마케팅등급이 불일치하는 고객 목록", ["TB_ADW_CSC101M", "TB_ADW_CSP103M"], "CUS"),
-        ("SELECT ci.CUS_DCD, COUNT(li.LN_NO) AS loan_cnt, SUM(li.LN_EXC_AMT) AS total_amt FROM biz_schema.TB_ADW_LNB301M li JOIN biz_schema.TB_ADW_CSC101M ci ON li.EDPS_CSN = ci.EDPS_CSN AND ci.STD_DT = CURRENT_DATE WHERE li.STD_DT = CURRENT_DATE GROUP BY ci.CUS_DCD",
-         "고객유형별(개인/기업/개인사업자) 대출건수 및 실행금액", ["TB_ADW_LNB301M", "TB_ADW_CSC101M"], "LON"),
-        ("SELECT b.BR_NM, COUNT(ab.ACN) AS acct_cnt, SUM(ab.BAL_AMT) AS total_bal FROM biz_schema.TB_ADW_DEP201P ab JOIN biz_schema.TB_ADW_COM001M b ON ab.BLNG_BRCD = b.BLNG_BRCD WHERE ab.STD_DT = CURRENT_DATE AND ab.ACT_STCD = '01' GROUP BY b.BR_NM ORDER BY total_bal DESC LIMIT 10",
-         "지점별 정상계좌수 및 예금잔액 상위 10개 지점", ["TB_ADW_DEP201P", "TB_ADW_COM001M"], "DEP"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_subquery(domain: str) -> tuple[str, str, list[str], str]:
-    """서브쿼리."""
-    templates = [
-        ("SELECT ACN, EDPS_CSN, BAL_AMT FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND BAL_AMT > (SELECT AVG(BAL_AMT) FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE) ORDER BY BAL_AMT DESC",
-         "평균 잔액보다 높은 잔액을 보유한 계좌 목록", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT EDPS_CSN, CSM FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND EDPS_CSN IN (SELECT EDPS_CSN FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND OVDU_GRD_CD IN ('D','E'))",
-         "연체등급 D 또는 E인 대출을 보유한 고객 목록", ["TB_ADW_CSC101M", "TB_ADW_LNB301M"], "LON"),
-        ("SELECT EDPS_CSN, CSM FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND EDPS_CSN NOT IN (SELECT DISTINCT EDPS_CSN FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE)",
-         "예금 계좌가 없는 고객 목록", ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "CUS"),
-        ("SELECT LN_NO, LN_BAL_AMT, INT_RT FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND INT_RT > (SELECT AVG(INT_RT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '02') AND LN_DCD = '02'",
-         "담보대출 평균금리보다 높은 금리의 담보대출 목록", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT EDPS_CSN, CSM FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND EXISTS (SELECT 1 FROM biz_schema.TB_ADW_CRD401M WHERE EDPS_CSN = TB_ADW_CSC101M.EDPS_CSN AND STD_DT = CURRENT_DATE AND MON_USE_AMT > 5000000)",
-         "월 카드 이용금액 500만원 이상 고객 목록", ["TB_ADW_CSC101M", "TB_ADW_CRD401M"], "CRD"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_window(domain: str) -> tuple[str, str, list[str], str]:
-    """윈도우 함수."""
-    templates = [
-        ("SELECT EDPS_CSN, STD_DT, SUM(MON_USE_AMT) AS total, LAG(SUM(MON_USE_AMT)) OVER (PARTITION BY EDPS_CSN ORDER BY STD_DT) AS prev_total FROM biz_schema.TB_ADW_CRD401M GROUP BY EDPS_CSN, STD_DT ORDER BY EDPS_CSN, STD_DT",
-         "고객별 월별 카드 이용금액과 전월 이용금액 비교", ["TB_ADW_CRD401M"], "CRD"),
-        ("SELECT LN_NO, EDPS_CSN, LN_BAL_AMT, RANK() OVER (ORDER BY LN_BAL_AMT DESC) AS rnk FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '02' LIMIT 20",
-         "담보대출 잔액 순위 상위 20건", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT ACN, BAL_AMT, ROW_NUMBER() OVER (PARTITION BY ACT_DCD ORDER BY BAL_AMT DESC) AS rn FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE",
-         "계좌유형별 잔액 순위 부여", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT EDPS_CSN, CUS_GRD_CD, SUM(BAL_AMT) AS total, SUM(SUM(BAL_AMT)) OVER (ORDER BY SUM(BAL_AMT) DESC) AS running_total FROM biz_schema.TB_ADW_CSC101M ci JOIN biz_schema.TB_ADW_DEP201P ab ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE WHERE ci.STD_DT = CURRENT_DATE GROUP BY ci.EDPS_CSN, ci.CUS_GRD_CD ORDER BY total DESC",
-         "고객별 예금잔액과 누적합계", ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "DEP"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_cte(domain: str) -> tuple[str, str, list[str], str]:
-    """CTE 쿼리."""
-    templates = [
-        ("WITH cust_bal AS (SELECT ci.EDPS_CSN, ci.CSM, ci.CUS_GRD_CD, COALESCE(SUM(ab.BAL_AMT), 0) AS total_dep FROM biz_schema.TB_ADW_CSC101M ci LEFT JOIN biz_schema.TB_ADW_DEP201P ab ON ci.EDPS_CSN = ab.EDPS_CSN AND ab.STD_DT = CURRENT_DATE WHERE ci.STD_DT = CURRENT_DATE GROUP BY ci.EDPS_CSN, ci.CSM, ci.CUS_GRD_CD) SELECT CUS_GRD_CD, COUNT(*) AS cnt, AVG(total_dep) AS avg_dep FROM cust_bal GROUP BY CUS_GRD_CD ORDER BY avg_dep DESC",
-         "고객등급별 평균 예금잔액 (CTE 활용)", ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "CUS"),
-        ("WITH monthly_trx AS (SELECT DATE_TRUNC('month', TR_DT) AS mon, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '6 months' GROUP BY DATE_TRUNC('month', TR_DT)) SELECT mon, cnt, total, LAG(total) OVER (ORDER BY mon) AS prev_total, total - LAG(total) OVER (ORDER BY mon) AS diff FROM monthly_trx ORDER BY mon",
-         "최근 6개월 월별 거래금액 추이 및 전월 대비 증감", ["TB_ADW_TRX701L"], "TRX"),
-        ("WITH loan_summary AS (SELECT EDPS_CSN, SUM(LN_BAL_AMT) AS total_loan FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE GROUP BY EDPS_CSN), dep_summary AS (SELECT EDPS_CSN, SUM(BAL_AMT) AS total_dep FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE GROUP BY EDPS_CSN) SELECT ci.EDPS_CSN, ci.CSM, COALESCE(d.total_dep, 0) AS dep, COALESCE(l.total_loan, 0) AS loan FROM biz_schema.TB_ADW_CSC101M ci LEFT JOIN dep_summary d ON ci.EDPS_CSN = d.EDPS_CSN LEFT JOIN loan_summary l ON ci.EDPS_CSN = l.EDPS_CSN WHERE ci.STD_DT = CURRENT_DATE ORDER BY dep DESC LIMIT 100",
-         "고객별 예금총액, 대출총액 종합 현황 (CTE 활용, 상위 100명)", ["TB_ADW_CSC101M", "TB_ADW_DEP201P", "TB_ADW_LNB301M"], "CUS"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_case_decode(domain: str) -> tuple[str, str, list[str], str]:
-    """CASE WHEN 코드→한글 변환 쿼리."""
-    templates = [
-        ("SELECT EDPS_CSN, CSM, CASE WHEN CUS_DCD = '01' THEN '개인' WHEN CUS_DCD = '02' THEN '법인' WHEN CUS_DCD = '03' THEN '개인사업자' ELSE '기타' END AS 고객유형, CASE WHEN CUS_GRD_CD = '01' THEN '최우수' WHEN CUS_GRD_CD = '02' THEN '우수' WHEN CUS_GRD_CD = '03' THEN '보통' WHEN CUS_GRD_CD = '04' THEN '관리' ELSE '미분류' END AS 고객등급 FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE",
-         "전체 고객의 유형코드와 등급코드를 한글 레이블로 변환한 목록", ["TB_ADW_CSC101M"], "CUS"),
-        ("SELECT LN_NO, EDPS_CSN, LN_BAL_AMT, CASE WHEN LN_DCD = '01' THEN '신용대출' WHEN LN_DCD = '02' THEN '담보대출' WHEN LN_DCD = '03' THEN '보증대출' ELSE '기타' END AS 대출유형, CASE WHEN OVDU_GRD_CD = 'A' THEN '정상' WHEN OVDU_GRD_CD = 'B' THEN '요주의' WHEN OVDU_GRD_CD = 'C' THEN '고정' WHEN OVDU_GRD_CD = 'D' THEN '회수의문' WHEN OVDU_GRD_CD = 'E' THEN '추정손실' ELSE COALESCE(OVDU_GRD_CD, '미분류') END AS 연체등급 FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE",
-         "전체 대출의 유형과 연체등급을 한글로 변환한 현황", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT ACN, BAL_AMT, CASE WHEN ACT_DCD = '01' THEN '보통예금' WHEN ACT_DCD = '02' THEN '정기예금' WHEN ACT_DCD = '03' THEN '적금' WHEN ACT_DCD = '04' THEN 'MMF' ELSE '기타' END AS 계좌유형, CASE WHEN ACT_STCD = '01' THEN '정상' WHEN ACT_STCD = '02' THEN '해지' WHEN ACT_STCD = '03' THEN '휴면' ELSE '기타' END AS 계좌상태 FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE",
-         "전체 예금계좌의 유형과 상태를 한글로 변환한 현황", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT CRD_NO, EDPS_CSN, MON_USE_AMT, CASE WHEN CRD_DCD = '01' THEN '신용카드' WHEN CRD_DCD = '02' THEN '체크카드' WHEN CRD_DCD = '03' THEN '선불카드' ELSE '기타' END AS 카드유형, CASE WHEN FLG_YN = 'Y' THEN '해외사용가능' ELSE '해외사용불가' END AS 해외사용여부 FROM biz_schema.TB_ADW_CRD401M WHERE STD_DT = CURRENT_DATE",
-         "전체 카드의 유형과 해외사용 여부를 한글로 변환한 현황", ["TB_ADW_CRD401M"], "CRD"),
-        ("SELECT EDPS_CSN, CASE WHEN CUS_GRD_CD IN ('01','02') THEN 'VIP' WHEN CUS_GRD_CD = '03' THEN '일반' ELSE '관리대상' END AS 고객구분, CASE WHEN AGE_GRP_CD IN ('20','30') THEN '청년' WHEN AGE_GRP_CD IN ('40','50') THEN '중장년' ELSE '시니어' END AS 연령구분 FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE AND CUS_DCD = '01'",
-         "개인고객의 등급 구간별·연령 구간별 분류 데이터", ["TB_ADW_CSC101M"], "CUS"),
-        ("SELECT LN_NO, LN_BAL_AMT, CASE WHEN LN_BAL_AMT < 10000000 THEN '1천만미만' WHEN LN_BAL_AMT < 50000000 THEN '1천만~5천만' WHEN LN_BAL_AMT < 100000000 THEN '5천만~1억' ELSE '1억이상' END AS 잔액구간 FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE",
-         "대출 잔액 구간별 분류 데이터", ["TB_ADW_LNB301M"], "LON"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_union(domain: str) -> tuple[str, str, list[str], str]:
-    """UNION ALL 합산 쿼리."""
-    templates = [
-        ("SELECT '수신' AS 구분, COUNT(*) AS cnt, SUM(BAL_AMT) AS total FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE UNION ALL SELECT '여신', COUNT(*), SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE UNION ALL SELECT '카드', COUNT(*), SUM(MON_USE_AMT) FROM biz_schema.TB_ADW_CRD401M WHERE STD_DT = CURRENT_DATE",
-         "수신·여신·카드 도메인별 건수 및 잔액(이용액) 종합 합산", ["TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_CRD401M"], "CUS"),
-        ("SELECT EDPS_CSN, '수신' AS 구분, SUM(BAL_AMT) AS amt FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE GROUP BY EDPS_CSN UNION ALL SELECT EDPS_CSN, '여신', SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE GROUP BY EDPS_CSN",
-         "고객별 수신잔액과 여신잔액을 행으로 합산한 데이터", ["TB_ADW_DEP201P", "TB_ADW_LNB301M"], "CUS"),
-        ("SELECT '보통예금' AS 상품구분, COUNT(*) AS cnt, SUM(BAL_AMT) AS total FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_DCD = '01' UNION ALL SELECT '정기예금', COUNT(*), SUM(BAL_AMT) FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_DCD = '02' UNION ALL SELECT '적금', COUNT(*), SUM(BAL_AMT) FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND ACT_DCD = '03'",
-         "수신 상품유형별(보통예금/정기예금/적금) 건수 및 잔액", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT '신용대출' AS 구분, COUNT(*) AS cnt, SUM(LN_BAL_AMT) AS total FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '01' UNION ALL SELECT '담보대출', COUNT(*), SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '02' UNION ALL SELECT '보증대출', COUNT(*), SUM(LN_BAL_AMT) FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DCD = '03'",
-         "여신 유형별(신용/담보/보증) 대출건수 및 잔액 현황", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT '영업점' AS 채널, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' AND CHN_CD = '01' UNION ALL SELECT '인터넷뱅킹', COUNT(*), SUM(TR_AMT) FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' AND CHN_CD = '02' UNION ALL SELECT '모바일뱅킹', COUNT(*), SUM(TR_AMT) FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days' AND CHN_CD = '03'",
-         "최근 30일 채널별(영업점/인뱅/모뱅) 거래건수 및 거래금액", ["TB_ADW_TRX701L"], "TRX"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_pivot(domain: str) -> tuple[str, str, list[str], str]:
-    """피벗(크로스탭) 쿼리."""
-    templates = [
-        ("SELECT BLNG_BRCD, SUM(CASE WHEN LN_DCD = '01' THEN LN_BAL_AMT ELSE 0 END) AS 신용대출, SUM(CASE WHEN LN_DCD = '02' THEN LN_BAL_AMT ELSE 0 END) AS 담보대출, SUM(CASE WHEN LN_DCD = '03' THEN LN_BAL_AMT ELSE 0 END) AS 보증대출, SUM(LN_BAL_AMT) AS 합계 FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE GROUP BY BLNG_BRCD ORDER BY 합계 DESC",
-         "지점별 대출유형별 잔액 크로스탭 (신용/담보/보증 피벗)", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT BLNG_BRCD, SUM(CASE WHEN ACT_DCD = '01' THEN BAL_AMT ELSE 0 END) AS 보통예금, SUM(CASE WHEN ACT_DCD = '02' THEN BAL_AMT ELSE 0 END) AS 정기예금, SUM(CASE WHEN ACT_DCD = '03' THEN BAL_AMT ELSE 0 END) AS 적금, SUM(BAL_AMT) AS 합계 FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE GROUP BY BLNG_BRCD ORDER BY 합계 DESC",
-         "지점별 예금유형별 잔액 크로스탭 (보통/정기/적금 피벗)", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT CUS_GRD_CD, SUM(CASE WHEN CUS_DCD = '01' THEN 1 ELSE 0 END) AS 개인, SUM(CASE WHEN CUS_DCD = '02' THEN 1 ELSE 0 END) AS 법인, SUM(CASE WHEN CUS_DCD = '03' THEN 1 ELSE 0 END) AS 개인사업자, COUNT(*) AS 합계 FROM biz_schema.TB_ADW_CSC101M WHERE STD_DT = CURRENT_DATE GROUP BY CUS_GRD_CD ORDER BY CUS_GRD_CD",
-         "고객등급별 고객유형 분포 크로스탭", ["TB_ADW_CSC101M"], "CUS"),
-        ("SELECT TO_CHAR(TR_DT, 'YYYY-MM') AS 기준월, SUM(CASE WHEN TR_DCD = '01' THEN TR_AMT ELSE 0 END) AS 입금, SUM(CASE WHEN TR_DCD = '02' THEN TR_AMT ELSE 0 END) AS 출금, SUM(CASE WHEN TR_DCD = '03' THEN TR_AMT ELSE 0 END) AS 이체 FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '6 months' GROUP BY TO_CHAR(TR_DT, 'YYYY-MM') ORDER BY 기준월",
-         "최근 6개월 월별 거래유형(입금/출금/이체) 금액 추이 피벗", ["TB_ADW_TRX701L"], "TRX"),
-    ]
-    tpl = random.choice(templates)
-    return tpl[0], tpl[1], tpl[2], tpl[3]
-
-
-def _gen_date_func(domain: str) -> tuple[str, str, list[str], str]:
-    """DATE_TRUNC/EXTRACT 날짜 변환 쿼리."""
-    templates = [
-        ("SELECT DATE_TRUNC('month', STD_DT) AS 기준월, COUNT(*) AS cnt, SUM(BAL_AMT) AS total FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT BETWEEN '{sd}' AND '{ed}' GROUP BY DATE_TRUNC('month', STD_DT) ORDER BY 기준월",
-         "{sd}~{ed} 기간 월별 예금 계좌수 및 잔액 추이", ["TB_ADW_DEP201P"], "DEP"),
-        ("SELECT EXTRACT(YEAR FROM LN_DT) AS 대출연도, EXTRACT(MONTH FROM LN_DT) AS 대출월, COUNT(*) AS cnt, SUM(LN_EXC_AMT) AS total FROM biz_schema.TB_ADW_LNB301M WHERE STD_DT = CURRENT_DATE AND LN_DT >= '{sd}' GROUP BY EXTRACT(YEAR FROM LN_DT), EXTRACT(MONTH FROM LN_DT) ORDER BY 대출연도, 대출월",
-         "{sd} 이후 월별 신규 대출 건수 및 실행금액 추이", ["TB_ADW_LNB301M"], "LON"),
-        ("SELECT TO_CHAR(TR_DT, 'YYYY-MM') AS 기준월, COUNT(*) AS cnt, SUM(TR_AMT) AS total FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT BETWEEN '{sd}' AND '{ed}' GROUP BY TO_CHAR(TR_DT, 'YYYY-MM') ORDER BY 기준월",
-         "{sd}~{ed} 기간 월별 거래건수 및 거래금액 추이", ["TB_ADW_TRX701L"], "TRX"),
-        ("SELECT DATE_TRUNC('week', TR_DT) AS 기준주, COUNT(*) AS cnt FROM biz_schema.TB_ADW_TRX701L WHERE TR_DT >= CURRENT_DATE - INTERVAL '3 months' GROUP BY DATE_TRUNC('week', TR_DT) ORDER BY 기준주",
-         "최근 3개월 주별 거래건수 추이", ["TB_ADW_TRX701L"], "TRX"),
-        ("SELECT TO_CHAR(OPEN_DT, 'YYYY-MM') AS 개설월, COUNT(*) AS cnt FROM biz_schema.TB_ADW_DEP201P WHERE STD_DT = CURRENT_DATE AND OPEN_DT >= '{sd}' GROUP BY TO_CHAR(OPEN_DT, 'YYYY-MM') ORDER BY 개설월",
-         "{sd} 이후 월별 신규 계좌 개설 건수 추이", ["TB_ADW_DEP201P"], "DEP"),
-    ]
-    sd = (date(2025, 4, 1) + timedelta(days=random.randint(0, 200))).isoformat()
-    ed = (date.fromisoformat(sd) + timedelta(days=random.randint(90, 300))).isoformat()
-    tpl = random.choice(templates)
-    sql = tpl[0].format(sd=sd, ed=ed)
-    desc = tpl[1].format(sd=sd, ed=ed)
-    return sql, desc, tpl[2], tpl[3]
-
-
-# 복잡도별 생성 함수 매핑
-_GENERATORS = {
-    "simple": _gen_simple,
-    "aggregation": _gen_aggregation,
-    "multi_join": _gen_multi_join,
-    "subquery": _gen_subquery,
-    "window_func": _gen_window,
-    "cte": _gen_cte,
-    "case_decode": _gen_case_decode,
-    "union": _gen_union,
-    "pivot": _gen_pivot,
-    "date_func": _gen_date_func,
+# 테이블 타입별 설명 접미사
+_TYPE_DESC: dict[str, str] = {
+    "M": "기본", "D": "상세", "L": "내역", "H": "이력",
+    "S": "통계", "P": "현황", "G": "로그", "C": "코드",
 }
 
-# 복잡도 분포 (10000건 기준, 요구사항 문서 준수)
-_COMPLEXITY_DIST = [
-    ("simple", 1500),
-    ("aggregation", 2000),
-    ("multi_join", 2500),
-    ("subquery", 1000),
-    ("window_func", 1000),
-    ("cte", 500),
-    ("case_decode", 500),
-    ("union", 500),
-    ("pivot", 300),
-    ("date_func", 200),
-]
+# ── Non-star 테이블 동적 파싱 (requirements doc 기반) ────────
+# seed_postgres.py와 동일한 요구사항 문서에서 전체 테이블 추출
 
-# 도메인 분포
-_DOMAIN_WEIGHTS = {
-    "CUS": 15, "DEP": 20, "LON": 25, "CRD": 10, "TRX": 15,
-    "FX": 2, "TRS": 2, "RSK": 2, "MKT": 2, "FIN": 2,
-}
-_DOMAIN_LIST = []
-for d, w in _DOMAIN_WEIGHTS.items():
-    _DOMAIN_LIST.extend([d] * w)
+_REPO_ROOT = Path(__file__).parent.parent.parent
+_REQUIREMENTS_DOC = (
+    _REPO_ROOT / "docs" / "agent-guides"
+    / "test-data-requirements.md"
+)
+_TABLE_ROW_RE = re.compile(
+    r"^\|\s*\d+\s*\|\s*(★\s*)?`(TB_ADW_[A-Z0-9]+)`\s*\|"
+)
 
 
-def generate_sql_history_data(target: int = 10000) -> list[dict]:
-    """10,000+ SQL 이력 데이터 생성."""
-    data = []
+def _extract_domain(tbl_name: str) -> str:
+    """테이블명에서 도메인 접두사 추출 (가장 긴 매치 우선)."""
+    prefix = tbl_name[7:]  # TB_ADW_ 제거
+    for length in (4, 3, 2):
+        candidate = prefix[:length]
+        if candidate in _DOMAIN_GROUP:
+            return candidate
+    return prefix[:3]
+
+
+def _parse_non_star_tables() -> list[tuple[str, str, str]]:
+    """요구사항 문서에서 non-star 테이블 전체를 파싱.
+
+    Returns: [(테이블명, 도메인, 타입코드), ...]
+    """
+    star_names = {t.name for t in _STAR.values()}
+    result: list[tuple[str, str, str]] = []
+
+    if not _REQUIREMENTS_DOC.exists():
+        return result
+
+    for line in _REQUIREMENTS_DOC.read_text(
+        encoding="utf-8",
+    ).splitlines():
+        m = _TABLE_ROW_RE.match(line.strip())
+        if not m:
+            continue
+        is_star = bool(m.group(1) and "★" in m.group(1))
+        tbl_name = m.group(2)
+        if is_star or tbl_name in star_names:
+            continue
+        ttype = tbl_name[-1]  # M, D, L, H, S, P, G, C
+        dom_prefix = _extract_domain(tbl_name)
+        domain = _DOMAIN_GROUP.get(dom_prefix, "COM")
+        result.append((tbl_name, domain, ttype))
+
+    return result
+
+
+_ALL_NON_STAR: list[tuple[str, str, str]] = (
+    _parse_non_star_tables()
+)
+if not _ALL_NON_STAR:
+    # requirements doc가 없는 환경 (CI 등)에서는 빈 리스트 허용
+    pass
+
+
+# ══════════════════════════════════════════════════════════════
+# Tier 1: Star 테이블 정밀 SQL 템플릿
+# ══════════════════════════════════════════════════════════════
+
+def _ref_dt_cond(tbl_def: _TblDef) -> str:
+    """기준일 WHERE 절 생성."""
+    if tbl_def.std_dt is None:
+        return ""
+    return (
+        f"{tbl_def.std_dt} = '{_REF_DATE_STR}'"
+    )
+
+
+def _gen_star_simple() -> list[tuple[str, str, list[str], str]]:
+    """Star 테이블 단순 조회 템플릿."""
+    results = []
+    S = _SCHEMA  # noqa: N806
+
+    # ── 공통(등급코드) ──
+    results.append((
+        f"SELECT GRD_CD, GRD_NM, GRD_DESC "
+        f"FROM {S}.TB_ADW_COM002M",
+        "등급코드 전체 목록",
+        ["TB_ADW_COM002M"], "COM"))
+
+    # ── 고객 ──
+    for cv, cn in _CODES["CUS_DCD"].items():
+        results.append((
+            f"SELECT EDPS_CSN, CSM, CUS_DCD, CUS_GRD_CD "
+            f"FROM {S}.TB_ADW_CSC101M "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND CUS_DCD = '{cv}'",
+            f"{cn} 고객의 기본 정보 목록",
+            ["TB_ADW_CSC101M"], "CUS"))
+
+    # ── 고객이력 ──
+    results.append((
+        f"SELECT EDPS_CSN, CSM, CUS_DCD, CUS_GRD_CD, "
+        f"GNDR_DCD, AGE_GRP_CD "
+        f"FROM {S}.TB_ADW_CSC102H "
+        f"WHERE STD_DT = '{_REF_DATE_STR}'",
+        "고객 이력 스냅샷 조회",
+        ["TB_ADW_CSC102H"], "CUS"))
+
+    for gv, gn in _CODES["CUS_GRD_CD"].items():
+        results.append((
+            f"SELECT EDPS_CSN, CSM, CUS_GRD_CD, BLNG_BRCD "
+            f"FROM {S}.TB_ADW_CSC101M "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND CUS_GRD_CD = '{gv}'",
+            f"고객등급 {gn} 고객 목록",
+            ["TB_ADW_CSC101M"], "CUS"))
+
+    for mv, mn in _CODES["MKT_GRD_CD"].items():
+        results.append((
+            f"SELECT EDPS_CSN, CSM, MKT_GRD_CD, PREF_CHN_DCD "
+            f"FROM {S}.TB_ADW_CSP103M "
+            f"WHERE MKT_GRD_CD = '{mv}'",
+            f"마케팅등급 {mn} 고객의 선호채널 정보",
+            ["TB_ADW_CSP103M"], "CUS"))
+
+    for av, an in _CODES["AGE_GRP_CD"].items():
+        for gv, gn in _CODES["GNDR_DCD"].items():
+            results.append((
+                f"SELECT EDPS_CSN, CSM "
+                f"FROM {S}.TB_ADW_CSC101M "
+                f"WHERE STD_DT = '{_REF_DATE_STR}' "
+                f"AND AGE_GRP_CD = '{av}' "
+                f"AND GNDR_DCD = '{gv}'",
+                f"{an} {gn} 고객 목록",
+                ["TB_ADW_CSC101M"], "CUS"))
+
+    # ── 수신 ──
+    for av, an in _CODES["ACT_DCD"].items():
+        results.append((
+            f"SELECT ACN, EDPS_CSN, ACT_DCD, TOT_BAL_AMT "
+            f"FROM {S}.TB_ADW_DEP202S "
+            f"WHERE BASE_DT = '{_REF_DATE_STR}' "
+            f"AND ACT_DCD = '{av}'",
+            f"{an} 계좌 일별잔액 통계",
+            ["TB_ADW_DEP202S"], "DEP"))
+
+    for av, an in _CODES["ACT_DCD"].items():
+        results.append((
+            f"SELECT ACN, EDPS_CSN, BAL_AMT, PD_NM "
+            f"FROM {S}.TB_ADW_DEP201P "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND ACT_STCD = '01' AND ACT_DCD = '{av}'",
+            f"정상 {an} 계좌 잔액 현황",
+            ["TB_ADW_DEP201P"], "DEP"))
+
+    for amt, desc in [
+        (10_000_000, "1천만원"), (50_000_000, "5천만원"),
+        (100_000_000, "1억원"), (500_000_000, "5억원"),
+    ]:
+        results.append((
+            f"SELECT ACN, EDPS_CSN, BAL_AMT, PD_NM "
+            f"FROM {S}.TB_ADW_DEP201P "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND ACT_STCD = '01' AND BAL_AMT >= {amt}",
+            f"잔액 {desc} 이상 정상 계좌 목록",
+            ["TB_ADW_DEP201P"], "DEP"))
+
+    # ── 여신 ──
+    for lv, ln_ in _CODES["LN_DCD"].items():
+        results.append((
+            f"SELECT LN_NO, EDPS_CSN, LN_BAL_AMT, APLY_RT "
+            f"FROM {S}.TB_ADW_LNB301M "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND LN_DCD = '{lv}'",
+            f"{ln_} 대출 건별 잔액 및 금리",
+            ["TB_ADW_LNB301M"], "LN"))
+
+    for ov, on_ in list(_CODES["OVDU_GRD_CD"].items())[:3]:
+        results.append((
+            f"SELECT LN_NO, EDPS_CSN, OVDU_AMT, OVDU_DY_CN "
+            f"FROM {S}.TB_ADW_LNB301M "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND OVDU_GRD_CD = '{ov}'",
+            f"연체등급 {on_} 대출 연체 현황",
+            ["TB_ADW_LNB301M"], "LN"))
+
+    for pv, pn in _CODES["LN_PUSE_CD"].items():
+        results.append((
+            f"SELECT LN_NO, EDPS_CSN, LN_APR_AMT, APPR_DT "
+            f"FROM {S}.TB_ADW_LNB302M "
+            f"WHERE LN_PUSE_CD = '{pv}'",
+            f"용도 {pn} 대출 승인 내역",
+            ["TB_ADW_LNB302M"], "LN"))
+
+    # ── 카드 ──
+    for cv, cn in _CODES["CRD_DCD"].items():
+        results.append((
+            f"SELECT CRD_NO, EDPS_CSN, MON_USE_AMT "
+            f"FROM {S}.TB_ADW_CRD401M "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND CRD_DCD = '{cv}'",
+            f"{cn} 월 이용금액 현황",
+            ["TB_ADW_CRD401M"], "CRD"))
+
+    # ── 외환 ──
+    for fv, fn in _CODES["FX_DL_DCD"].items():
+        results.append((
+            f"SELECT DL_NO, CCY_CD, DL_AMT, DL_RT "
+            f"FROM {S}.TB_ADW_FXD501L "
+            f"WHERE FX_DL_DCD = '{fv}'",
+            f"외환 {fn} 거래 내역",
+            ["TB_ADW_FXD501L"], "FX"))
+
+    for cv, cn in list(_CODES["CCY_CD"].items())[:4]:
+        results.append((
+            f"SELECT BASE_DT, BASE_RT, BUY_RT, SELL_RT "
+            f"FROM {S}.TB_ADW_FXB502M "
+            f"WHERE CCY_CD = '{cv}' "
+            f"AND BASE_DT >= '{_rnd_date_str(30)}'",
+            f"{cn} 최근 환율 추이",
+            ["TB_ADW_FXB502M"], "FX"))
+
+    # ── 펀드 ──
+    for fv, fn in _CODES["FND_DCD"].items():
+        results.append((
+            f"SELECT FND_ACN, EDPS_CSN, BAL_AMT, RSK_GRD_CD "
+            f"FROM {S}.TB_ADW_FND601P "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND FND_DCD = '{fv}'",
+            f"{fn} 펀드 잔고 현황",
+            ["TB_ADW_FND601P"], "FND"))
+
+    for rv, rn in _CODES["RSK_GRD_CD"].items():
+        results.append((
+            f"SELECT FND_ACN, FUND_CD, EVAL_AMT, ERNS_RT "
+            f"FROM {S}.TB_ADW_FND602P "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND FND_DCD IN "
+            f"(SELECT FND_DCD FROM {S}.TB_ADW_FND601P "
+            f"WHERE RSK_GRD_CD = '{rv}' "
+            f"AND STD_DT = '{_REF_DATE_STR}')",
+            f"위험등급 {rn} 펀드 평가 현황",
+            ["TB_ADW_FND602P", "TB_ADW_FND601P"], "FND"))
+
+    # ── 거래 ──
+    for cv, cn in _CODES["CHN_CD"].items():
+        sd, ed = _rnd_period()
+        results.append((
+            f"SELECT TR_ID, ACN, TR_AMT, TR_DCD "
+            f"FROM {S}.TB_ADW_TRX701L "
+            f"WHERE TR_DT BETWEEN '{sd}' AND '{ed}' "
+            f"AND CHN_CD = '{cv}'",
+            f"{sd}~{ed} {cn} 채널 거래 내역",
+            ["TB_ADW_TRX701L"], "TRX"))
+
+    # ── 보험 ──
+    for iv, in_ in _CODES["INS_DCD"].items():
+        results.append((
+            f"SELECT INS_NO, EDPS_CSN, INS_AMT, INS_STCD "
+            f"FROM {S}.TB_ADW_INS803M "
+            f"WHERE INS_DCD = '{iv}'",
+            f"{in_} 보험 계약 현황",
+            ["TB_ADW_INS803M"], "INS"))
+
+    # ── 연금 ──
+    for pv, pn in _CODES["PN_DCD"].items():
+        results.append((
+            f"SELECT PLAN_NO, EDPS_CSN, TOT_BAL_AMT "
+            f"FROM {S}.TB_ADW_PNB904P "
+            f"WHERE STD_DT = '{_REF_DATE_STR}' "
+            f"AND PN_DCD = '{pv}'",
+            f"{pn} 퇴직연금 잔고 현황",
+            ["TB_ADW_PNB904P"], "PN"))
+
+    # ── 리스크 ──
+    for iv, in_ in _CODES["IND_CD"].items():
+        results.append((
+            f"SELECT IND_NM, IND_VAL, IND_UNIT, LIMIT_VAL "
+            f"FROM {S}.TB_ADW_RSK1101M "
+            f"WHERE IND_CD = '{iv}' "
+            f"AND STD_DT = '{_REF_DATE_STR}'",
+            f"{in_} 지표 현황",
+            ["TB_ADW_RSK1101M"], "RSK"))
+
+    # ── 마케팅 ──
+    for sv, sn in _CODES["CAMP_STCD"].items():
+        results.append((
+            f"SELECT CAMP_CD, CAMP_NM, START_DT, END_DT "
+            f"FROM {S}.TB_ADW_MKT1201M "
+            f"WHERE CAMP_STCD = '{sv}'",
+            f"{sn} 상태 캠페인 목록",
+            ["TB_ADW_MKT1201M"], "MKT"))
+
+    # ── 재무 ──
+    for pv, pn in _CODES["PL_ITEM_CD"].items():
+        results.append((
+            f"SELECT BLNG_BRCD, BASE_YM, AMT "
+            f"FROM {S}.TB_ADW_FIN1306S "
+            f"WHERE PL_ITEM_CD = '{pv}'",
+            f"지점별 {pn} 실적",
+            ["TB_ADW_FIN1306S"], "FIN"))
+
+    # ── WM ──
+    for wv, wn in _CODES["WM_GRD_CD"].items():
+        results.append((
+            f"SELECT EDPS_CSN, CSM, TOT_ASSET_AMT, "
+            f"INVEST_PRFL_CD "
+            f"FROM {S}.TB_ADW_WMB1401M "
+            f"WHERE WM_GRD_CD = '{wv}'",
+            f"{wn} 등급 자산관리 고객",
+            ["TB_ADW_WMB1401M"], "WM"))
+
+    return results
+
+
+def _gen_star_aggregation() -> list[tuple[str, str, list[str], str]]:
+    """Star 테이블 집계 쿼리."""
+    S = _SCHEMA  # noqa: N806
+    D = _REF_DATE_STR  # noqa: N806
+    return [
+        (f"SELECT CUS_DCD, COUNT(*) AS cnt "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}' GROUP BY CUS_DCD",
+         "고객유형별 고객 수", ["TB_ADW_CSC101M"], "CUS"),
+        (f"SELECT AGE_GRP_CD, GNDR_DCD, COUNT(*) AS cnt "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}' AND CUS_DCD = '01' "
+         f"GROUP BY AGE_GRP_CD, GNDR_DCD "
+         f"ORDER BY AGE_GRP_CD",
+         "개인 고객 연령대/성별 분포",
+         ["TB_ADW_CSC101M"], "CUS"),
+        (f"SELECT CUS_GRD_CD, COUNT(*) AS cnt "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}' "
+         f"GROUP BY CUS_GRD_CD ORDER BY CUS_GRD_CD",
+         "고객등급별 인원수",
+         ["TB_ADW_CSC101M"], "CUS"),
+        (f"SELECT ACT_DCD, COUNT(*) AS cnt, "
+         f"SUM(BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}' "
+         f"GROUP BY ACT_DCD ORDER BY total DESC",
+         "계좌유형별 계좌수 및 총잔액",
+         ["TB_ADW_DEP201P"], "DEP"),
+        (f"SELECT PD_CD, PD_NM, COUNT(*) AS cnt, "
+         f"SUM(BAL_AMT) AS total, "
+         f"ROUND(AVG(APLY_RT)::NUMERIC, 4) AS avg_rate "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}' AND ACT_STCD = '01' "
+         f"GROUP BY PD_CD, PD_NM ORDER BY total DESC",
+         "상품별 정상계좌 수, 잔액, 평균금리",
+         ["TB_ADW_DEP201P"], "DEP"),
+        (f"SELECT ACT_STCD, COUNT(*) AS cnt, "
+         f"SUM(BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}' GROUP BY ACT_STCD",
+         "계좌상태별 계좌수 및 잔액",
+         ["TB_ADW_DEP201P"], "DEP"),
+        (f"SELECT LN_DCD, COUNT(*) AS cnt, "
+         f"SUM(LN_BAL_AMT) AS total, "
+         f"ROUND(AVG(APLY_RT), 2) AS avg_rate "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}' GROUP BY LN_DCD",
+         "대출유형별 건수, 잔액, 평균금리",
+         ["TB_ADW_LNB301M"], "LN"),
+        (f"SELECT OVDU_GRD_CD, COUNT(*) AS cnt, "
+         f"SUM(OVDU_AMT) AS total "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}' "
+         f"AND OVDU_GRD_CD IS NOT NULL "
+         f"GROUP BY OVDU_GRD_CD ORDER BY OVDU_GRD_CD",
+         "연체등급별 건수 및 연체금액",
+         ["TB_ADW_LNB301M"], "LN"),
+        (f"SELECT LN_STCD, COUNT(*) AS cnt, "
+         f"SUM(LN_BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}' "
+         f"GROUP BY LN_STCD ORDER BY cnt DESC",
+         "대출상태별 건수 및 잔액",
+         ["TB_ADW_LNB301M"], "LN"),
+        (f"SELECT CRD_DCD, COUNT(*) AS cnt, "
+         f"SUM(MON_USE_AMT) AS total "
+         f"FROM {S}.TB_ADW_CRD401M "
+         f"WHERE STD_DT = '{D}' GROUP BY CRD_DCD",
+         "카드유형별 카드수 및 월이용금액",
+         ["TB_ADW_CRD401M"], "CRD"),
+        (f"SELECT FX_DL_DCD, COUNT(*) AS cnt, "
+         f"SUM(DL_AMT) AS total "
+         f"FROM {S}.TB_ADW_FXD501L "
+         f"GROUP BY FX_DL_DCD ORDER BY total DESC",
+         "외환딜유형별 건수 및 금액",
+         ["TB_ADW_FXD501L"], "FX"),
+        (f"SELECT FND_DCD, COUNT(*) AS cnt, "
+         f"SUM(BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_FND601P "
+         f"WHERE STD_DT = '{D}' GROUP BY FND_DCD",
+         "펀드유형별 건수 및 잔고",
+         ["TB_ADW_FND601P"], "FND"),
+        (f"SELECT CHN_CD, COUNT(*) AS cnt, "
+         f"SUM(TR_AMT) AS total "
+         f"FROM {S}.TB_ADW_TRX701L "
+         f"WHERE TR_DT >= '{_REF_DATE_STR}'::DATE "
+         f"- INTERVAL '30 days' "
+         f"GROUP BY CHN_CD ORDER BY cnt DESC",
+         "최근 30일 채널별 거래 현황",
+         ["TB_ADW_TRX701L"], "TRX"),
+        (f"SELECT INS_DCD, COUNT(*) AS cnt, "
+         f"SUM(INS_AMT) AS total "
+         f"FROM {S}.TB_ADW_INS803M "
+         f"GROUP BY INS_DCD",
+         "보험유형별 건수 및 보험금액",
+         ["TB_ADW_INS803M"], "INS"),
+        (f"SELECT PN_DCD, COUNT(*) AS cnt, "
+         f"SUM(TOT_BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_PNB904P "
+         f"WHERE STD_DT = '{D}' GROUP BY PN_DCD",
+         "연금유형별 건수 및 적립금",
+         ["TB_ADW_PNB904P"], "PN"),
+        (f"SELECT WM_GRD_CD, COUNT(*) AS cnt, "
+         f"SUM(TOT_ASSET_AMT) AS total "
+         f"FROM {S}.TB_ADW_WMB1401M "
+         f"GROUP BY WM_GRD_CD ORDER BY total DESC",
+         "WM등급별 고객수 및 총자산",
+         ["TB_ADW_WMB1401M"], "WM"),
+        (f"SELECT INVEST_PRFL_CD, COUNT(*) AS cnt "
+         f"FROM {S}.TB_ADW_WMB1401M "
+         f"GROUP BY INVEST_PRFL_CD "
+         f"ORDER BY INVEST_PRFL_CD",
+         "투자성향별 WM고객 분포",
+         ["TB_ADW_WMB1401M"], "WM"),
+        (f"SELECT CAMP_STCD, COUNT(*) AS cnt "
+         f"FROM {S}.TB_ADW_MKT1201M "
+         f"GROUP BY CAMP_STCD",
+         "캠페인 상태별 건수",
+         ["TB_ADW_MKT1201M"], "MKT"),
+        (f"SELECT BLNG_BRCD, PL_ITEM_CD, SUM(AMT) AS total "
+         f"FROM {S}.TB_ADW_FIN1306S "
+         f"GROUP BY BLNG_BRCD, PL_ITEM_CD "
+         f"ORDER BY BLNG_BRCD",
+         "지점별 손익항목별 실적 합계",
+         ["TB_ADW_FIN1306S"], "FIN"),
+    ]
+
+
+def _gen_star_join() -> list[tuple[str, str, list[str], str]]:
+    """Star 테이블 조인 쿼리."""
+    S = _SCHEMA  # noqa: N806
+    D = _REF_DATE_STR  # noqa: N806
+    return [
+        # 고객 + 지점
+        (f"SELECT b.BR_NM, COUNT(c.EDPS_CSN) AS cnt "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_COM001M b "
+         f"ON c.BLNG_BRCD = b.BLNG_BRCD "
+         f"WHERE c.STD_DT = '{D}' "
+         f"GROUP BY b.BR_NM ORDER BY cnt DESC LIMIT 10",
+         "지점별 고객수 상위 10개",
+         ["TB_ADW_CSC101M", "TB_ADW_COM001M"], "CUS"),
+        # 고객 + 수신
+        (f"SELECT c.EDPS_CSN, c.CSM, c.CUS_GRD_CD, "
+         f"SUM(d.BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_DEP201P d "
+         f"ON c.EDPS_CSN = d.EDPS_CSN "
+         f"AND d.STD_DT = '{D}' "
+         f"WHERE c.STD_DT = '{D}' AND c.CUS_GRD_CD = '01' "
+         f"GROUP BY c.EDPS_CSN, c.CSM, c.CUS_GRD_CD "
+         f"ORDER BY total DESC LIMIT 20",
+         "VIP 고객 예금잔액 상위 20명",
+         ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "CUS"),
+        # 여신 + 지점
+        (f"SELECT b.BR_NM, COUNT(l.LN_NO) AS cnt, "
+         f"SUM(l.LN_BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_LNB301M l "
+         f"JOIN {S}.TB_ADW_COM001M b "
+         f"ON l.BLNG_BRCD = b.BLNG_BRCD "
+         f"WHERE l.STD_DT = '{D}' "
+         f"GROUP BY b.BR_NM ORDER BY total DESC LIMIT 10",
+         "지점별 대출잔액 상위 10개",
+         ["TB_ADW_LNB301M", "TB_ADW_COM001M"], "LN"),
+        # 고객 + 여신 연체
+        (f"SELECT c.EDPS_CSN, c.CSM, l.LN_NO, "
+         f"l.LN_BAL_AMT, l.OVDU_GRD_CD, l.OVDU_AMT "
+         f"FROM {S}.TB_ADW_LNB301M l "
+         f"JOIN {S}.TB_ADW_CSC101M c "
+         f"ON l.EDPS_CSN = c.EDPS_CSN "
+         f"AND c.STD_DT = '{D}' "
+         f"WHERE l.STD_DT = '{D}' "
+         f"AND l.OVDU_GRD_CD IN ('C','D','E') "
+         f"ORDER BY l.OVDU_AMT DESC",
+         "연체등급 고정 이상 고객 대출 상세",
+         ["TB_ADW_LNB301M", "TB_ADW_CSC101M"], "LN"),
+        # 고객 + 수신 + 여신 종합
+        (f"SELECT c.EDPS_CSN, c.CSM, "
+         f"COALESCE(SUM(d.BAL_AMT),0) AS dep, "
+         f"COALESCE(SUM(l.LN_BAL_AMT),0) AS loan "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"LEFT JOIN {S}.TB_ADW_DEP201P d "
+         f"ON c.EDPS_CSN = d.EDPS_CSN "
+         f"AND d.STD_DT = '{D}' "
+         f"LEFT JOIN {S}.TB_ADW_LNB301M l "
+         f"ON c.EDPS_CSN = l.EDPS_CSN "
+         f"AND l.STD_DT = '{D}' "
+         f"WHERE c.STD_DT = '{D}' "
+         f"GROUP BY c.EDPS_CSN, c.CSM "
+         f"ORDER BY dep DESC LIMIT 50",
+         "고객별 예금·대출 종합 상위 50명",
+         ["TB_ADW_CSC101M", "TB_ADW_DEP201P",
+          "TB_ADW_LNB301M"], "CUS"),
+        # 영업/마케팅 등급 불일치
+        (f"SELECT c.EDPS_CSN, c.CSM, "
+         f"c.CUS_GRD_CD, p.MKT_GRD_CD "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_CSP103M p "
+         f"ON c.EDPS_CSN = p.EDPS_CSN "
+         f"WHERE c.STD_DT = '{D}'",
+         "영업등급과 마케팅등급 비교",
+         ["TB_ADW_CSC101M", "TB_ADW_CSP103M"], "CUS"),
+        # 고객 + 카드
+        (f"SELECT c.EDPS_CSN, c.CSM, "
+         f"SUM(k.MON_USE_AMT) AS total "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_CRD401M k "
+         f"ON c.EDPS_CSN = k.EDPS_CSN "
+         f"AND k.STD_DT = '{D}' "
+         f"WHERE c.STD_DT = '{D}' "
+         f"GROUP BY c.EDPS_CSN, c.CSM "
+         f"ORDER BY total DESC LIMIT 20",
+         "고객별 카드 이용금액 상위 20명",
+         ["TB_ADW_CSC101M", "TB_ADW_CRD401M"], "CRD"),
+        # 고객 + 펀드
+        (f"SELECT c.EDPS_CSN, c.CSM, "
+         f"SUM(f.BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_FND601P f "
+         f"ON c.EDPS_CSN = f.EDPS_CSN "
+         f"AND f.STD_DT = '{D}' "
+         f"WHERE c.STD_DT = '{D}' "
+         f"GROUP BY c.EDPS_CSN, c.CSM "
+         f"ORDER BY total DESC LIMIT 20",
+         "고객별 펀드 잔고 상위 20명",
+         ["TB_ADW_CSC101M", "TB_ADW_FND601P"], "FND"),
+        # 고객 + 보험
+        (f"SELECT c.EDPS_CSN, c.CSM, "
+         f"COUNT(i.INS_NO) AS cnt, SUM(i.INS_AMT) AS total "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_INS803M i "
+         f"ON c.EDPS_CSN = i.EDPS_CSN "
+         f"WHERE c.STD_DT = '{D}' "
+         f"GROUP BY c.EDPS_CSN, c.CSM "
+         f"ORDER BY total DESC LIMIT 20",
+         "고객별 보험 계약 현황 상위 20명",
+         ["TB_ADW_CSC101M", "TB_ADW_INS803M"], "INS"),
+        # 고객 + WM
+        (f"SELECT c.EDPS_CSN, c.CSM, c.CUS_GRD_CD, "
+         f"w.WM_GRD_CD, w.TOT_ASSET_AMT "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_WMB1401M w "
+         f"ON c.EDPS_CSN = w.EDPS_CSN "
+         f"WHERE c.STD_DT = '{D}' "
+         f"ORDER BY w.TOT_ASSET_AMT DESC LIMIT 30",
+         "자산관리 고객의 고객등급·WM등급 종합",
+         ["TB_ADW_CSC101M", "TB_ADW_WMB1401M"], "WM"),
+        # 캠페인 + 응답
+        (f"SELECT m.CAMP_CD, m.CAMP_NM, "
+         f"COUNT(t.EDPS_CSN) AS 대상수, "
+         f"SUM(CASE WHEN t.RESP_YN = 'Y' "
+         f"THEN 1 ELSE 0 END) AS 응답수 "
+         f"FROM {S}.TB_ADW_MKT1201M m "
+         f"JOIN {S}.TB_ADW_MKT1202M t "
+         f"ON m.CAMP_CD = t.CAMP_CD "
+         f"WHERE m.CAMP_STCD = '03' "
+         f"GROUP BY m.CAMP_CD, m.CAMP_NM "
+         f"ORDER BY 응답수 DESC",
+         "종료 캠페인별 응답률",
+         ["TB_ADW_MKT1201M", "TB_ADW_MKT1202M"], "MKT"),
+        # 수신 + 지점
+        (f"SELECT b.BR_NM, COUNT(d.ACN) AS cnt, "
+         f"SUM(d.BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_DEP201P d "
+         f"JOIN {S}.TB_ADW_COM001M b "
+         f"ON d.BLNG_BRCD = b.BLNG_BRCD "
+         f"WHERE d.STD_DT = '{D}' AND d.ACT_STCD = '01' "
+         f"GROUP BY b.BR_NM ORDER BY total DESC LIMIT 10",
+         "지점별 정상계좌수 및 예금잔액 상위 10",
+         ["TB_ADW_DEP201P", "TB_ADW_COM001M"], "DEP"),
+    ]
+
+
+def _gen_star_advanced() -> list[tuple[str, str, list[str], str]]:
+    """Star 테이블 고급 쿼리 (subquery, window, CTE, CASE 등)."""
+    S = _SCHEMA  # noqa: N806
+    D = _REF_DATE_STR  # noqa: N806
+    results = []
+
+    # ── Subquery ──
+    results.extend([
+        (f"SELECT ACN, EDPS_CSN, BAL_AMT "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}' AND BAL_AMT > "
+         f"(SELECT AVG(BAL_AMT) FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}') "
+         f"ORDER BY BAL_AMT DESC",
+         "평균 잔액 초과 계좌 목록",
+         ["TB_ADW_DEP201P"], "DEP"),
+        (f"SELECT EDPS_CSN, CSM "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}' AND EDPS_CSN IN "
+         f"(SELECT EDPS_CSN FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}' "
+         f"AND OVDU_GRD_CD IN ('D','E'))",
+         "연체등급 D·E 보유 고객",
+         ["TB_ADW_CSC101M", "TB_ADW_LNB301M"], "LN"),
+        (f"SELECT EDPS_CSN, CSM "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}' AND EDPS_CSN NOT IN "
+         f"(SELECT DISTINCT EDPS_CSN "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}')",
+         "예금계좌 미보유 고객",
+         ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "CUS"),
+        (f"SELECT EDPS_CSN, CSM "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}' AND EXISTS "
+         f"(SELECT 1 FROM {S}.TB_ADW_CRD401M "
+         f"WHERE EDPS_CSN = {S}.TB_ADW_CSC101M.EDPS_CSN "
+         f"AND STD_DT = '{D}' "
+         f"AND MON_USE_AMT > 5000000)",
+         "월 카드이용 500만원 이상 고객",
+         ["TB_ADW_CSC101M", "TB_ADW_CRD401M"], "CRD"),
+        (f"SELECT EDPS_CSN, CSM "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}' AND EDPS_CSN NOT IN "
+         f"(SELECT DISTINCT EDPS_CSN "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}') "
+         f"AND EDPS_CSN IN "
+         f"(SELECT DISTINCT EDPS_CSN "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}' "
+         f"AND BAL_AMT >= 100000000)",
+         "대출 없는 1억 이상 예금 고객",
+         ["TB_ADW_CSC101M", "TB_ADW_LNB301M",
+          "TB_ADW_DEP201P"], "CUS"),
+    ])
+
+    # ── Window ──
+    results.extend([
+        (f"SELECT LN_NO, EDPS_CSN, LN_BAL_AMT, "
+         f"RANK() OVER (ORDER BY LN_BAL_AMT DESC) AS rnk "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}' AND LN_DCD = '02' "
+         f"LIMIT 20",
+         "담보대출 잔액 순위 상위 20건",
+         ["TB_ADW_LNB301M"], "LN"),
+        (f"SELECT ACN, BAL_AMT, "
+         f"ROW_NUMBER() OVER "
+         f"(PARTITION BY ACT_DCD ORDER BY BAL_AMT DESC) "
+         f"AS rn "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}'",
+         "계좌유형별 잔액 순위",
+         ["TB_ADW_DEP201P"], "DEP"),
+        (f"SELECT EDPS_CSN, CUS_GRD_CD, "
+         f"SUM(d.BAL_AMT) AS total, "
+         f"SUM(SUM(d.BAL_AMT)) OVER "
+         f"(ORDER BY SUM(d.BAL_AMT) DESC) AS running "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"JOIN {S}.TB_ADW_DEP201P d "
+         f"ON c.EDPS_CSN = d.EDPS_CSN "
+         f"AND d.STD_DT = '{D}' "
+         f"WHERE c.STD_DT = '{D}' "
+         f"GROUP BY c.EDPS_CSN, c.CUS_GRD_CD "
+         f"ORDER BY total DESC",
+         "고객별 예금잔액과 누적합계",
+         ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "DEP"),
+    ])
+
+    # ── CTE ──
+    results.extend([
+        (f"WITH bal AS ("
+         f"SELECT c.EDPS_CSN, c.CUS_GRD_CD, "
+         f"COALESCE(SUM(d.BAL_AMT),0) AS total "
+         f"FROM {S}.TB_ADW_CSC101M c "
+         f"LEFT JOIN {S}.TB_ADW_DEP201P d "
+         f"ON c.EDPS_CSN = d.EDPS_CSN "
+         f"AND d.STD_DT = '{D}' "
+         f"WHERE c.STD_DT = '{D}' "
+         f"GROUP BY c.EDPS_CSN, c.CUS_GRD_CD) "
+         f"SELECT CUS_GRD_CD, COUNT(*) AS cnt, "
+         f"AVG(total) AS avg_dep "
+         f"FROM bal GROUP BY CUS_GRD_CD "
+         f"ORDER BY avg_dep DESC",
+         "고객등급별 평균 예금잔액 (CTE)",
+         ["TB_ADW_CSC101M", "TB_ADW_DEP201P"], "CUS"),
+        (f"WITH trx AS ("
+         f"SELECT DATE_TRUNC('month', TR_DT) AS mon, "
+         f"COUNT(*) AS cnt, SUM(TR_AMT) AS total "
+         f"FROM {S}.TB_ADW_TRX701L "
+         f"WHERE TR_DT >= '{D}'::DATE "
+         f"- INTERVAL '6 months' "
+         f"GROUP BY DATE_TRUNC('month', TR_DT)) "
+         f"SELECT mon, cnt, total, "
+         f"LAG(total) OVER (ORDER BY mon) AS prev, "
+         f"total - LAG(total) OVER (ORDER BY mon) AS diff "
+         f"FROM trx ORDER BY mon",
+         "최근 6개월 월별 거래 추이 및 증감",
+         ["TB_ADW_TRX701L"], "TRX"),
+    ])
+
+    # ── CASE WHEN (실제 코드값 매핑) ──
+    results.extend([
+        (f"SELECT EDPS_CSN, CSM, "
+         f"CASE CUS_DCD "
+         f"WHEN '01' THEN '개인' "
+         f"WHEN '02' THEN '법인' "
+         f"WHEN '03' THEN '개인사업자' "
+         f"ELSE '기타' END AS 고객유형, "
+         f"CASE CUS_GRD_CD "
+         f"WHEN '01' THEN 'VIP' "
+         f"WHEN '02' THEN '우수' "
+         f"WHEN '03' THEN '일반' "
+         f"WHEN '04' THEN '잠재' "
+         f"WHEN '05' THEN '관리' "
+         f"ELSE '미분류' END AS 고객등급 "
+         f"FROM {S}.TB_ADW_CSC101M "
+         f"WHERE STD_DT = '{D}'",
+         "고객 유형·등급 한글 변환 목록",
+         ["TB_ADW_CSC101M"], "CUS"),
+        (f"SELECT LN_NO, LN_BAL_AMT, "
+         f"CASE LN_DCD "
+         f"WHEN '01' THEN '신용대출' "
+         f"WHEN '02' THEN '담보대출' "
+         f"WHEN '03' THEN '보증대출' "
+         f"ELSE '기타' END AS 대출유형, "
+         f"CASE OVDU_GRD_CD "
+         f"WHEN 'A' THEN '정상' "
+         f"WHEN 'B' THEN '요주의' "
+         f"WHEN 'C' THEN '고정' "
+         f"WHEN 'D' THEN '회수의문' "
+         f"WHEN 'E' THEN '추정손실' "
+         f"ELSE COALESCE(OVDU_GRD_CD,'미분류') END "
+         f"AS 연체등급 "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}'",
+         "대출 유형·연체등급 한글 변환",
+         ["TB_ADW_LNB301M"], "LN"),
+    ])
+
+    # ── UNION ──
+    results.extend([
+        (f"SELECT '수신' AS 구분, COUNT(*) AS cnt, "
+         f"SUM(BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT = '{D}' "
+         f"UNION ALL "
+         f"SELECT '여신', COUNT(*), SUM(LN_BAL_AMT) "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}' "
+         f"UNION ALL "
+         f"SELECT '카드', COUNT(*), SUM(MON_USE_AMT) "
+         f"FROM {S}.TB_ADW_CRD401M "
+         f"WHERE STD_DT = '{D}'",
+         "수신·여신·카드 도메인별 건수 및 금액",
+         ["TB_ADW_DEP201P", "TB_ADW_LNB301M",
+          "TB_ADW_CRD401M"], "CUS"),
+    ])
+
+    # ── PIVOT ──
+    results.extend([
+        (f"SELECT BLNG_BRCD, "
+         f"SUM(CASE WHEN LN_DCD='01' "
+         f"THEN LN_BAL_AMT ELSE 0 END) AS 신용, "
+         f"SUM(CASE WHEN LN_DCD='02' "
+         f"THEN LN_BAL_AMT ELSE 0 END) AS 담보, "
+         f"SUM(CASE WHEN LN_DCD='03' "
+         f"THEN LN_BAL_AMT ELSE 0 END) AS 보증, "
+         f"SUM(LN_BAL_AMT) AS 합계 "
+         f"FROM {S}.TB_ADW_LNB301M "
+         f"WHERE STD_DT = '{D}' "
+         f"GROUP BY BLNG_BRCD ORDER BY 합계 DESC",
+         "지점별 대출유형별 잔액 피벗",
+         ["TB_ADW_LNB301M"], "LN"),
+    ])
+
+    # ── DATE ──
+    sd, ed = _rnd_period()
+    results.extend([
+        (f"SELECT DATE_TRUNC('month', STD_DT) AS 기준월, "
+         f"COUNT(*) AS cnt, SUM(BAL_AMT) AS total "
+         f"FROM {S}.TB_ADW_DEP201P "
+         f"WHERE STD_DT BETWEEN '{sd}' AND '{ed}' "
+         f"GROUP BY DATE_TRUNC('month', STD_DT) "
+         f"ORDER BY 기준월",
+         f"{sd}~{ed} 월별 예금 추이",
+         ["TB_ADW_DEP201P"], "DEP"),
+        (f"SELECT TO_CHAR(TR_DT, 'YYYY-MM') AS 기준월, "
+         f"COUNT(*) AS cnt, SUM(TR_AMT) AS total "
+         f"FROM {S}.TB_ADW_TRX701L "
+         f"WHERE TR_DT BETWEEN '{sd}' AND '{ed}' "
+         f"GROUP BY TO_CHAR(TR_DT, 'YYYY-MM') "
+         f"ORDER BY 기준월",
+         f"{sd}~{ed} 월별 거래 현황",
+         ["TB_ADW_TRX701L"], "TRX"),
+    ])
+
+    return results
+
+
+# ══════════════════════════════════════════════════════════════
+# Tier 2: Non-star 테이블 프로그래매틱 SQL 생성
+# ══════════════════════════════════════════════════════════════
+
+def _gen_nonstar_simple(
+    tbl_name: str, domain: str, ttype: str,
+) -> tuple[str, str, list[str], str]:
+    """Non-star 단일 테이블 단순 조회."""
+    S = _SCHEMA  # noqa: N806
+    dcols = _DOMAIN_COLS.get(domain, _DOMAIN_COLS["COM"])
+    desc_ko = dcols["desc_ko"]
+    type_desc = _TYPE_DESC.get(ttype, "")
+
+    codes = dcols["codes"]
+    if codes:
+        code_col = random.choice(codes)
+        if code_col in _CODES:
+            cv = _cd(code_col)
+            cn = _cd_label(code_col, cv)
+            return (
+                f"SELECT * FROM {S}.{tbl_name} "
+                f"WHERE {code_col} = '{cv}' "
+                f"LIMIT 100",
+                f"{desc_ko} {type_desc} 중 "
+                f"{code_col}={cn} 조건 조회",
+                [tbl_name], domain)
+
+    return (
+        f"SELECT * FROM {S}.{tbl_name} LIMIT 100",
+        f"{desc_ko} {type_desc} 데이터 조회",
+        [tbl_name], domain)
+
+
+def _gen_nonstar_agg(
+    tbl_name: str, domain: str, ttype: str,
+) -> tuple[str, str, list[str], str]:
+    """Non-star 집계 쿼리."""
+    S = _SCHEMA  # noqa: N806
+    dcols = _DOMAIN_COLS.get(domain, _DOMAIN_COLS["COM"])
+    desc_ko = dcols["desc_ko"]
+    codes = dcols["codes"]
+    amounts = dcols["amounts"]
+
+    if codes:
+        grp_col = random.choice(codes)
+        agg_expr = "COUNT(*) AS cnt"
+        if amounts:
+            amt_col = random.choice(amounts)
+            agg_expr += f", SUM({amt_col}) AS total"
+        return (
+            f"SELECT {grp_col}, {agg_expr} "
+            f"FROM {S}.{tbl_name} "
+            f"GROUP BY {grp_col} "
+            f"ORDER BY cnt DESC",
+            f"{desc_ko} {grp_col}별 집계",
+            [tbl_name], domain)
+
+    return (
+        f"SELECT COUNT(*) AS cnt "
+        f"FROM {S}.{tbl_name}",
+        f"{desc_ko} 총 건수 조회",
+        [tbl_name], domain)
+
+
+def _gen_nonstar_join_star(
+    tbl_name: str, domain: str, ttype: str,
+) -> tuple[str, str, list[str], str]:
+    """Non-star + Star 테이블 조인."""
+    S = _SCHEMA  # noqa: N806
+    D = _REF_DATE_STR  # noqa: N806
+    dcols = _DOMAIN_COLS.get(domain, _DOMAIN_COLS["COM"])
+    desc_ko = dcols["desc_ko"]
+    eid = dcols["entity_id"]
+
+    # 고객 조인 가능한 도메인
+    if eid == "EDPS_CSN" or "EDPS_CSN" in str(dcols):
+        return (
+            f"SELECT c.EDPS_CSN, c.CSM, n.* "
+            f"FROM {S}.{tbl_name} n "
+            f"JOIN {S}.TB_ADW_CSC101M c "
+            f"ON n.EDPS_CSN = c.EDPS_CSN "
+            f"AND c.STD_DT = '{D}' "
+            f"LIMIT 100",
+            f"{desc_ko} 데이터에 고객정보 결합",
+            [tbl_name, "TB_ADW_CSC101M"], domain)
+
+    # 지점 조인
+    return (
+        f"SELECT b.BR_NM, COUNT(*) AS cnt "
+        f"FROM {S}.{tbl_name} n "
+        f"JOIN {S}.TB_ADW_COM001M b "
+        f"ON n.BLNG_BRCD = b.BLNG_BRCD "
+        f"GROUP BY b.BR_NM ORDER BY cnt DESC",
+        f"지점별 {desc_ko} 건수",
+        [tbl_name, "TB_ADW_COM001M"], domain)
+
+
+def _gen_nonstar_date(
+    tbl_name: str, domain: str, ttype: str,
+) -> tuple[str, str, list[str], str]:
+    """Non-star 날짜 함수 쿼리."""
+    S = _SCHEMA  # noqa: N806
+    dcols = _DOMAIN_COLS.get(domain, _DOMAIN_COLS["COM"])
+    desc_ko = dcols["desc_ko"]
+
+    # S타입은 BASE_YM 사용
+    if ttype == "S":
+        return (
+            f"SELECT BASE_YM, SUM(AMT) AS total "
+            f"FROM {S}.{tbl_name} "
+            f"GROUP BY BASE_YM ORDER BY BASE_YM",
+            f"{desc_ko} 월별 추이",
+            [tbl_name], domain)
+
+    # L/H/G 타입은 날짜 컬럼 사용
+    date_col = {
+        "L": "TR_DT", "H": "CHG_DT", "G": "LOG_DT",
+    }.get(ttype, "STD_DT")
+
+    sd, ed = _rnd_period()
+    return (
+        f"SELECT DATE_TRUNC('month', {date_col}::DATE) "
+        f"AS 기준월, COUNT(*) AS cnt "
+        f"FROM {S}.{tbl_name} "
+        f"WHERE {date_col} BETWEEN '{sd}' AND '{ed}' "
+        f"GROUP BY DATE_TRUNC('month', {date_col}::DATE) "
+        f"ORDER BY 기준월",
+        f"{sd}~{ed} {desc_ko} 월별 건수",
+        [tbl_name], domain)
+
+
+# ══════════════════════════════════════════════════════════════
+# Tier 3: 크로스 도메인 조인
+# ══════════════════════════════════════════════════════════════
+
+def _gen_cross_domain() -> list[tuple[str, str, list[str], str]]:
+    """크로스 도메인 조인 쿼리."""
+    S = _SCHEMA  # noqa: N806
+    D = _REF_DATE_STR  # noqa: N806
+    results = []
+
+    # 고객유형별 도메인 크로스
+    for cv, cn in _CODES["CUS_DCD"].items():
+        results.append((
+            f"SELECT COUNT(DISTINCT d.ACN) AS dep_cnt, "
+            f"COUNT(DISTINCT l.LN_NO) AS ln_cnt, "
+            f"COUNT(DISTINCT k.CRD_NO) AS crd_cnt "
+            f"FROM {S}.TB_ADW_CSC101M c "
+            f"LEFT JOIN {S}.TB_ADW_DEP201P d "
+            f"ON c.EDPS_CSN = d.EDPS_CSN "
+            f"AND d.STD_DT = '{D}' "
+            f"LEFT JOIN {S}.TB_ADW_LNB301M l "
+            f"ON c.EDPS_CSN = l.EDPS_CSN "
+            f"AND l.STD_DT = '{D}' "
+            f"LEFT JOIN {S}.TB_ADW_CRD401M k "
+            f"ON c.EDPS_CSN = k.EDPS_CSN "
+            f"AND k.STD_DT = '{D}' "
+            f"WHERE c.STD_DT = '{D}' "
+            f"AND c.CUS_DCD = '{cv}'",
+            f"{cn} 고객의 수신·여신·카드 보유 현황",
+            ["TB_ADW_CSC101M", "TB_ADW_DEP201P",
+             "TB_ADW_LNB301M", "TB_ADW_CRD401M"], "CUS"))
+
+    # 등급별 크로스
+    for gv, gn in _CODES["CUS_GRD_CD"].items():
+        results.append((
+            f"SELECT "
+            f"COALESCE(SUM(d.BAL_AMT),0) AS dep_total, "
+            f"COALESCE(SUM(l.LN_BAL_AMT),0) AS ln_total, "
+            f"COALESCE(SUM(k.MON_USE_AMT),0) AS crd_total "
+            f"FROM {S}.TB_ADW_CSC101M c "
+            f"LEFT JOIN {S}.TB_ADW_DEP201P d "
+            f"ON c.EDPS_CSN = d.EDPS_CSN "
+            f"AND d.STD_DT = '{D}' "
+            f"LEFT JOIN {S}.TB_ADW_LNB301M l "
+            f"ON c.EDPS_CSN = l.EDPS_CSN "
+            f"AND l.STD_DT = '{D}' "
+            f"LEFT JOIN {S}.TB_ADW_CRD401M k "
+            f"ON c.EDPS_CSN = k.EDPS_CSN "
+            f"AND k.STD_DT = '{D}' "
+            f"WHERE c.STD_DT = '{D}' "
+            f"AND c.CUS_GRD_CD = '{gv}'",
+            f"고객등급 {gn} 수신·여신·카드 합산",
+            ["TB_ADW_CSC101M", "TB_ADW_DEP201P",
+             "TB_ADW_LNB301M", "TB_ADW_CRD401M"], "CUS"))
+
+    return results
+
+
+# ══════════════════════════════════════════════════════════════
+# 통합 생성 함수
+# ══════════════════════════════════════════════════════════════
+
+def generate_sql_history_data(  # noqa: C901
+    target: int = 25000,
+) -> list[dict]:
+    """25,000+ SQL 이력 데이터 생성.
+
+    Tier 1: Star 테이블 정밀 템플릿 (~5,000건)
+    Tier 2: Non-star 테이블 프로그래매틱 (~15,000건)
+    Tier 3: 크로스 도메인 (~5,000건)
+    """
+    data: list[dict] = []
     users = [f"user{i:02d}" for i in range(1, 51)]
     start_dt = date(2025, 4, 1)
     end_dt = date(2026, 3, 20)
     dt_range = (end_dt - start_dt).days
 
-    for complexity, count in _COMPLEXITY_DIST:
-        gen_fn = _GENERATORS[complexity]
-        for _ in range(count):
-            domain = random.choice(_DOMAIN_LIST)
-            sql, desc, tables, actual_domain = gen_fn(domain)
+    def _make_record(
+        sql: str, desc: str, tables: list[str],
+        domain: str, complexity: str,
+    ) -> dict:
+        exec_dt = (
+            start_dt + timedelta(days=random.randint(0, dt_range))
+        ).isoformat()
+        return {
+            "sql": sql,
+            "description": desc,
+            "tables_used": tables,
+            "domain": domain,
+            "complexity": complexity,
+            "exec_user": random.choice(users),
+            "exec_dt": exec_dt,
+        }
 
-            # 약간의 변형으로 유니크성 확보
-            if random.random() < 0.3:
-                desc = desc + f" ({random.choice(['최근', '당월', '금주', '전월', '분기', '반기'])} 기준)"
-            if random.random() < 0.2 and "LIMIT" not in sql:
-                n = random.choice([10, 20, 50, 100])
-                sql += f" LIMIT {n}"
-                desc += f" (상위 {n}건)"
+    # ── Tier 1: Star 템플릿 ─────────────────────────────
+    star_simple = _gen_star_simple()
+    star_agg = _gen_star_aggregation()
+    star_join = _gen_star_join()
+    star_adv = _gen_star_advanced()
 
-            exec_dt = (start_dt + timedelta(days=random.randint(0, dt_range))).isoformat()
+    # 파라미터 변형으로 배수 확장
+    for sql, desc, tbls, dom in star_simple:
+        data.append(_make_record(
+            sql, desc, tbls, dom, "simple"))
+        # 변형: LIMIT 추가
+        for n in [10, 50, 100]:
+            if "LIMIT" not in sql:
+                data.append(_make_record(
+                    f"{sql} LIMIT {n}",
+                    f"{desc} (상위 {n}건)",
+                    tbls, dom, "simple"))
 
-            data.append({
-                "sql": sql,
-                "description": desc,
-                "tables_used": tables,
-                "domain": actual_domain,
-                "complexity": complexity,
-                "exec_user": random.choice(users),
-                "exec_dt": exec_dt,
-            })
+    for sql, desc, tbls, dom in star_agg:
+        data.append(_make_record(
+            sql, desc, tbls, dom, "aggregation"))
+
+    for sql, desc, tbls, dom in star_join:
+        data.append(_make_record(
+            sql, desc, tbls, dom, "multi_join"))
+
+    for sql, desc, tbls, dom in star_adv:
+        cplx = "subquery"
+        if "OVER" in sql:
+            cplx = "window_func"
+        elif sql.startswith("WITH"):
+            cplx = "cte"
+        elif "CASE" in sql:
+            cplx = "case_decode"
+        elif "UNION" in sql:
+            cplx = "union"
+        elif "PIVOT" in desc or "피벗" in desc:
+            cplx = "pivot"
+        elif "DATE_TRUNC" in sql or "TO_CHAR" in sql:
+            cplx = "date_func"
+        data.append(_make_record(
+            sql, desc, tbls, dom, cplx))
+
+    tier1_count = len(data)
+
+    # ── Tier 2: Non-star 프로그래매틱 ───────────────────
+    gen_funcs = [
+        (_gen_nonstar_simple, "simple"),
+        (_gen_nonstar_agg, "aggregation"),
+        (_gen_nonstar_join_star, "multi_join"),
+        (_gen_nonstar_date, "date_func"),
+    ]
+
+    # 각 non-star 테이블당 ~4가지 패턴
+    for tbl_name, domain, ttype in _ALL_NON_STAR:
+        for gen_fn, cplx in gen_funcs:
+            sql, desc, tbls, dom = gen_fn(
+                tbl_name, domain, ttype)
+            data.append(_make_record(
+                sql, desc, tbls, dom, cplx))
+            # 변형 생성
+            if random.random() < 0.5:
+                suffix = random.choice([
+                    "최근", "당월", "금주", "전월",
+                    "분기", "반기",
+                ])
+                data.append(_make_record(
+                    sql, f"{desc} ({suffix} 기준)",
+                    tbls, dom, cplx))
+
+    tier2_count = len(data) - tier1_count
+
+    # ── Tier 3: 크로스 도메인 ───────────────────────────
+    cross = _gen_cross_domain()
+    for sql, desc, tbls, dom in cross:
+        data.append(_make_record(
+            sql, desc, tbls, dom, "multi_join"))
+        # 변형 확장
+        for suffix in ["최근", "당월", "분기"]:
+            data.append(_make_record(
+                sql, f"{desc} ({suffix} 기준)",
+                tbls, dom, "multi_join"))
+
+    _ = len(data) - tier1_count - tier2_count  # tier3
+
+    # ── 부족분 추가 생성 (target까지) ───────────────────
+    while len(data) < target:
+        # Star 템플릿 재활용 + 랜덤 변형
+        all_templates = (
+            star_simple + star_agg
+            + star_join + star_adv
+        )
+        sql, desc, tbls, dom = random.choice(all_templates)
+
+        # 약간의 변형
+        mods = [
+            "최근 기준", "당월 기준", "전월 대비",
+            "분기 누적", "YTD", "전년동기 대비",
+        ]
+        desc = f"{desc} ({random.choice(mods)})"
+
+        if "LIMIT" not in sql and random.random() < 0.3:
+            n = random.choice([10, 20, 50, 100, 200])
+            sql = f"{sql} LIMIT {n}"
+
+        cplx = "simple"
+        if "GROUP BY" in sql:
+            cplx = "aggregation"
+        elif "JOIN" in sql:
+            cplx = "multi_join"
+        elif "OVER" in sql:
+            cplx = "window_func"
+
+        data.append(_make_record(
+            sql, desc, tbls, dom, cplx))
 
     random.shuffle(data)
     return data[:target]

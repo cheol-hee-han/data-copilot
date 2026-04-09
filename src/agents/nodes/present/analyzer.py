@@ -1,5 +1,7 @@
 """데이터 분석 노드 — SQL 실행 결과에 대한 인사이트 도출 및 시각화 생성.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 SQL 실행으로 추출된 데이터(sql_result)를 LLM 에 전달하여 비즈니스 인사이트를 도출하고,
 데이터 특성에 따라 시각화(SVG 차트) 생성 여부를 판단·실행한다.
 시각화 판단과 SVG 생성은 별도의 프롬프트로 순차 호출되며,
@@ -43,6 +45,10 @@ from src.agents.state.state import (
 from src.config import settings
 from src.services.data_analyzer import analyze_data
 from src.utils.logger import get_logger
+from src.utils.tracker.dispatch import (
+    dispatch_tracking_event,
+    REASONING_STEP,
+)
 
 logger = get_logger(__name__)
 
@@ -51,11 +57,20 @@ async def analyze_data_node(
     state: PipelineState,
 ) -> dict:
     """추출된 데이터를 분석하고 시각화를 생성한다."""
+    from src.agents.graph.cancel import check_cancel
+
     logger.info("데이터 분석 시작")
+
+    # 원본(시각화/분석 지시 포함)을 사용하여 시각화 판단이 정확하게 동작하도록 한다
+    # (이 노드는 DATA_ANALYSIS 라우팅 시에만 진입)
+    user_input = state.analysis_query or state.preprocessed_input
+
+    async def _is_cancelled() -> bool:
+        return await check_cancel(state.session_id, state.turn_id)
 
     try:
         analysis, viz = await analyze_data(
-            user_input=state.preprocessed_input,
+            user_input=user_input,
             sql_result=state.sql_result,
             system_prompt=ANALYZER_SYSTEM,
             user_template=ANALYZER_USER,
@@ -66,6 +81,7 @@ async def analyze_data_node(
             min_rows_for_viz=(
                 settings.min_rows_for_visualization
             ),
+            is_cancelled=_is_cancelled,
         )
     except Exception as e:
         logger.error(
@@ -87,10 +103,43 @@ async def analyze_data_node(
     )
 
     viz_detail = ""
+    viz_judgment = "SKIPPED"
     if viz.has_visualization:
         viz_detail = (
             f", 시각화: {viz.chart_type.value}"
         )
+        viz_judgment = f"APPROVED — {viz.chart_type.value}"
+
+    _row_count = state.sql_result.row_count if state.sql_result else 0
+    _columns = state.sql_result.columns if state.sql_result else []
+
+    await dispatch_tracking_event(REASONING_STEP, {
+        "node": "analyze_data",
+        "phase": "present",
+        "step_type": "analysis",
+        "round": 0,
+        "hypothesis_id": "",
+        "inputs": {
+            "query": user_input,
+            "sql_result": {
+                "row_count": _row_count,
+                "columns": _columns[:10],
+            },
+            "viz_eligible": _row_count >= settings.min_rows_for_visualization,
+        },
+        "output": {
+            "summary": analysis.summary[:200] if analysis.summary else "",
+            "insights": [
+                i[:100] for i in (analysis.insights or [])[:5]
+            ],
+            "recommendations": [],
+            "viz_judgment": viz_judgment,
+        },
+        "routing": {
+            "next_node": "format_response",
+            "reason": f"분석 완료{viz_detail}",
+        },
+    })
 
     return {
         "analysis_result": analysis,

@@ -6,7 +6,7 @@
 >
 > v1.1 (2026-03-28): 초안 작성
 > v2.0 (2026-03-29): table_verifier/TableResolution 삭제 반영, 중복 분석 갱신, 권고안 재정리, KI 승격 갭 반영
-> v2.1 (2026-04-01): 노드 리네임 반영 (context_explorer→knowledge_fetcher+knowledge_interpreter, confidence_evaluator→readiness_gate, recovery_planner→recovery_agent, clarify→clarification_handler, preprocessor 삭제), 신규 state 필드 기재, W/R 약어 갱신
+> v2.1 (2026-04-01): 노드 리네임 반영 (context_explorer→context_retriever+context_interpreter, confidence_evaluator→readiness_gate, recovery_planner→recovery_agent, clarify→clarification_handler, preprocessor 삭제), 신규 state 필드 기재, W/R 약어 갱신
 > v2.2 (2026-04-02): planner→reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용), W/R 약어 갱신 (PRP)
 
 ---
@@ -65,12 +65,12 @@
 
 | 이전 노드명 | 이전 약어 | 현재 노드명 | 현재 약어 | 비고 |
 | --- | --- | --- | --- | --- |
-| `context_explorer` | EXP | `knowledge_fetcher` | FET | 도구 호출·데이터 수집 담당 |
-| — | — | `knowledge_interpreter` | INT | 배치 해석·KI 승격 담당 (EXP에서 분리) |
+| `context_explorer` | EXP | `context_retriever` | FET | 도구 호출·데이터 수집 담당 |
+| — | — | `context_interpreter` | INT | 배치 해석·KI 승격 담당 (EXP에서 분리) |
 | `confidence_evaluator` | EVL | `readiness_gate` | RDG | 준비도 판정 + 라우팅 |
 | `recovery_planner` | RCV | `recovery_agent` | RCV | 약어 동일, 노드명만 변경 |
 | `preprocessor` | — | *(삭제)* | — | sanitize 로직이 runner.py로 이동 |
-| `table_verifier` | — | *(삭제)* | — | 기능이 knowledge_interpreter에 흡수 |
+| `table_verifier` | — | *(삭제)* | — | 기능이 context_interpreter에 흡수 |
 | `clarify` | — | `clarification_handler` | — | Interpret/Reason 명확화 통합 |
 | `planner` | PLN | `reasoning_preparer` | PRP | 규칙 기반, LLM/프롬프트 미사용 |
 
@@ -233,8 +233,8 @@ LLM에 의존하지 않으므로 소형 모델에서도 안정적.
 
 **현상:**
 
-reasoning_preparer가 생성한 UNRESOLVED KI(예: `measure:연체율`)가 `knowledge_fetcher`+`knowledge_interpreter`의 탐색으로 사실상 해소되었음에도
-UNRESOLVED 상태로 남는다. `knowledge_interpreter`는 도구 결과에서 **새로운 KI를 추가**하지만(예: `glossary:연체율` → PROBABLE),
+reasoning_preparer가 생성한 UNRESOLVED KI(예: `measure:연체율`)가 `context_retriever`+`context_interpreter`의 탐색으로 사실상 해소되었음에도
+UNRESOLVED 상태로 남는다. `context_interpreter`는 도구 결과에서 **새로운 KI를 추가**하지만(예: `glossary:연체율` → PROBABLE),
 기존 UNRESOLVED KI와 연결하여 승격하지 않는다.
 
 ```
@@ -322,7 +322,7 @@ PLANNING → EXPLORING → VERIFYING → GENERATING → VALIDATING → REPLANNIN
 
 ```python
 # 실제 phase 전이 (코드에서 추출)
-PLANNING → EXPLORING (reasoning_preparer → knowledge_fetcher 직행)
+PLANNING → EXPLORING (reasoning_preparer → context_retriever 직행)
 EXPLORING → EXPLORING (반복 탐색)
 EXPLORING → VERIFYING (readiness_gate가 설정)
 EXPLORING → GENERATING (readiness_gate가 설정)
@@ -372,7 +372,7 @@ normalize_query → ambiguities 발견 → clarification_handler → END → (�
 **반론:**
 
 파이프라인 재실행 시 이전 턴의 conversation_history가 포함되므로,
-context_classifier → normalizer가 이전 맥락을 반영한 질의를 생성한다.
+intent_classifier → normalizer가 이전 맥락을 반영한 질의를 생성한다.
 "처음부터지만 이전 대화 맥락이 있어서 더 빨리 도달"하는 구조.
 
 **권장:** 현행 유지. Reason 상태를 세션에 캐싱하여 이어가는 구조는 복잡도가 매우 높고,
@@ -446,7 +446,7 @@ context_classifier → normalizer가 이전 맥락을 반영한 질의를 생성
 | # | 권고 | 변경 범위 | 기대 효과 |
 | --- | --- | --- | --- |
 | R3 | `Hypothesis`에 `confidence: float` 추가 + rule-based 자동 갱신 | state.py + readiness_gate | 가설별 적합도 추적, 병행 탐색 판단 근거 |
-| R4 | `KnowledgeItem`에 `unresolved_reason` 추가 | state.py + reasoning_preparer + knowledge_fetcher + knowledge_interpreter | "못 찾음" vs "안 찾음" 구분 → 전략 차별화 |
+| R4 | `KnowledgeItem`에 `unresolved_reason` 추가 | state.py + reasoning_preparer + context_retriever + context_interpreter | "못 찾음" vs "안 찾음" 구분 → 전략 차별화 |
 | R5 | `query_decomposition`, `explored_use_cases`를 TypedDict 또는 Pydantic으로 정형화 | state.py + 관련 노드 | 타입 안전성 + 자동 완성 + 문서화 |
 | R6 | `readiness_gate`에 rule-based 크로스매칭 fallback 추가 | readiness_gate.py | 배치 LLM이 KI key를 따르지 않는 경우 보완 |
 
@@ -514,7 +514,7 @@ R2  (검증 실패 부정 지식 추가) ────── 독립, 즉시 실�
 | A1 | `query_normalizer` | `normalized_query.measures[0]` | `{term: "고객 수", agg_function: "COUNT"}` | **원본** |
 | A2 | `reasoning_preparer` | `query_decomposition.measures[0]` | `{term: "고객 수", agg_function: "COUNT"}` | 아니오 — A1의 dict 복사 |
 | A3 | `reasoning_preparer` | `knowledge_items` | `key="measure:고객 수", status=UNRESOLVED` | 부분적 — 탐색 상태 추적 목적 |
-| A4 | `knowledge_interpreter` | `knowledge_items` 승격 | `key="measure:고객 수", status=PROBABLE` (배치 LLM이 해소 시) | **예** — 물리 컬럼 매핑 발견 |
+| A4 | `context_interpreter` | `knowledge_items` 승격 | `key="measure:고객 수", status=PROBABLE` (배치 LLM이 해소 시) | **예** — 물리 컬럼 매핑 발견 |
 | A5 | `reasoning_preparer` (초기 컨텍스트) | `structural_hints.agg_expressions` | `"COUNT(*)"` | 부분적 — 과거 SQL 패턴 |
 
 **sql_generator 프롬프트에 실제로 주입되는 형태:**
@@ -532,8 +532,8 @@ LLM은 이 4곳에서 "COUNT"라는 동일 사실을 만나며, **각각의 형�
 
 | # | 생성 노드 | 저장 필드 | 저장 형태 | 새 정보? |
 | --- | --- | --- | --- | --- |
-| B1 | `knowledge_fetcher` | `candidate_tables[0]` | `CandidateTable(table_name=..., relevant_columns=[...], sample_rows=[...])` | **원본** |
-| B2 | `knowledge_interpreter` | `knowledge_items` | `key="table:TB_ADW_CSC101M", value="고객마스터", status=CONFIRMED` | 아니오 — B1의 요약 |
+| B1 | `context_retriever` | `candidate_tables[0]` | `CandidateTable(table_name=..., relevant_columns=[...], sample_rows=[...])` | **원본** |
+| B2 | `context_interpreter` | `knowledge_items` | `key="table:TB_ADW_CSC101M", value="고객마스터", status=CONFIRMED` | 아니오 — B1의 요약 |
 | B3 | `reasoning_preparer` (초기 컨텍스트) | `structural_hints.source_tables` | `["TB_ADW_CSC101M"]` | 부분적 — 과거 SQL에서 발견 |
 | B4 | `result_finalizer` | `context.table_metas` | `TableMeta(table_name=..., columns=[...])` | 아니오 — B1의 재포맷 |
 
@@ -546,7 +546,7 @@ B4는 B1을 Present 계층용으로 다시 변환한 것이다.
 | --- | --- | --- | --- | --- |
 | C1 | `query_normalizer` | `normalized_query.dimensions[0]` | `{term: "지점", role: "GROUP"}` | **원본** (추상 용어) |
 | C2 | `reasoning_preparer` | `query_decomposition.group_by` | `["지점"]` | 아니오 — C1의 term 추출 |
-| C3 | `knowledge_interpreter` | `knowledge_items` | `key="column:BLNG_BRCD", value="GROUP BY 대상"` | **예** — 물리 컬럼 발견 |
+| C3 | `context_interpreter` | `knowledge_items` | `key="column:BLNG_BRCD", value="GROUP BY 대상"` | **예** — 물리 컬럼 발견 |
 | C4 | `reasoning_preparer` (초기 컨텍스트) | `structural_hints.group_by_columns` | `["BR_NM"]` | **주의** — 다른 컬럼! |
 
 **C4에서 불일치 발생.** 과거 SQL에서는 `BR_NM`(지점명)으로 GROUP BY 했는데,
@@ -666,7 +666,7 @@ normalized_query (8-Slot, Interpret 계층 산출물)
     │       │
     │       └─→ knowledge_items (UNRESOLVED)로 재포맷 ── 정보 보강 복제 (정당)
     │
-    ├─→ knowledge_fetcher + knowledge_interpreter: knowledge_items 승격 ── 정보 보강 (정당)
+    ├─→ context_retriever + context_interpreter: knowledge_items 승격 ── 정보 보강 (정당)
     │
     └─→ sql_generator: 전체를 프롬프트에 다중 주입 ──── 중복 노출의 최종 지점
 ```
@@ -709,7 +709,7 @@ sql_generator와 sql_validator가 `state.normalized_query`를 직접 참조.
 **선행 조건:** `normalized_query: Any` → `Optional[NormalizedQuery]` 타입 수정 (R1).
 타입이 `Any`인 상태에서 직접 참조하면 방어 코드가 오히려 늘어난다.
 
-**영향 파일:** `state.py`, `reasoning_preparer.py`, `sql_generator.py`, `sql_validator.py`, `knowledge_fetcher.py`, `knowledge_interpreter.py`
+**영향 파일:** `state.py`, `reasoning_preparer.py`, `sql_generator.py`, `sql_validator.py`, `context_retriever.py`, `context_interpreter.py`
 
 **비판적 검토:**
 

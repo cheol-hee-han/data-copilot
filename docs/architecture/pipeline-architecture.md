@@ -12,12 +12,12 @@
 
 | 계층 | 역할 | 노드 |
 |------|------|------|
-| **Interpret** | 사용자 의도 해석 | context_classifier, normalize_query |
+| **Interpret** | 사용자 의도 해석 | intent_classifier, normalize_query |
 | **Interpret** *(명확화)* | 통합 명확화 | clarification_handler (T1~T5 트리거, 모든 계층에서 진입) |
-| **Reason** | 에이전틱 추론 루프 | reasoning_preparer, knowledge_fetcher, knowledge_interpreter, readiness_gate, sql_generator, sql_validator, recovery_agent, result_finalizer |
+| **Reason** | 에이전틱 추론 루프 | reasoning_preparer, context_retriever, context_interpreter, readiness_gate, sql_generator, sql_validator, recovery_agent, result_finalizer |
 | **Present** | 결과 생성 및 표현 | execute_sql, analyze_data, format_response, simple_responder, error_end |
 
-> **Note:** 전처리(sanitize)는 그래프 노드가 아닌 `runner.py`에서 그래프 진입 전에 수행된다. 그래프의 진입점은 `context_classifier`이다.
+> **Note:** 전처리(sanitize)는 그래프 노드가 아닌 `runner.py`에서 그래프 진입 전에 수행된다. 그래프의 진입점은 `intent_classifier`이다.
 
 **핵심 소스 파일:**
 
@@ -27,8 +27,8 @@
 | `src/agents/graph/runner.py` | 파이프라인 실행 진입점 (sanitize 전처리 포함) |
 | `src/agents/state/state.py` | PipelineState, ReasoningState 정의 |
 | `src/services/confidence_scorer.py` | 행동 판정 SSOT (evaluate_readiness) |
-| `src/agents/nodes/reason/knowledge_fetcher.py` | 도구 기반 컨텍스트 검색 (ES, Qdrant, DB) |
-| `src/agents/nodes/reason/knowledge_interpreter.py` | 검색 결과 해석, knowledge_items 승격 |
+| `src/agents/nodes/reason/context_retriever.py` | 도구 기반 컨텍스트 검색 (ES, Qdrant, DB) |
+| `src/agents/nodes/reason/context_interpreter.py` | 검색 결과 해석, knowledge_items 승격 |
 | `src/agents/nodes/reason/recovery_agent.py` | 실패 후 재계획 전용 (execution_plan 재수립) |
 | `src/agents/nodes/interpret/clarification_handler.py` | 통합 명확화 노드 (AmbiguitySignal 기반) |
 
@@ -56,7 +56,7 @@ flowchart TD
     end
 
     subgraph interpret["Interpret 계층"]
-        SAN -->|정상| CC["context_classifier
+        SAN -->|정상| CC["intent_classifier
         이력해소 + 의도분류"]
         CC -->|DATA| NQ["normalize_query
         8-Slot 정규화"]
@@ -77,9 +77,9 @@ flowchart TD
     subgraph reason["Reason 계층 — 에이전틱 추론 루프"]
         RP["reasoning_preparer
         가설·탐색계획"]
-        RP --> KF["knowledge_fetcher
+        RP --> KF["context_retriever
         ES / Qdrant / DB 검색"]
-        KF --> KI["knowledge_interpreter
+        KF --> KI["context_interpreter
         결과해석·지식승격"]
         KI --> RG["readiness_gate
         준비도 판정"]
@@ -146,7 +146,7 @@ flowchart LR
     subgraph pipeline["파이프라인"]
         direction TB
         SAN["runner.py: sanitize"]
-        CC2["context_classifier"]
+        CC2["intent_classifier"]
         CLR2["clarification_handler"]
         PIPE["... (reason → present)"]
     end
@@ -169,16 +169,16 @@ flowchart LR
 
 **멀티턴 상태 전이:**
 
-| 턴 | 사용자 입력 | context_classifier 판정 | 결과 |
+| 턴 | 사용자 입력 | intent_classifier 판정 | 결과 |
 |----|-----------|---------------------|------|
 | 1 | "데이터 좀 뽑아줘" | SKIP (이력 없음) → AMBIGUOUS | 명확화 질문 |
 | 2 | "이번달 여신 잔액" | CONTINUE (명확화 응답) → DATA_EXTRACTION | 이전 맥락 + 현재 입력 합성 → 정규화 진행 |
 | 3 | "그거 지점별로 나눠줘" | CONTINUE (지시대명사) → DATA_EXTRACTION | 이전 결과 + "지점별" 추가 → 재실행 |
 | 4 | "오늘 날씨 어때?" | NEW → CASUAL_TALK | simple_responder → 정형 응답 |
 
-**context_classifier 내부 흐름:**
+**intent_classifier 내부 흐름:**
 
-context_classifier는 이력 해소와 의도 분류를 단일 LLM 호출로 통합한다.
+intent_classifier는 이력 해소와 의도 분류를 단일 LLM 호출로 통합한다.
 
 1. 대화 이력 없음 → `SKIP` (이력 해소 LLM 호출 생략)
 2. 이력 있음 → 룰 기반 게이트 → 필요 시 LLM 호출:
@@ -223,7 +223,7 @@ PLANNING → EXPLORING → VERIFYING → GENERATING → VALIDATING → REPLANNIN
 | `candidate_tables` | `list[CandidateTable]` | 후보 테이블 목록 |
 | `dead_ends` | `list[DeadEnd]` | 실패한 가설 기록 |
 | `loop_guard` | `LoopGuard` | 루프 제어 카운터 |
-| `exploration_phase` | `str` (initial/recovery) | 현재 탐색 페이즈 (knowledge_fetcher vs recovery_agent 경유) |
+| `exploration_phase` | `str` (initial/recovery) | 현재 탐색 페이즈 (context_retriever vs recovery_agent 경유) |
 | `recovery_entry_source` | `str` | recovery_agent 진입 출발 노드 |
 | `conflicted_bounce_count` | `int` | CONFLICTED 항목으로 인한 clarify 왕복 횟수 |
 | `is_force_generated` | `bool` | 루프 가드 한계 도달로 인한 강제 생성 여부 |
@@ -258,8 +258,8 @@ flowchart TD
     PLAN --> FETCH
 
     subgraph exploring["EXPLORING 단계 (2-노드 분리)"]
-        FETCH["knowledge_fetcher_node<br/><small>도구 기반 검색 실행<br/>(ES, Qdrant, DB)</small>"]
-        FETCH -->|"검색 결과 전달"| INTERP["knowledge_interpreter_node<br/><small>결과 해석·knowledge_items 승격<br/>(batch interpret)</small>"]
+        FETCH["context_retriever_node<br/><small>도구 기반 검색 실행<br/>(ES, Qdrant, DB)</small>"]
+        FETCH -->|"검색 결과 전달"| INTERP["context_interpreter_node<br/><small>결과 해석·knowledge_items 승격<br/>(batch interpret)</small>"]
     end
 
     INTERP --> EVAL
@@ -277,7 +277,7 @@ flowchart TD
     TERMINATE["TERMINATE<br/>→ result_finalizer"] --> FIN
     ASK_USER["ASK_USER<br/>→ clarification_handler"] --> CLR_U(["clarification_handler<br/><small>→ source_node 복귀</small>"])
     GENERATE["GENERATE<br/>→ sql_generator"] --> GEN
-    EXPLORE_MORE["EXPLORE<br/>→ knowledge_fetcher"] --> FETCH
+    EXPLORE_MORE["EXPLORE<br/>→ context_retriever"] --> FETCH
     REPLAN_V["REPLAN<br/>→ recovery_agent"] --> REC
 
     subgraph generating["GENERATING 단계"]
@@ -381,7 +381,7 @@ OR (pending 가설 없음 AND current_hypothesis 없음)
 ### 5.1 전처리 (runner.py — 그래프 진입 전)
 
 > **v3.1 변경:** `preprocess` 노드가 제거되고, 전처리(sanitize)가 `runner.py`의 그래프 호출 전 단계로 이동하였다.
-> 그래프의 진입점은 `context_classifier`이다.
+> 그래프의 진입점은 `intent_classifier`이다.
 
 LLM 호출 없이 입력을 정규화하고 보안 위협을 사전 차단한다.
 
@@ -391,13 +391,13 @@ LLM 호출 없이 입력을 정규화하고 보안 위협을 사전 차단한다
 - 프롬프트 인젝션 감지 (13종 패턴)
 - 공백 정규화
 
-### 5.2 이력 해소 + 의도 분류 (context_classifier_node)
+### 5.2 이력 해소 + 의도 분류 (intent_classifier_node)
 
-> **v3.2 변경:** 기존 `resolve_history` + `classify_intent` 2개 노드가 `context_classifier` 단일 노드로 통합되었다.
-> 위치: `src/agents/nodes/interpret/context_classifier.py`
-> 내부적으로 `services/context_classifier.py`를 호출한다.
+> **v3.2 변경:** 기존 `resolve_history` + `classify_intent` 2개 노드가 `intent_classifier` 단일 노드로 통합되었다.
+> 위치: `src/agents/nodes/interpret/intent_classifier.py`
+> 내부적으로 `services/intent_classifier.py`를 호출한다.
 
-context_classifier는 이력 해소와 의도 분류를 단일 LLM 호출로 수행한다.
+intent_classifier는 이력 해소와 의도 분류를 단일 LLM 호출로 수행한다.
 비데이터 의도(CASUAL_TALK, META_QUESTION)는 `simple_responder`로 라우팅된다.
 
 **의도 분류 결과:**
@@ -444,8 +444,8 @@ AMBIGUOUS       — 모호 → clarification_handler
 
 | 트리거 | 출발 노드 | 조건 | 동작 |
 | ------ | --------- | ---- | ---- |
-| T1 | context_classifier | UNSURE (맥락 불분명) | 이전 대화 맥락 관련 명확화 질문 |
-| T2 | context_classifier | AMBIGUOUS (의도 불분명) | intent별 명확화 질문 |
+| T1 | intent_classifier | UNSURE (맥락 불분명) | 이전 대화 맥락 관련 명확화 질문 |
+| T2 | intent_classifier | AMBIGUOUS (의도 불분명) | intent별 명확화 질문 |
 | T3 | normalize_query | ambiguities 발견 | 슬롯 모호성 기반 타겟 질문 |
 | T4 | readiness_gate | CONFLICTED 항목 존재 | 충돌하는 지식 항목에 대한 사용자 확인 |
 | T5 | sql_generator / recovery_agent / result_finalizer | 교차 DB 감지, 가설 충돌 등 | Reason 계층 내 모호성 해소 |
@@ -498,13 +498,13 @@ SQL 결과를 사용자 친화적 한국어 보고서로 변환한다.
 
 | 함수 | 입력 조건 | 분기 |
 |------|----------|------|
-| `_route_after_context_classifier` | `pending_signals / intent 유형` | → clarification_handler / simple_responder / normalize_query / reasoning_preparer / error_end |
+| `_route_after_intent_classifier` | `pending_signals / intent 유형` | → clarification_handler / simple_responder / normalize_query / reasoning_preparer / error_end |
 | `_next_after_intent` | `normalization_enabled` | → normalize_query / reasoning_preparer |
 | `_route_after_normalize` | `pending_signals` | → clarification_handler / reasoning_preparer |
-| `_route_after_readiness_gate` | `evaluate_readiness()` 반환값 | → knowledge_fetcher / sql_generator / recovery_agent / result_finalizer / clarification_handler |
+| `_route_after_readiness_gate` | `evaluate_readiness()` 반환값 | → context_retriever / sql_generator / recovery_agent / result_finalizer / clarification_handler |
 | `_route_after_sql_generator` | `pending_signals` | → sql_validator / clarification_handler |
 | `_route_after_sql_validator` | `validation_checks` | → 5가지 분기 (4.5절 참조): conclude_success / fix_syntax / fix_local / replan / conclude_failure |
-| `_route_after_recovery_agent` | `phase` (EXPLORING/GENERATING/DONE) | → knowledge_fetcher / sql_generator / result_finalizer / clarification_handler |
+| `_route_after_recovery_agent` | `phase` (EXPLORING/GENERATING/DONE) | → context_retriever / sql_generator / result_finalizer / clarification_handler |
 | `_route_after_result_finalizer` | `pending_signals / error_message / validated_sql` | → clarification_handler / error_end / execute_sql |
 | `_route_after_clarify` | `source_node` (해소된 signal) | → source_node로 복귀 |
 | `_route_after_execution` | `status == ERROR / intent 유형` | → error_end / analyze_data / format_response |
@@ -705,7 +705,7 @@ TraceEntry             — node, action, detail, timestamp
 
 #### ISSUE-2: `intent_confidence` — 쓰기만 하고 읽지 않음
 
-**현상:** context_classifier에서 값을 기록하지만 (2곳), **라우팅이나 다운스트림에서 참조하는 곳이 0건**. `_route_after_context_classifier()`는 `state.intent` 값만 보고 분기한다.
+**현상:** intent_classifier에서 값을 기록하지만 (2곳), **라우팅이나 다운스트림에서 참조하는 곳이 0건**. `_route_after_intent_classifier()`는 `state.intent` 값만 보고 분기한다.
 
 **판정:** 현재 불필요.
 
@@ -717,7 +717,7 @@ TraceEntry             — node, action, detail, timestamp
 
 #### ISSUE-3: `query_category` — `intent`와 역할 경계 모호
 
-**현상:** `intent`가 `DATA_EXTRACTION` 등 대분류, `query_category`가 LLM이 반환한 원문 카테고리(`"DATA_QUERY"` 등). 그런데 query_category를 참조하는 곳은 context_classifier(쓰기)와 insight_builder(읽기) **2곳뿐**.
+**현상:** `intent`가 `DATA_EXTRACTION` 등 대분류, `query_category`가 LLM이 반환한 원문 카테고리(`"DATA_QUERY"` 등). 그런데 query_category를 참조하는 곳은 intent_classifier(쓰기)와 insight_builder(읽기) **2곳뿐**.
 
 **판정:** intent로 충분하며 query_category는 중복.
 
@@ -741,7 +741,7 @@ TraceEntry             — node, action, detail, timestamp
 
 #### ISSUE-5: `clarification_response` — 실질적으로 사용되지 않음
 
-**현상:** runner.py에서 명확화 응답 시 값을 기록하고, context_classifier에서 빈 문자열로 리셋한다. **다운스트림에서 이 값을 읽어서 사용하는 곳이 0건**. 명확화 응답은 `user_input` → `preprocessed_input`으로 흘러가기 때문.
+**현상:** runner.py에서 명확화 응답 시 값을 기록하고, intent_classifier에서 빈 문자열로 리셋한다. **다운스트림에서 이 값을 읽어서 사용하는 곳이 0건**. 명확화 응답은 `user_input` → `preprocessed_input`으로 흘러가기 때문.
 
 **판정:** 불필요.
 
@@ -816,14 +816,14 @@ TraceEntry             — node, action, detail, timestamp
 
 | 디렉토리 | 파일 수 | 예시 |
 |----------|---------|------|
-| `interpret/` | 13 | `context_classifier_system.txt`, `query_normalizer_phase1_user.txt` + 미사용 7건 |
-| `reason/` | 8 | `knowledge_interpreter_system.txt`, `sql_generator_system.txt`, `sql_generator_fix_section.txt`, `sql_validator_system.txt`, `recovery_agent_system.txt` + 미사용 3건 |
-| `present/` | 8 | `analyzer_system.txt`, `formatter_user.txt` |
+| `interpret/` | 13 | `intent_classifier_system.txt`, `query_normalizer_phase1_user.txt` + 미사용 7건 |
+| `reason/` | 8 | `context_interpreter_system.txt`, `sql_generator_system.txt`, `sql_generator_fix_section.txt`, `sql_validator_system.txt`, `recovery_agent_system.txt` + 미사용 3건 |
+| `present/` | 6 | `analyzer_system.txt`, `analyzer_viz_judgment_system.txt` 등 (formatter 프롬프트는 rule-based 전환으로 삭제됨) |
 
 > **v3.1 추가 프롬프트:**
-> - `knowledge_interpreter_system.txt` — 검색 결과 해석·지식 승격용
+> - `context_interpreter_system.txt` — 검색 결과 해석·지식 승격용
 > - `recovery_agent_system.txt` — 재계획 전용 recovery_agent 시스템 프롬프트 (v3.2: ReAct → Plan-and-Execute)
-> - `미사용_table_comparison_system.txt` — (미사용) 유사 테이블 비교 — knowledge_interpreter로 통합
+> - `미사용_table_comparison_system.txt` — (미사용) 유사 테이블 비교 — context_interpreter로 통합
 
 ---
 
@@ -850,8 +850,8 @@ TraceEntry             — node, action, detail, timestamp
 | 버전 | 날짜 | 주요 변경 |
 |------|------|----------|
 | **3.3** | 2026-04-02 | `planner` → `reasoning_preparer` 리네이밍. Fast-Path 바이패스 메커니즘 제거 (`fast_path_triggered`, `explore_after_fast_path` 삭제). 확신도 임계값 0.75 → 0.65 변경. 미존재 상태 필드 정리 (`confirmed_join_path`, `sampled_tables`, `rejected_tables`, `sql_fix_instruction`, `sql_validation_result`, `fast_path_triggered`, `awaiting_clarification` 제거). 라우팅 함수명 수정 (`_route_after_clarification_handler` → `_route_after_clarify`). |
-| **3.2** | 2026-04-02 | `recovery_agent`를 ReAct 내부 루프에서 재계획 전용 노드로 변경. 도구 실행·결과 해석·판정을 제거하고 LLM 1회 호출로 새 execution_plan만 수립. 출구를 `knowledge_fetcher`(기존 파이프라인 재진입)로 변경. 프롬프트 재작성, config에서 ReAct 전용 설정 3개 삭제. |
-| **3.1** | 2026-04-01 | 노드 리네이밍 반영: `preprocess` 제거 (runner.py sanitize로 이동), `context_explorer` → `knowledge_fetcher` + `knowledge_interpreter` 분리, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent` (ReAct), `clarify` → `clarification_handler` (AmbiguitySignal 패턴, T1~T5 트리거). `_route_after_sql_validator` 분기 명칭 정리. 신규 상태 필드 추가 (`exploration_phase`, `recovery_entry_source`, `conflicted_bounce_count`, `is_force_generated`, `pending_signals`, `resolved_signals`). 신규 프롬프트 3종 추가. |
+| **3.2** | 2026-04-02 | `recovery_agent`를 ReAct 내부 루프에서 재계획 전용 노드로 변경. 도구 실행·결과 해석·판정을 제거하고 LLM 1회 호출로 새 execution_plan만 수립. 출구를 `context_retriever`(기존 파이프라인 재진입)로 변경. 프롬프트 재작성, config에서 ReAct 전용 설정 3개 삭제. |
+| **3.1** | 2026-04-01 | 노드 리네이밍 반영: `preprocess` 제거 (runner.py sanitize로 이동), `context_explorer` → `context_retriever` + `context_interpreter` 분리, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent` (ReAct), `clarify` → `clarification_handler` (AmbiguitySignal 패턴, T1~T5 트리거). `_route_after_sql_validator` 분기 명칭 정리. 신규 상태 필드 추가 (`exploration_phase`, `recovery_entry_source`, `conflicted_bounce_count`, `is_force_generated`, `pending_signals`, `resolved_signals`). 신규 프롬프트 3종 추가. |
 | **3.0** | 2026-03-25 | 3계층 파이프라인 재설계, 전체 문서 신규 작성 |
 | **2.0** | 2026-03-20 | 아키텍처 재설계 문서화 |
 | **1.0** | 2026-03-15 | 초기 버전 |

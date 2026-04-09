@@ -1,5 +1,7 @@
 """Qdrant 벡터 스토어 커넥터 — 업무 매뉴얼 및 SQL 수행이력 시맨틱 검색.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 2개의 Qdrant 컬렉션을 대상으로 서로 다른 검색 전략을 적용한다.
 biz_manual 컬렉션은 Dense 벡터 단일 검색으로 업무 매뉴얼(여신 심사, 연체 관리,
 수신 상품, BIS 비율, 고객 등급 등)에서 관련 문서를 검색한다.
@@ -72,7 +74,7 @@ class QdrantConnector(SearchConnector):
         self._embed_model: Any = None
 
     async def connect(self) -> None:
-        """Qdrant 연결 초기화."""
+        """Qdrant 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("Qdrant Dummy 모드로 초기화")
             return
@@ -87,18 +89,19 @@ class QdrantConnector(SearchConnector):
         logger.info("Qdrant 연결 완료")
 
     async def disconnect(self) -> None:
-        """Qdrant 연결 종료."""
+        """Qdrant 연결을 종료한다."""
         if self._client:
             await self._client.close()
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         try:
             await self._client.get_collections()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     async def search(
@@ -242,13 +245,34 @@ class QdrantConnector(SearchConnector):
     # ──────────────────────────────────────────────────────
 
     async def search_manual(
-        self, query: str, top_k: int | None = None
+        self,
+        query: str,
+        top_k: int | None = None,
+        exclude_ids: list[str | int] | None = None,
     ) -> list[dict[str, Any]]:
-        """업무 매뉴얼에서 관련 문서를 검색한다."""
+        """업무 매뉴얼에서 관련 문서를 검색한다.
+
+        Args:
+            exclude_ids: 이전 검색에서 반환된 point id 목록.
+                지정하면 해당 id를 검색에서 제외하고,
+                제외된 만큼 limit을 보정한다.
+        """
         if top_k is None:
             top_k = settings.qdrant_search_top_k
         if self._use_dummy:
             return search_dummy_manuals(query, top_k)
+
+        query_filter = None
+        effective_limit = top_k
+        if exclude_ids:
+            from qdrant_client.models import Filter, HasIdCondition
+            query_filter = Filter(
+                must_not=[HasIdCondition(has_id=exclude_ids)],
+            )
+            effective_limit = min(
+                top_k + len(exclude_ids),
+                settings.qdrant_manual_max_limit,
+            )
 
         embedding = self.encode_dense_only(query)
 
@@ -256,16 +280,21 @@ class QdrantConnector(SearchConnector):
         results = await self._client.search(
             collection_name=settings.qdrant_collection_name,
             query_vector=("dense", embedding),
-            limit=top_k,
+            limit=effective_limit,
+            query_filter=query_filter,
         )
         elapsed = (_time.perf_counter() - start) * 1000
         logger.info(
             "Qdrant 매뉴얼 검색",
             query=truncate_log(query),
             count=len(results),
+            excluded=len(exclude_ids) if exclude_ids else 0,
             latency_ms=round(elapsed, 1),
         )
-        return [hit.payload for hit in results]
+        return [
+            {**hit.payload, "_point_id": str(hit.id)}
+            for hit in results[:top_k]
+        ]
 
     # ──────────────────────────────────────────────────────
     # sql_history 검색 (Dense + Sparse 하이브리드 → RRF → Rerank)
@@ -276,6 +305,7 @@ class QdrantConnector(SearchConnector):
         query: str,
         prefetch_limit: int | None = None,
         top_k: int | None = None,
+        exclude_ids: list[str | int] | None = None,
     ) -> list[dict[str, Any]]:
         """SQL 수행이력에서 유사한 SQL을 하이브리드 검색 + 재순위한다.
 
@@ -283,6 +313,12 @@ class QdrantConnector(SearchConnector):
         2단계: Reranker Cross-Encoder 재순위 (상위 top_k건)
         Reranker 비활성 시 RRF 스코어 기준 상위 top_k건 폴백.
         반환 dict에 similarity 필드를 추가하여 confidence_scorer 호환성을 보장한다.
+
+        Args:
+            exclude_ids: 이전 검색에서 반환된 point id 목록.
+                지정하면 해당 id를 HNSW 탐색에서 제외하고,
+                제외된 만큼 prefetch_limit을 보정하여
+                reranker에 항상 동일한 수의 후보가 들어가도록 한다.
         """
         if prefetch_limit is None:
             prefetch_limit = (
@@ -296,11 +332,25 @@ class QdrantConnector(SearchConnector):
             )
 
         from qdrant_client.models import (
+            Filter,
             Fusion,
             FusionQuery,
+            HasIdCondition,
             Prefetch,
             SparseVector,
         )
+
+        # seen_ids 필터 + prefetch 보정
+        query_filter = None
+        effective_prefetch = prefetch_limit
+        if exclude_ids:
+            query_filter = Filter(
+                must_not=[HasIdCondition(has_id=exclude_ids)],
+            )
+            effective_prefetch = min(
+                prefetch_limit + len(exclude_ids),
+                settings.qdrant_max_prefetch,
+            )
 
         emb = self.encode(query)
 
@@ -318,27 +368,33 @@ class QdrantConnector(SearchConnector):
                 Prefetch(
                     query=emb.dense,
                     using="dense",
-                    limit=prefetch_limit,
+                    limit=effective_prefetch,
+                    filter=query_filter,
                 ),
                 Prefetch(
                     query=sparse_vector,
                     using="sparse",
-                    limit=prefetch_limit,
+                    limit=effective_prefetch,
+                    filter=query_filter,
                 ),
             ],
             query=FusionQuery(fusion=Fusion.RRF),
-            limit=prefetch_limit,
+            limit=effective_prefetch,
+            query_filter=query_filter,
         )
         elapsed = (_time.perf_counter() - start) * 1000
 
+        # _point_id 포함하여 다음 호출 시 exclude_ids로 전달 가능
         payloads = [
-            {**point.payload, "_score": point.score}
+            {**point.payload, "_score": point.score,
+             "_point_id": str(point.id)}
             for point in results.points
         ]
         logger.info(
             "Qdrant sql_history 하이브리드 검색",
             query=truncate_log(query),
             count=len(payloads),
+            excluded=len(exclude_ids) if exclude_ids else 0,
             latency_ms=round(elapsed, 1),
         )
 

@@ -7,12 +7,17 @@
 
 {original_query}
 
-## 질의 분해
+## 질의 분해 (정규화 결과 중 구조적 체크 대상)
+
+아래는 질의 정규화에서 추출한 구조 요소이다.
+기간·질의유형·대상 엔티티 등은 포함되지 않으며,
+체크 7(논리적 정합성)에서 원문 질의 기준으로 별도 검증한다.
 
 - measure: {measures}
 - filters: {filters}
 - group_by: {group_by}
 - order_limit: {order_limit}
+- output_hint: {output_hint}
 
 ## 생성된 SQL
 
@@ -44,7 +49,12 @@
 4. **order_limit 반영**: 정렬/제한이 ORDER BY / LIMIT에 반영되었는가?
 5. **미확인 값 사용**: CONFIRMED되지 않은 코드값이나 컬럼명을 사용하지 않았는가?
 6. **dead_end 반복**: 실패한 접근 패턴을 반복하지 않았는가?
-7. **논리적 정합성**: SQL의 전체 로직이 사용자 질의의 의도와 부합하는가? 0건 반환은 질의 의도에 따라 유효할 수 있음(존재 여부 확인, 조건에 해당하는 데이터가 실제로 없는 경우 등). 0건 자체를 실패로 판정하지 말고 의도 부합 여부로 판단하라.
+7. **논리적 정합성**: 사용자의 원문 질의({original_query})를 기준으로, SQL의 전체 로직이 원래 의도와 부합하는가? 질의 분해(체크 1-4)는 정규화 결과의 일부이며 불완전할 수 있으므로, 이 체크에서는 원문 질의를 직접 대조하라.
+   확인 포인트:
+   - 기간: 사용자가 언급한 기간(이번 달, 작년, 최근 3개월 등)이 WHERE 절에 올바르게 반영되었는가?
+   - 질의 유형: 순위 질의라면 ORDER BY + LIMIT, 추이 질의라면 날짜 축 GROUP BY, 비교 질의라면 비교 구조가 있는가?
+   - 대상: 사용자가 언급한 대상(예금, 대출, 고객 등)이 적절한 테이블에서 조회되는가?
+   - 0건 반환은 질의 의도에 따라 유효할 수 있음(존재 여부 확인, 조건에 해당하는 데이터가 실제로 없는 경우 등). 0건 자체를 실패로 판정하지 말고 의도 부합 여부로 판단하라.
 8. **DB 실행 결과**: DB 실행 에러가 있을 경우, 테이블 스키마(컬럼 타입)를 참고하여 원인을 분석하고 수정 방법을 제시하라. DB 실행이 성공(PASS)이면 pass=true.
 
 ## failure_classification 기준
@@ -70,25 +80,40 @@ verdict가 FAIL일 때, 아래 기준에 따라 failure_classification을 판정
 순수 JSON만 출력하세요. 마크다운 코드블록(```)이나 설명 텍스트를 포함하지 마세요.
 
 {
-  "verdict": "PASS",
-  "failure_classification": "",
+  "verdict": "PASS 또는 FAIL",
+  "failure_classification": "FAIL일 때만 local_fix 또는 structural, PASS이면 빈 문자열",
   "checks": {
-    "measure_reflected": {"pass": true, "detail": ""},
-    "filters_reflected": {"pass": true, "detail": ""},
-    "group_by_reflected": {"pass": true, "detail": ""},
-    "order_limit_reflected": {"pass": true, "detail": ""},
-    "no_unconfirmed_values": {"pass": true, "detail": ""},
-    "no_dead_end_repeat": {"pass": true, "detail": ""},
-    "logical_consistency": {"pass": true, "detail": ""},
-    "db_execution": {"pass": true, "detail": ""}
+    "measure_reflected": {"pass": "(판정)", "detail": "(판정 사유)"},
+    "filters_reflected": {"pass": "(판정)", "detail": "(판정 사유)"},
+    "group_by_reflected": {"pass": "(판정)", "detail": "(판정 사유)"},
+    "order_limit_reflected": {"pass": "(판정)", "detail": "(판정 사유)"},
+    "no_unconfirmed_values": {"pass": "(판정)", "detail": "(판정 사유)"},
+    "no_dead_end_repeat": {"pass": "(판정)", "detail": "(판정 사유)"},
+    "logical_consistency": {"pass": "(판정)", "detail": "(판정 사유)"},
+    "db_execution": {"pass": "(판정)", "detail": "(판정 사유)"}
   },
-  "fix_instruction": ""
+  "validation_summary": "(검증 총평)",
+  "fix_instruction": "FAIL일 때만 작성"
 }
 
-verdict는 "PASS" 또는 "FAIL" 중 하나.
 하나라도 pass=false이면 verdict는 반드시 "FAIL"이어야 합니다.
 failure_classification은 FAIL일 때만 "local_fix" 또는 "structural" 중 하나를 기재합니다. PASS이면 빈 문자열.
 fix_instruction은 FAIL일 때만 작성하세요 — SQL 생성자가 즉시 수정할 수 있도록 구체적으로 기술합니다.
+
+### validation_summary 작성 규칙
+
+verdict와 무관하게 항상 작성하라.
+8개 체크 항목의 개별 판정을 종합하여, SQL이 사용자 질의 의도를
+얼마나 충실히 반영하는지 한 문단으로 요약하라.
+
+포함할 내용:
+- 전체 의도 부합 여부와 그 근거
+- 정규화가 불완전할 수 있는 부분을 감안한 판단이 있었다면 그 내용
+- 개별 체크 간 상호 보완 판단 (예: filter가 느슨하나 group_by가 보정)
+- PASS이지만 주의할 점이 있다면 언급
+
+이 텍스트는 사용자(비IT 직원)가 직접 읽는 것이 아니라,
+formatter LLM이 사용자 친화적으로 재가공하는 재료이다. IT 용어 사용 가능.
 
 ---
 
@@ -99,11 +124,11 @@ fix_instruction은 FAIL일 때만 작성하세요 — SQL 생성자가 즉시 �
 DB 실행 결과: PASS (5건 반환)
 생성된 SQL:
 ```sql
-SELECT B.BRANCH_NM AS 지점명, COUNT(*) AS 신규대출건수
-FROM TB_LOAN_EXEC A
-INNER JOIN TB_BRANCH B ON A.BRANCH_CD = B.BRANCH_CD
-WHERE A.EXEC_DT >= DATE_TRUNC('month', CURRENT_DATE)
-GROUP BY B.BRANCH_NM
+SELECT B.BR_NM AS 지점명, COUNT(*) AS 신규대출건수
+FROM ADWOWN.TB_ADW_LNB301M A
+INNER JOIN ADWOWN.TB_ADW_COM001M B ON A.BLNG_BRCD = B.BLNG_BRCD
+WHERE A.LN_DT >= DATE_TRUNC('month', CURRENT_DATE)
+GROUP BY B.BR_NM
 ORDER BY 신규대출건수 DESC
 LIMIT 1000
 ```
@@ -114,14 +139,15 @@ LIMIT 1000
   "failure_classification": "",
   "checks": {
     "measure_reflected": {"pass": true, "detail": "COUNT(*) AS 신규대출건수 — 건수 집계 반영됨"},
-    "filters_reflected": {"pass": true, "detail": "EXEC_DT >= DATE_TRUNC 조건으로 이번 달 필터 반영"},
-    "group_by_reflected": {"pass": true, "detail": "GROUP BY B.BRANCH_NM — 지점별 그룹핑 반영"},
+    "filters_reflected": {"pass": true, "detail": "LN_DT >= DATE_TRUNC 조건으로 이번 달 필터 반영"},
+    "group_by_reflected": {"pass": true, "detail": "GROUP BY B.BR_NM — 지점별 그룹핑 반영"},
     "order_limit_reflected": {"pass": true, "detail": "ORDER BY + LIMIT 1000 포함"},
     "no_unconfirmed_values": {"pass": true, "detail": "모든 테이블/컬럼이 CONFIRMED 상태"},
     "no_dead_end_repeat": {"pass": true, "detail": "dead_ends 비어있음"},
     "logical_consistency": {"pass": true, "detail": "지점별 신규 대출 건수 조회 의도와 SQL 로직 일치"},
     "db_execution": {"pass": true, "detail": "5건 반환 확인"}
   },
+  "validation_summary": "사용자의 '지점별 이번 달 신규 대출 건수' 질의에 대해 LN_DT 기준 당월 필터, COUNT(*) 집계, 지점별 GROUP BY가 모두 반영됨. DB 5건 정상 반환. 정규화 슬롯과 SQL 구조가 정확히 일치하며 의도 부합에 문제 없음.",
   "fix_instruction": ""
 }
 
@@ -131,11 +157,11 @@ LIMIT 1000
 
 사용자 질의: "이번 년도 예금 신규 상위 10개 지점"
 DB 실행 결과: FAIL: operator does not exist: date >= text
-테이블 스키마: TB_ADW_DEP201P — OPEN_DT DATE [PK]
+테이블 스키마: ADWOWN.TB_ADW_DEP201P — OPEN_DT DATE [PK]
 생성된 SQL:
 ```sql
-SELECT B.BR_NM, COUNT(*) FROM TB_ADW_DEP201P A
-INNER JOIN TB_ADW_COM001M B ON A.BLNG_BRCD = B.BLNG_BRCD
+SELECT B.BR_NM, COUNT(*) FROM ADWOWN.TB_ADW_DEP201P A
+INNER JOIN ADWOWN.TB_ADW_COM001M B ON A.BLNG_BRCD = B.BLNG_BRCD
 WHERE A.OPEN_DT >= '20260101'
 GROUP BY B.BR_NM ORDER BY COUNT(*) DESC LIMIT 10
 ```
@@ -154,6 +180,7 @@ GROUP BY B.BR_NM ORDER BY COUNT(*) DESC LIMIT 10
     "logical_consistency": {"pass": true, "detail": "질의 의도와 SQL 로직 일치"},
     "db_execution": {"pass": false, "detail": "OPEN_DT는 DATE 타입인데 문자열 '20260101'과 비교하여 타입 불일치 발생"}
   },
+  "validation_summary": "질의 의도와 SQL 구조는 일치하나, OPEN_DT가 DATE 타입인데 문자열 비교를 시도하여 DB 실행 에러 발생. 날짜 함수로 변환하면 해결 가능한 local_fix 수준 문제.",
   "fix_instruction": "OPEN_DT는 DATE 타입입니다. 문자열 비교 대신 날짜 비교를 사용하세요: WHERE A.OPEN_DT >= DATE_TRUNC('year', CURRENT_DATE)"
 }
 
@@ -163,13 +190,13 @@ GROUP BY B.BR_NM ORDER BY COUNT(*) DESC LIMIT 10
 
 사용자 질의: "작년 해외 송금 건수"
 DB 실행 결과: PASS (0건 반환)
-dead_ends: [{failure_type: "EMPTY_RESULT", reason: "TB_FX_TRANSFER에서 조건 FX_TYPE='OVERSEAS' 결과 0건"}]
+dead_ends: [{failure_type: "EMPTY_RESULT", reason: "ADWOWN.TB_ADW_FXD501L에서 조건 FX_DL_DCD='OVERSEAS' 결과 0건"}]
 생성된 SQL:
 ```sql
 SELECT COUNT(*) AS 송금건수
-FROM TB_FX_TRANSFER
-WHERE FX_TYPE = 'OVERSEAS'
-  AND TXN_DT >= '20240101' AND TXN_DT < '20250101'
+FROM ADWOWN.TB_ADW_FXD501L
+WHERE FX_DL_DCD = 'OVERSEAS'
+  AND SETL_DT >= '20250101' AND SETL_DT < '20260101'
 LIMIT 1000
 ```
 
@@ -182,10 +209,47 @@ LIMIT 1000
     "filters_reflected": {"pass": true, "detail": "기간 조건 + 해외송금 필터 반영"},
     "group_by_reflected": {"pass": true, "detail": "group_by 없음 — 해당 없음"},
     "order_limit_reflected": {"pass": true, "detail": "LIMIT 포함"},
-    "no_unconfirmed_values": {"pass": false, "detail": "FX_TYPE='OVERSEAS' 코드값이 confirmed_terms에 없음"},
-    "no_dead_end_repeat": {"pass": false, "detail": "dead_ends에 'TB_FX_TRANSFER + FX_TYPE=OVERSEAS → 0건' 실패 기록 있음 — 동일 패턴 반복"},
+    "no_unconfirmed_values": {"pass": false, "detail": "FX_DL_DCD='OVERSEAS' 코드값이 confirmed_terms에 없음"},
+    "no_dead_end_repeat": {"pass": false, "detail": "dead_ends에 'TB_ADW_FXD501L + FX_DL_DCD=OVERSEAS → 0건' 실패 기록 있음 — 동일 패턴 반복"},
     "logical_consistency": {"pass": false, "detail": "이전에 0건 반환된 동일 조합을 그대로 재시도하고 있음"},
     "db_execution": {"pass": true, "detail": "실행 성공 (0건은 의미 검증에서 판단)"}
   },
-  "fix_instruction": "TB_FX_TRANSFER + FX_TYPE='OVERSEAS' 조합은 이전에 0건이었습니다. 1) 다른 테이블(TB_REMITTANCE 등)을 탐색하거나, 2) 해외송금 필터 조건을 코드메타에서 재확인하세요. 동일한 테이블+조건 조합을 반복하지 마세요."
+  "validation_summary": "dead_ends에 기록된 동일 테이블+코드값 조합을 반복하고 있으며, 해당 코드값이 confirmed_terms에 없음. 테이블 재탐색 또는 코드메타 재확인이 필요한 구조적 문제.",
+  "fix_instruction": "ADWOWN.TB_ADW_FXD501L + FX_DL_DCD='OVERSEAS' 조합은 이전에 0건이었습니다. 1) 다른 테이블을 탐색하거나, 2) 해외송금 필터 조건을 코드메타에서 재확인하세요. 동일한 테이블+조건 조합을 반복하지 마세요."
+}
+
+---
+
+## 예시 4: PASS — 정규화 불확실성을 감안한 판단
+
+사용자 질의: "이번년도 예금신규 금액 top 10 지점 알려줘"
+질의 분해: measures=[{term: "예금신규 금액", agg: "SUM"}], group_by=["지점"], order_limit=[{type: "RANK", value: "10"}]
+DB 실행 결과: PASS (47건 반환)
+생성된 SQL:
+```sql
+SELECT B.BR_NM AS 지점명, SUM(A.DEP_BAL_AMT) AS 신규금액합계
+FROM ADWOWN.TB_ADW_DEP201P A
+INNER JOIN ADWOWN.TB_ADW_COM001M B ON A.BLNG_BRCD = B.BLNG_BRCD
+WHERE A.DEP_NEW_DT >= DATE_TRUNC('year', CURRENT_DATE)
+GROUP BY B.BR_NM
+ORDER BY 신규금액합계 DESC
+LIMIT 10
+```
+
+출력:
+{
+  "verdict": "PASS",
+  "failure_classification": "",
+  "checks": {
+    "measure_reflected": {"pass": true, "detail": "SUM(DEP_BAL_AMT) — 금액 합계 집계 반영"},
+    "filters_reflected": {"pass": true, "detail": "DEP_NEW_DT 기준 당년 필터 반영"},
+    "group_by_reflected": {"pass": true, "detail": "GROUP BY B.BR_NM — 지점별 그룹핑"},
+    "order_limit_reflected": {"pass": true, "detail": "ORDER BY DESC LIMIT 10 — 상위 10개"},
+    "no_unconfirmed_values": {"pass": true, "detail": "confirmed_terms 범위 내"},
+    "no_dead_end_repeat": {"pass": true, "detail": "dead_ends 비어있음"},
+    "logical_consistency": {"pass": true, "detail": "원문 '예금신규 금액 top 10 지점'과 SQL의 지점별 신규예금 금액합계 상위 10건 조회가 정확히 부합. 이번년도 기간 조건도 DEP_NEW_DT >= 당년 시작일로 정확히 적용됨"},
+    "db_execution": {"pass": true, "detail": "47건 반환 확인"}
+  },
+  "validation_summary": "'예금신규 금액'이 신규 시점의 잔액(DEP_BAL_AMT)인지 신규 유입 거래액인지 정규화 단계에서 확정되지 않았으나, 수신기본 테이블에 DEP_BAL_AMT만 존재하여 유일한 해석으로 SQL 생성됨. 4개 분해 슬롯이 모두 SQL에 반영되었고, 원문의 '이번년도' 기간 조건도 DEP_NEW_DT >= 당년 시작일로 정확히 적용됨. 전체 의도에 부합하며 DB 47건 정상 반환.",
+  "fix_instruction": ""
 }

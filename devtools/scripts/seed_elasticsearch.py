@@ -1,6 +1,6 @@
 """ElasticSearch 메타데이터 시딩.
 
-PG biz_schema의 실제 테이블/컬럼 구조를 읽어서
+PG ADWOWN 스키마의 실제 테이블/컬럼 구조를 읽어서
 table_meta, column_meta, code_meta, report_sql, term_dict 인덱스를 생성한다.
 
 TYPE-2: code_meta에 공식 코드만 등록 (PG 미정의 코드 의도적 누락)
@@ -32,7 +32,7 @@ ES_URL = (
 ES_USER = os.getenv("ES_USER", "elastic")
 ES_PASSWORD = os.getenv("ES_PASSWORD", "elastic_pass")
 
-SCHEMA = "biz_schema"
+SCHEMA = "adwown"
 SHARD_SETTINGS = {
     "number_of_shards": 1,
     "number_of_replicas": 0,
@@ -106,7 +106,7 @@ def _parse_requirements() -> dict[str, dict]:
 # ══════════════════════════════════════════════════════════════
 
 def _get_pg_schema() -> dict[str, list[dict]]:
-    """PG biz_schema의 테이블/컬럼 정보를 docker exec로 추출."""
+    """PG ADWOWN 스키마의 테이블/컬럼 정보를 docker exec로 추출."""
     query = (
         "SELECT t.table_name, c.column_name, c.data_type, "
         "c.character_maximum_length, c.is_nullable, "
@@ -120,10 +120,10 @@ def _get_pg_schema() -> dict[str, list[dict]]:
         "  JOIN information_schema.key_column_usage kcu "
         "  ON tc.constraint_name = kcu.constraint_name "
         "  WHERE tc.constraint_type = 'PRIMARY KEY'"
-        "  AND tc.table_schema = 'biz_schema'"
+        "  AND tc.table_schema = 'adwown'"
         ") pk ON c.table_name = pk.table_name"
         " AND c.column_name = pk.column_name "
-        "WHERE t.table_schema = 'biz_schema'"
+        "WHERE t.table_schema = 'adwown'"
         " AND t.table_type = 'BASE TABLE' "
         "ORDER BY t.table_name, c.ordinal_position"
     )
@@ -335,7 +335,7 @@ def _pg_type_to_es(data_type: str, max_len: str | None) -> str:
 CODE_META_DOCS = [
     {"code_field": "CUS_DCD", "code_field_desc": "고객구분코드",  # noqa: E501
      "table_name": "TB_ADW_CSC101M",
-     "codes": {"01": "개인", "02": "법인"}},
+     "codes": {"01": "개인", "02": "법인", "03": "개인사업자"}},
     {"code_field": "CUS_GRD_CD", "code_field_desc": "고객등급코드",  # noqa: E501
      "table_name": "TB_ADW_CSC101M",
      "codes": {"01": "VIP", "02": "우수", "03": "일반", "04": "잠재", "05": "관리"}},  # noqa: E501
@@ -377,7 +377,7 @@ CODE_META_DOCS = [
      "codes": {"01": "현물매입", "02": "현물매도", "03": "선물환", "04": "스왑", "05": "옵션"}},  # noqa: E501
     {"code_field": "CCY_CD", "code_field_desc": "통화코드",
      "table_name": "TB_ADW_COM012M",
-     "codes": {"KRW": "한국원", "USD": "미국달러", "EUR": "유로", "JPY": "일본엔"}},  # noqa: E501
+     "codes": {"KRW": "한국원", "USD": "미국달러", "EUR": "유로", "JPY": "일본엔", "GBP": "영국파운드", "CNY": "중국위안"}},  # noqa: E501
     {"code_field": "FND_DCD", "code_field_desc": "펀드구분코드",
      "table_name": "TB_ADW_FND603M",
      "codes": {"01": "주식형", "02": "채권형", "03": "혼합형", "04": "MMF"}},
@@ -409,6 +409,76 @@ CODE_META_DOCS = [
     {"code_field": "RSK_STAGE_CD", "code_field_desc": "IFRS9단계코드",  # noqa: E501
      "table_name": "TB_ADW_RSK1111M",
      "codes": {"1": "Stage1-정상", "2": "Stage2-유의적증가", "3": "Stage3-신용손상"}},  # noqa: E501
+    # ── 추가 코드 (기존 _EXTRA_CODES 에서 승격) ──────────────
+    {"code_field": "GNDR_DCD", "code_field_desc": "성별구분코드",
+     "table_name": "TB_ADW_CSC101M",
+     "codes": {"M": "남성", "F": "여성"}},
+    {"code_field": "AGE_GRP_CD", "code_field_desc": "연령대코드",
+     "table_name": "TB_ADW_CSC101M",
+     "codes": {"20": "20대", "30": "30대", "40": "40대", "50": "50대", "60": "60대이상"}},  # noqa: E501
+    {"code_field": "STS_DCD", "code_field_desc": "상태구분코드",
+     "table_name": "TB_ADW_CSC101M",
+     "codes": {"01": "활성", "02": "비활성", "03": "정지"}},
+    {"code_field": "WM_GRD_CD", "code_field_desc": "자산관리등급코드",  # noqa: E501
+     "table_name": "TB_ADW_WMB1401M",
+     "codes": {"WM_VIP": "WM VIP", "WM_PREMIUM": "WM프리미엄", "WM_GOLD": "WM골드", "WM_STANDARD": "WM일반"}},  # noqa: E501
+    {"code_field": "INVEST_PRFL_CD", "code_field_desc": "투자성향코드",  # noqa: E501
+     "table_name": "TB_ADW_WMB1401M",
+     "codes": {"1": "안정형", "2": "안정추구형", "3": "위험중립형", "4": "적극투자형", "5": "공격투자형"}},  # noqa: E501
+    {"code_field": "ALERT_LVL_CD", "code_field_desc": "경보수준코드",
+     "table_name": "TB_ADW_AML1121M",
+     "codes": {"H": "높음", "M": "중간", "L": "낮음"}},
+    {"code_field": "CHG_RSN_DCD", "code_field_desc": "변경사유코드",
+     "table_name": "TB_ADW_CSC102H",
+     "codes": {"01": "정보변경", "02": "등급변경", "03": "상태변경", "04": "기타"}},  # noqa: E501
+    {"code_field": "ACTN_DCD", "code_field_desc": "행위구분코드",
+     "table_name": "TB_ADW_COM017L",
+     "codes": {"01": "조회", "02": "등록", "03": "수정", "04": "삭제", "05": "승인"}},  # noqa: E501
+    {"code_field": "INS_STCD", "code_field_desc": "보험상태코드",
+     "table_name": "TB_ADW_INS803M",
+     "codes": {"01": "유지", "02": "실효", "03": "해지", "04": "만기"}},
+    {"code_field": "CAMP_TGT_DCD", "code_field_desc": "캠페인대상구분코드",  # noqa: E501
+     "table_name": "TB_ADW_MKT1201M",
+     "codes": {"01": "전체", "02": "세그먼트", "03": "개인"}},
+    {"code_field": "RESP_YN", "code_field_desc": "응답여부",
+     "table_name": "TB_ADW_MKT1202M",
+     "codes": {"Y": "응답", "N": "미응답"}},
+    {"code_field": "FLG_YN", "code_field_desc": "해외사용가능여부",
+     "table_name": "TB_ADW_CRD401M",
+     "codes": {"Y": "해당", "N": "미해당"}},
+    {"code_field": "USE_YN", "code_field_desc": "사용여부",
+     "table_name": "TB_ADW_COM001M",
+     "codes": {"Y": "사용", "N": "미사용"}},
+    {"code_field": "RGN_CD", "code_field_desc": "지역코드",
+     "table_name": "TB_ADW_COM001M",
+     "codes": {
+         "01": "서울", "02": "경기", "03": "인천", "04": "대전",
+         "05": "대구", "06": "부산", "07": "광주", "08": "울산",
+         "09": "제주", "10": "충북", "11": "전북", "12": "경남",
+     }},
+    {"code_field": "PREF_CHN_DCD", "code_field_desc": "선호채널구분코드",  # noqa: E501
+     "table_name": "TB_ADW_CSP103M",
+     "codes": {"영업점": "영업점", "인터넷뱅킹": "인터넷뱅킹", "모바일뱅킹": "모바일뱅킹", "ATM": "ATM", "콜센터": "콜센터"}},  # noqa: E501
+    {"code_field": "CONTACT_CHN_CD", "code_field_desc": "접촉채널코드",  # noqa: E501
+     "table_name": "TB_ADW_MKT1202M",
+     "codes": {"01": "영업점", "02": "인터넷뱅킹", "03": "모바일뱅킹", "04": "ATM"}},  # noqa: E501
+    {"code_field": "PL_ITEM_CD", "code_field_desc": "손익항목코드",
+     "table_name": "TB_ADW_FIN1306S",
+     "codes": {
+         "NII": "순이자이익", "NFI": "비이자이익", "OPEX": "판매관리비",
+         "PROV": "충당금전입", "PRETAX": "세전이익", "NET": "당기순이익",
+         "INT_INC": "이자수익", "FEE_INC": "수수료수익",
+         "FX_INC": "외환수익", "FUND_INC": "펀드수익",
+     }},
+    {"code_field": "IND_CD", "code_field_desc": "리스크지표코드",
+     "table_name": "TB_ADW_RSK1101M",
+     "codes": {
+         "BIS_RATIO": "BIS자기자본비율", "LCR": "유동성커버리지비율",
+         "NSFR": "순안정자금조달비율", "NIM": "순이자마진",
+         "ROA": "총자산순이익률", "ROE": "자기자본순이익률",
+         "NPL_RATIO": "부실채권비율", "CVA": "신용가치조정",
+         "LTV_AVG": "평균담보인정비율", "DSR_AVG": "평균총부채원리금상환비율",
+     }},
 ]
 
 
@@ -423,7 +493,7 @@ REPORT_SQL_DOCS = [
      "sql_text": (  # noqa: E501
          "SELECT DATE_TRUNC('month', JOIN_DT) AS base_month,"
          " CUS_DCD, COUNT(*) AS cnt"
-         " FROM biz_schema.TB_ADW_CSC101M"
+         " FROM ADWOWN.TB_ADW_CSC101M"
          " WHERE STD_DT = CURRENT_DATE GROUP BY 1, 2 ORDER BY 1"
      )},
     {"report_nm": "부점별 여신 잔액 TOP 10",  # noqa: E501
@@ -432,8 +502,8 @@ REPORT_SQL_DOCS = [
      "tables_used": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
      "sql_text": (  # noqa: E501
          "SELECT b.BR_NM, SUM(l.LN_BAL_AMT) AS total_bal"
-         " FROM biz_schema.TB_ADW_LNB301M l"
-         " JOIN biz_schema.TB_ADW_COM001M b"
+         " FROM ADWOWN.TB_ADW_LNB301M l"
+         " JOIN ADWOWN.TB_ADW_COM001M b"
          " ON l.BLNG_BRCD = b.BLNG_BRCD"
          " WHERE l.STD_DT = CURRENT_DATE"
          " GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
@@ -445,7 +515,7 @@ REPORT_SQL_DOCS = [
          "SELECT STD_DT,"
          " ROUND(SUM(OVDU_AMT)::NUMERIC / NULLIF(SUM(LN_BAL_AMT), 0)"
          " * 100, 2) AS ovdu_rate"
-         " FROM biz_schema.TB_ADW_LNB301M GROUP BY 1 ORDER BY 1"
+         " FROM ADWOWN.TB_ADW_LNB301M GROUP BY 1 ORDER BY 1"
      )},
     {"report_nm": "VIP 고객 자산 현황",
      "report_desc": "VIP 등급 고객의 수신+여신 종합 현황",
@@ -455,10 +525,10 @@ REPORT_SQL_DOCS = [
          "SELECT ci.EDPS_CSN, ci.CSM,"
          " COALESCE(SUM(ab.BAL_AMT),0) AS dep,"
          " COALESCE(SUM(li.LN_BAL_AMT),0) AS loan"
-         " FROM biz_schema.TB_ADW_CSC101M ci"
-         " LEFT JOIN biz_schema.TB_ADW_DEP201P ab"
+         " FROM ADWOWN.TB_ADW_CSC101M ci"
+         " LEFT JOIN ADWOWN.TB_ADW_DEP201P ab"
          " ON ci.EDPS_CSN=ab.EDPS_CSN"
-         " LEFT JOIN biz_schema.TB_ADW_LNB301M li"
+         " LEFT JOIN ADWOWN.TB_ADW_LNB301M li"
          " ON ci.EDPS_CSN=li.EDPS_CSN"
          " WHERE ci.CUS_GRD_CD='01'"
          " GROUP BY 1,2 ORDER BY dep DESC LIMIT 50"
@@ -468,7 +538,7 @@ REPORT_SQL_DOCS = [
      "domain_cd": "DEP", "tables_used": ["TB_ADW_DEP201P"],
      "sql_text": (  # noqa: E501
          "SELECT ACT_DCD, COUNT(*) AS cnt, SUM(BAL_AMT) AS total"
-         " FROM biz_schema.TB_ADW_DEP201P"
+         " FROM ADWOWN.TB_ADW_DEP201P"
          " WHERE STD_DT = CURRENT_DATE GROUP BY 1 ORDER BY 3 DESC"
      )},
     {"report_nm": "카드 이용 현황",
@@ -476,14 +546,14 @@ REPORT_SQL_DOCS = [
      "domain_cd": "CRD", "tables_used": ["TB_ADW_CRD401M"],
      "sql_text": (
          "SELECT STD_DT, SUM(MON_USE_AMT) AS total_use"
-         " FROM biz_schema.TB_ADW_CRD401M GROUP BY 1 ORDER BY 1"
+         " FROM ADWOWN.TB_ADW_CRD401M GROUP BY 1 ORDER BY 1"
      )},
     {"report_nm": "거래 채널별 통계",
      "report_desc": "채널별 거래 건수 및 금액",
      "domain_cd": "TRX", "tables_used": ["TB_ADW_TRX701L"],
      "sql_text": (  # noqa: E501
          "SELECT CHN_CD, COUNT(*) AS cnt, SUM(TR_AMT) AS total"
-         " FROM biz_schema.TB_ADW_TRX701L"
+         " FROM ADWOWN.TB_ADW_TRX701L"
          " WHERE TR_DT >= CURRENT_DATE - INTERVAL '30 days'"
          " GROUP BY 1 ORDER BY 2 DESC"
      )},
@@ -492,7 +562,7 @@ REPORT_SQL_DOCS = [
      "domain_cd": "CUS", "tables_used": ["TB_ADW_CSC101M"],
      "sql_text": (  # noqa: E501
          "SELECT CUS_DCD, COUNT(*)"
-         " FROM biz_schema.TB_ADW_CSC101M"
+         " FROM ADWOWN.TB_ADW_CSC101M"
          " WHERE STD_DT=CURRENT_DATE GROUP BY 1 ORDER BY 1"
      )},
     {"report_nm": "담보대출 평균 금리",
@@ -500,7 +570,7 @@ REPORT_SQL_DOCS = [
      "domain_cd": "LON", "tables_used": ["TB_ADW_LNB301M"],
      "sql_text": (  # noqa: E501
          "SELECT ROUND(AVG(INT_RT),2)"
-         " FROM biz_schema.TB_ADW_LNB301M"
+         " FROM ADWOWN.TB_ADW_LNB301M"
          " WHERE STD_DT=CURRENT_DATE AND LN_DCD='02'"
      )},
     {"report_nm": "휴면 계좌 현황",
@@ -508,7 +578,7 @@ REPORT_SQL_DOCS = [
      "domain_cd": "DEP", "tables_used": ["TB_ADW_DEP201P"],
      "sql_text": (  # noqa: E501
          "SELECT COUNT(*), SUM(BAL_AMT)"
-         " FROM biz_schema.TB_ADW_DEP201P"
+         " FROM ADWOWN.TB_ADW_DEP201P"
          " WHERE STD_DT=CURRENT_DATE AND ACT_STCD='03'"
      )},
 ]
@@ -796,7 +866,7 @@ def seed_elasticsearch():
             "table_name": tbl_upper,
             "table_nm_ko": ko_name,
             "table_desc": desc,
-            "schema": "biz_schema",
+            "schema": SCHEMA,
             "domain_cd": domain,
             "std_dt_col": std_dt_col,
             "is_partitioned": is_part,

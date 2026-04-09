@@ -1,5 +1,7 @@
 """LangGraph 표준 콜백 기반 파이프라인 텔레메트리 핸들러.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 요청마다 새 인스턴스를 생성하여
 ``config={"callbacks": [handler]}`` 로 주입한다.
 
@@ -32,7 +34,6 @@ State 변화 추적을 신규로 제공한다.
 from __future__ import annotations
 
 import json
-import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -50,11 +51,15 @@ from src.utils.tracker.evaluation import (
     EvaluationTrace,
     LLMCallRecord,
     NodeRecord,
+    ReasoningStep,
+    RoutingDecision,
     SQLRecord,
     TimelineEntry,
 )
 
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 # ── 프로그레스 메시지 매핑 ──────────────────────────
@@ -66,7 +71,7 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "label": "질의 전처리, 보안 검사",
         "thinking": "입력 전처리 중",
     },
-    "context_classifier": {
+    "intent_classifier": {
         "phase": "interpret",
         "label": "대화 맥락 분석 및 질의 의도 분류",
         "thinking": "질문 의도 파악 중",
@@ -92,12 +97,12 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "label": "관련 테이블·데이터 탐색",
         "thinking": "데이터 소스 탐색 중",
     },
-    "knowledge_fetcher": {
+    "context_retriever": {
         "phase": "reason",
         "label": "관련 테이블·데이터 수집",
         "thinking": "데이터 소스 수집 중",
     },
-    "knowledge_interpreter": {
+    "context_interpreter": {
         "phase": "reason",
         "label": "수집 데이터 해석",
         "thinking": "데이터 해석 중",
@@ -195,11 +200,17 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
         self._trace = EvaluationTrace(run_id=self._run_id)
         self._enabled = (
             enabled if enabled is not None
-            else settings.eval_tracker_enabled
+            else (
+                settings.eval_trace_json_enabled
+                or settings.eval_trace_report_enabled
+                or settings.eval_trace_reasoning_enabled
+            )
         )
 
         # 타임라인 순번
         self._seq: int = 0
+        # reasoning flow 순번
+        self._reasoning_seq: int = 0
         # run_id(UUID) → node_name 매핑 (on_chain_end에서 노드 식별)
         self._run_to_node: dict[str, str] = {}
         # node_name → (start_time, start_seq)
@@ -232,6 +243,11 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
     def enabled(self) -> bool:
         """트래커 활성 여부."""
         return self._enabled
+
+    @property
+    def run_id(self) -> str:
+        """외부 참조용 실행 ID (trace_id로 사용)."""
+        return self._run_id
 
     # ── 타임라인 관리 (내부) ──
 
@@ -293,7 +309,7 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
         # on_chain_start를 2번 호출한다. 이미 활성 상태이면 중복 무시.
         if node in self._active_nodes:
             self._nested_runs.add(rid)
-            logger.debug("중복 on_chain_start 무시: node=%s", node)
+            logger.debug("중복 on_chain_start 무시", node=node)
             return
         self._active_nodes.add(node)
         self._run_to_node[rid] = node
@@ -486,6 +502,8 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
                     self._merge_prompt_variables(data)
             case "sql":
                 self._record_sql(data)
+            case "reasoning":
+                self._record_reasoning_step(node, data)
 
     # ── 커스텀 이벤트 레코딩 ──
 
@@ -653,6 +671,37 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
             ),
         )
 
+    # ── reasoning flow 레코딩 ──
+
+    def _next_reasoning_seq(self) -> int:
+        """reasoning flow 순번을 발급한다."""
+        self._reasoning_seq += 1
+        return self._reasoning_seq
+
+    def _record_reasoning_step(
+        self,
+        node: str,
+        data: dict[str, Any],
+    ) -> None:
+        """reasoning flow 단계를 기록한다."""
+        step = ReasoningStep(
+            seq=self._next_reasoning_seq(),
+            node=data.get("node", node),
+            phase=data.get("phase", ""),
+            round=data.get("round", 0),
+            hypothesis_id=data.get("hypothesis_id", ""),
+            step_type=data.get("step_type", ""),
+            inputs=data.get("inputs", {}),
+            output=data.get("output", {}),
+            routing=RoutingDecision(
+                **data["routing"],
+            ) if isinstance(data.get("routing"), dict) else RoutingDecision(),
+            duration_ms=data.get("duration_ms", 0.0),
+            model=data.get("model", ""),
+            tokens=data.get("tokens", 0),
+        )
+        self._trace.reasoning_flow.append(step)
+
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 그래프 외부 직접 호출 메서드
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -709,40 +758,233 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
         self,
         output_dir: str | None = None,
         *,
+        turn_id: str = "",
+        user_id: str = "anonymous",
         with_report: bool = True,
-    ) -> Path | None:
-        """트레이스를 JSON + Markdown 보고서로 저장한다."""
+    ) -> list[dict[str, str]]:
+        """트레이스를 JSON + Markdown 보고서로 저장한다.
+
+        Args:
+            output_dir: 출력 디렉토리 (기본: settings 참조).
+            turn_id: 턴 식별자 (파일명에 12자 사용).
+            user_id: 사용자 식별자 (기본: anonymous).
+            with_report: 보고서 생성 여부 (개별 플래그와 AND).
+
+        Returns:
+            생성된 파일 목록 ``[{"name": ..., "filename": ...}, ...]``.
+        """
         if not self._enabled:
-            return None
+            return []
 
         base = Path(
             output_dir or settings.eval_tracker_output_dir,
         )
         base.mkdir(parents=True, exist_ok=True)
 
-        ts = now_filesafe()
-        filepath = base / f"trace_{self._run_id}_{ts}.json"
-        data = self._trace.model_dump(mode="json")
-        filepath.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        logger.info("평가 트레이스 저장", extra={"path": str(filepath)})
+        from src.utils.timezone import now_kst
 
-        # Markdown 보고서 자동 생성
-        if with_report and self._trace.timeline:
+        date_str = now_kst().strftime("%Y%m%d")
+        tid = turn_id.replace("-", "")[:12] if turn_id else self._run_id[:12]
+        sid = self._trace.session_id or self._run_id
+        prefix = f"{date_str}_{user_id}_{sid}_{tid}"
+
+        data = self._trace.model_dump(mode="json")
+        saved_files: list[dict[str, str]] = []
+
+        # JSON 텔레메트리
+        if settings.eval_trace_json_enabled:
+            filename = f"trace_telemetry_{prefix}.json"
+            filepath = base / filename
+            filepath.write_text(
+                json.dumps(
+                    data, ensure_ascii=False, indent=2,
+                ),
+                encoding="utf-8",
+            )
+            logger.info(
+                "평가 트레이스 저장", path=str(filepath),
+            )
+            saved_files.append({
+                "name": "텔레메트리 (JSON)",
+                "filename": filename,
+            })
+
+        # Markdown 보고서 (기존 5섹션)
+        if (
+            settings.eval_trace_report_enabled
+            and with_report
+            and self._trace.timeline
+        ):
             from src.utils.tracker.visualizer import (
                 save_report,
             )
 
-            report_name = f"report_{self._run_id}_{ts}.md"
+            report_name = f"trace_report_{prefix}.md"
             save_report(data, base / report_name)
+            saved_files.append({
+                "name": "분석 보고서",
+                "filename": report_name,
+            })
 
-        return filepath
+        # Reasoning flow Markdown (신규)
+        if (
+            settings.eval_trace_reasoning_enabled
+            and self._trace.reasoning_flow
+        ):
+            from src.utils.tracker.visualizer import (
+                render_reasoning_flow,
+            )
+            reasoning_name = (
+                f"trace_reasoning_{prefix}.md"
+            )
+            reasoning_path = base / reasoning_name
+            reasoning_md = render_reasoning_flow(data)
+            reasoning_path.write_text(
+                reasoning_md, encoding="utf-8",
+            )
+            logger.info(
+                "reasoning flow 저장",
+                path=str(reasoning_path),
+            )
+            saved_files.append({
+                "name": "추론 흐름",
+                "filename": reasoning_name,
+            })
+
+        return saved_files
 
     def to_dict(self) -> dict[str, Any]:
         """트레이스를 dict로 직렬화한다."""
         return self._trace.model_dump(mode="json")
+
+    def resume_from(
+        self,
+        previous: dict[str, Any],
+    ) -> None:
+        """이전 트레이스 데이터를 복원하여 이어서 기록한다.
+
+        명확화 인터럽트 후 재개 시, 이전 턴의 트레이스를
+        이어받아 전체 사고 과정을 하나의 흐름으로 연결한다.
+
+        Args:
+            previous: 이전 트레이스 JSON (model_dump 결과).
+        """
+        # reasoning_flow 복원
+        for step_data in previous.get("reasoning_flow", []):
+            routing_data = step_data.get("routing", {})
+            step = ReasoningStep(
+                seq=step_data.get("seq", 0),
+                node=step_data.get("node", ""),
+                phase=step_data.get("phase", ""),
+                round=step_data.get("round", 0),
+                hypothesis_id=step_data.get(
+                    "hypothesis_id", "",
+                ),
+                step_type=step_data.get("step_type", ""),
+                inputs=step_data.get("inputs", {}),
+                output=step_data.get("output", {}),
+                routing=RoutingDecision(**routing_data)
+                if routing_data
+                else RoutingDecision(),
+                duration_ms=step_data.get(
+                    "duration_ms", 0.0,
+                ),
+                model=step_data.get("model", ""),
+                tokens=step_data.get("tokens", 0),
+                timestamp=step_data.get("timestamp", ""),
+            )
+            self._trace.reasoning_flow.append(step)
+
+        # timeline 복원
+        for entry_data in previous.get("timeline", []):
+            entry = TimelineEntry(
+                seq=entry_data.get("seq", 0),
+                event_type=entry_data.get(
+                    "event_type", "",
+                ),
+                node=entry_data.get("node", ""),
+                parent_seq=entry_data.get("parent_seq"),
+                summary=entry_data.get("summary", ""),
+                detail=entry_data.get("detail", {}),
+                duration_ms=entry_data.get(
+                    "duration_ms", 0.0,
+                ),
+                status=entry_data.get("status", ""),
+                timestamp=entry_data.get("timestamp", ""),
+            )
+            self._trace.timeline.append(entry)
+
+        # llm_calls 복원
+        for call_data in previous.get("llm_calls", []):
+            record = LLMCallRecord(
+                node=call_data.get("node", ""),
+                prompt_summary=call_data.get(
+                    "prompt_summary", "",
+                ),
+                prompt_variables=call_data.get(
+                    "prompt_variables", {},
+                ),
+                prompt_tokens=call_data.get(
+                    "prompt_tokens", 0,
+                ),
+                response_text=call_data.get(
+                    "response_text", "",
+                ),
+                response_tokens=call_data.get(
+                    "response_tokens", 0,
+                ),
+                model=call_data.get("model", ""),
+                latency_ms=call_data.get(
+                    "latency_ms", 0.0,
+                ),
+                timestamp=call_data.get("timestamp", ""),
+            )
+            self._trace.llm_calls.append(record)
+
+        # node_path 복원
+        self._trace.node_path = (
+            previous.get("node_path", [])
+            + self._trace.node_path
+        )
+
+        # 실행 시작 정보 복원
+        self._trace.start_time = previous.get(
+            "start_time", self._trace.start_time,
+        )
+        self._trace.user_input = previous.get(
+            "user_input", self._trace.user_input,
+        )
+
+        # 순번 카운터 복원
+        prev_timeline = previous.get("timeline", [])
+        if prev_timeline:
+            self._seq = max(
+                e.get("seq", 0) for e in prev_timeline
+            )
+        prev_reasoning = previous.get(
+            "reasoning_flow", [],
+        )
+        if prev_reasoning:
+            self._reasoning_seq = max(
+                s.get("seq", 0) for s in prev_reasoning
+            )
+
+        # 누적 통계 복원
+        self._trace.total_llm_calls += previous.get(
+            "total_llm_calls", 0,
+        )
+        self._trace.total_llm_tokens += previous.get(
+            "total_llm_tokens", 0,
+        )
+        self._trace.total_llm_latency_ms += previous.get(
+            "total_llm_latency_ms", 0.0,
+        )
+
+        logger.debug(
+            "이전 트레이스 복원 완료",
+            prev_reasoning_steps=len(prev_reasoning),
+            prev_timeline_entries=len(prev_timeline),
+        )
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # WebSocket 진행률
@@ -759,14 +1001,14 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
         if node not in NODE_PROGRESS_MAP:
             return
 
-        if node in ("context_explorer", "knowledge_fetcher") and action == "add":
+        if node in ("context_explorer", "context_retriever") and action == "add":
             self._explore_count += 1
 
         info = NODE_PROGRESS_MAP[node]
         label = info["label"]
         phase = info["phase"]
         if (
-            node in ("context_explorer", "knowledge_fetcher")
+            node in ("context_explorer", "context_retriever")
             and self._explore_count > 1
         ):
             label = (
@@ -787,8 +1029,8 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
                     "thinkingLabel": info["thinking"],
                 }
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("WebSocket progress 전파 실패", error=str(e))
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 유틸리티
@@ -836,8 +1078,8 @@ def _snapshot_state(
                 "hypotheses_count": len(
                     getattr(val, "hypotheses", []),
                 ),
-                "candidate_tables_count": len(
-                    getattr(val, "candidate_tables", []),
+                "explored_tables_count": len(
+                    getattr(val, "explored_tables", []),
                 ),
                 "knowledge_confirmed": sum(
                     1
@@ -878,8 +1120,8 @@ def _compute_state_diff(
     """
     if not isinstance(outputs, dict):
         logger.debug(
-            "state diff 스킵: outputs가 dict가 아님 (type=%s)",
-            type(outputs).__name__,
+            "state diff 스킵: outputs가 dict가 아님",
+            output_type=type(outputs).__name__,
         )
         return []
     changes: list[dict[str, str]] = []

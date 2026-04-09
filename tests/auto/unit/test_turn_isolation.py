@@ -10,7 +10,7 @@ turn_id 필드를 통해 이전 대화 턴의 resolved_signals가 현재 턴의 
     │  build_auto_resolved_notice        현재 턴 INFER만 반환      X    │
     │  build_clarification_context       현재 턴 ASK/INFER만 포함  X    │
     │  _route_after_clarify              현재 턴 시그널로 라우팅   X    │
-    │  context_classifier ask_count      전체 세션 ASK 카운트      X    │
+    │  intent_classifier ask_count      전체 세션 ASK 카운트      X    │
     │  clarification_handler_node        turn_id 주입 확인         X    │
     │  query_normalizer signal           turn_id 설정 확인         X    │
     └──────────────────────────────────────────────────────────────────┘
@@ -386,8 +386,8 @@ class TestRouteAfterClarify:
             f"이전 턴 시그널에 의한 오라우팅 발생. 기대=normalize_query, 실제={result}"
         )
 
-    def test_falls_back_to_context_classifier_when_no_current_signals(self):
-        """현재 턴 시그널이 없으면 context_classifier로 폴백한다."""
+    def test_falls_back_to_intent_classifier_when_no_current_signals(self):
+        """현재 턴 시그널이 없으면 intent_classifier로 폴백한다."""
         from src.agents.graph.pipeline import _route_after_clarify
 
         prev_signal = _make_signal(
@@ -401,23 +401,23 @@ class TestRouteAfterClarify:
 
         result = _route_after_clarify(state)
 
-        passed = result == "context_classifier"
+        passed = result == "intent_classifier"
         log_test_case(
             logger,
             "test_fallback_no_current_signals",
             "현재 턴 시그널 없음",
-            "context_classifier",
+            "intent_classifier",
             result,
             passed,
         )
-        assert passed, f"context_classifier 기대, 실제: {result}"
+        assert passed, f"intent_classifier 기대, 실제: {result}"
 
     def test_routes_last_signal_when_multiple_current_turn_signals(self):
         """현재 턴 시그널이 여러 개이면 마지막 시그널의 source_node로 라우팅한다."""
         from src.agents.graph.pipeline import _route_after_clarify
 
         first_signal = _make_signal(
-            source_node="context_classifier",
+            source_node="intent_classifier",
             decision="ASK",
             answer="첫 번째 답변",
             inferred_value=None,

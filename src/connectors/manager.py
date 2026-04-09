@@ -1,5 +1,7 @@
 """커넥터 매니저 — 외부 시스템 커넥터의 싱글턴 통합 관리자.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 검색 커넥터:
   - ElasticSearch: 보고서 SQL 검색 (table_meta/code_meta는 하위 호환용 보존)
   - MongoDB: 테이블/컬럼/코드/용어사전 메타 검색 (메타 주 소스)
@@ -20,11 +22,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+from typing import TYPE_CHECKING, Any
 
-from src.connectors.impl.elasticsearch_connector import (
-    ElasticSearchConnector,
-)
+# from src.connectors.impl.elasticsearch_connector import (
+#     ElasticSearchConnector,
+# )
 from src.connectors.impl.mongo_connector import MongoConnector
 from src.connectors.impl.postgres_connector import (
     HistoryDBConnector,
@@ -32,7 +35,8 @@ from src.connectors.impl.postgres_connector import (
 )
 from src.connectors.impl.neo4j_connector import Neo4jConnector
 from src.connectors.impl.qdrant_connector import QdrantConnector
-from src.connectors.interfaces import DatabaseConnector
+from src.config import settings
+from src.connectors.interfaces import BaseConnector, DatabaseConnector
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -41,8 +45,40 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+
+# ── 커넥터 레지스트리 ─────────────────────────────────
+# (config 이름, attribute 이름) 매핑.
+# enabled_connectors에 config 이름이 포함된 커넥터만
+# connect/disconnect/health_check를 수행한다.
+_CONNECTORS: list[tuple[str, str]] = [
+    # ("elasticsearch", "es"),  # 미사용
+    ("mongodb", "mongo"),
+    ("qdrant", "qdrant"),
+    ("neo4j", "neo4j"),
+    ("info_db", "info_db"),
+    ("history_db", "history_db"),
+]
+
+
 class ConnectorManager:
-    """외부 시스템 커넥터 통합 관리자."""
+    """외부 시스템 커넥터 통합 관리자.
+
+    검색 커넥터(ES, MongoDB, Qdrant, Neo4j)와 업무/이력 DB 커넥터를
+    생성·초기화·종료하며, 배포 모드(external/internal)에 따라
+    멀티 DB 라우팅(ADW/BDP)을 수행한다.
+
+    모든 커넥터는 __init__에서 인스턴스를 생성하되,
+    settings.enabled_connectors에 포함된 커넥터만 실제 connect를 수행한다.
+    비활성 커넥터는 dummy 모드 인스턴스로 유지되어 빈 결과를 반환한다.
+
+    Attributes:
+        es: ElasticSearch 커넥터 (보고서 SQL 검색).
+        mongo: MongoDB 커넥터 (테이블/코드 메타, 용어사전).
+        qdrant: Qdrant 커넥터 (업무 매뉴얼, SQL 이력 벡터 검색).
+        neo4j: Neo4j 커넥터 (온톨로지 그래프).
+        info_db: 정보계 DB 커넥터 (읽기 전용).
+        history_db: SQL 이력 DB 커넥터.
+    """
 
     def __init__(self, use_dummy: bool = True) -> None:
         from src.config import settings
@@ -52,7 +88,7 @@ class ConnectorManager:
         self._deployment = settings.deployment_mode
 
         # ── 검색 커넥터 (공통) ──
-        self.es = ElasticSearchConnector(use_dummy=use_dummy)
+        self.es: Any = None  # ES 미사용, 향후 재사용 시 복원
         self.mongo = MongoConnector(use_dummy=use_dummy)
         self.qdrant = QdrantConnector(use_dummy=use_dummy)
         self.neo4j = Neo4jConnector(use_dummy=use_dummy)
@@ -68,6 +104,9 @@ class ConnectorManager:
         self._adw_db: DatabaseConnector | None = None
         self._bigdata_db: DatabaseConnector | None = None
 
+        # ── Checkpointer pool (외부 주입) ──
+        self._checkpointer_pool: Any = None
+
         if self._deployment == "internal" and not use_dummy:
             from src.connectors.impl.sybase_connector import (
                 SybaseIQConnector,
@@ -78,17 +117,37 @@ class ConnectorManager:
             self._adw_db = SybaseIQConnector()
             self._bigdata_db = ImpalaConnector()
 
+    def set_checkpointer_pool(self, pool: Any) -> None:
+        """checkpointer가 생성한 pool을 주입받는다.
+
+        main.py lifespan에서 create_checkpointer() 후 호출.
+        turn_text_store 등 커스텀 테이블 접근에 이 pool을 재사용한다.
+        """
+        self._checkpointer_pool = pool
+
+    @property
+    def checkpointer_pool(self) -> Any | None:
+        """checkpoint_dc_* 테이블 접근용 pool (checkpointer와 공유).
+
+        MemorySaver 경로(backend=memory)에서는 None을 반환한다.
+        호출부에서 None 체크 후 적절히 처리해야 한다.
+        """
+        return self._checkpointer_pool
+
     async def connect_all(self) -> None:
-        """모든 커넥터를 초기화한다 (멱등)."""
+        """활성 커넥터를 초기화한다 (멱등).
+
+        settings.enabled_connectors에 포함된 커넥터만 connect를 수행한다.
+        비활성 커넥터는 dummy 모드 인스턴스로 유지된다.
+        """
         if self._connected:
             return
-        logger.info("전체 커넥터 초기화 시작")
-        await self.es.connect()
-        await self.mongo.connect()
-        await self.info_db.connect()
-        await self.history_db.connect()
-        await self.qdrant.connect()
-        await self.neo4j.connect()
+        enabled = settings.enabled_connectors
+        logger.info("커넥터 초기화 시작", enabled=sorted(enabled))
+
+        for cfg_name, attr in _CONNECTORS:
+            if cfg_name in enabled:
+                await getattr(self, attr).connect()
 
         if self._adw_db:
             await self._adw_db.connect()
@@ -97,18 +156,17 @@ class ConnectorManager:
 
         self._connected = True
         logger.info(
-            "전체 커넥터 초기화 완료",
+            "커넥터 초기화 완료",
             deployment=self._deployment,
+            enabled=sorted(enabled),
         )
 
     async def disconnect_all(self) -> None:
-        """모든 커넥터 연결을 종료한다."""
-        await self.es.disconnect()
-        await self.mongo.disconnect()
-        await self.info_db.disconnect()
-        await self.history_db.disconnect()
-        await self.qdrant.disconnect()
-        await self.neo4j.disconnect()
+        """활성 커넥터 연결을 종료한다."""
+        enabled = settings.enabled_connectors
+        for cfg_name, attr in _CONNECTORS:
+            if cfg_name in enabled:
+                await getattr(self, attr).disconnect()
 
         if self._adw_db:
             await self._adw_db.disconnect()
@@ -116,27 +174,53 @@ class ConnectorManager:
             await self._bigdata_db.disconnect()
 
         self._connected = False
-        logger.info("전체 커넥터 연결 종료")
+        logger.info("커넥터 연결 종료")
 
     async def health_check_all(self) -> dict[str, bool]:
-        """모든 커넥터의 상태를 확인한다."""
-        result = {
-            "elasticsearch": await self.es.health_check(),
-            "mongodb": await self.mongo.health_check(),
-            "info_db": await self.info_db.health_check(),
-            "history_db": await self.history_db.health_check(),
-            "qdrant": await self.qdrant.health_check(),
-            "neo4j": await self.neo4j.health_check(),
-        }
+        """모든 커넥터의 상태를 확인한다.
+
+        개별 커넥터에 타임아웃을 적용하여 hang을 방지한다.
+        커넥터가 응답하지 않으면 타임아웃 후 False를 반환한다.
+        asyncio.gather로 병렬 실행하여 전체 소요 시간을 단축한다.
+        """
+        timeout = settings.health_check_timeout
+
+        async def _safe_check(
+            name: str, connector: BaseConnector,
+        ) -> tuple[str, bool]:
+            try:
+                result = await asyncio.wait_for(
+                    connector.health_check(), timeout=timeout,
+                )
+                return name, result
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "health_check 타임아웃",
+                    connector=name, timeout=timeout,
+                )
+                return name, False
+            except Exception as e:
+                logger.debug(
+                    "health_check 실패",
+                    connector=name, error=str(e),
+                )
+                return name, False
+
+        enabled = settings.enabled_connectors
+        checks = [
+            _safe_check(cfg_name, getattr(self, attr))
+            for cfg_name, attr in _CONNECTORS
+            if cfg_name in enabled
+        ]
         if self._adw_db:
-            result["adw_db"] = (
-                await self._adw_db.health_check()
-            )
+            checks.append(_safe_check("adw_db", self._adw_db))
         if self._bigdata_db:
-            result["bigdata_db"] = (
-                await self._bigdata_db.health_check()
+            checks.append(
+                _safe_check("bigdata_db", self._bigdata_db),
             )
-        return result
+
+        results = await asyncio.gather(*checks)
+        return dict(results)
 
     # ── 테이블명 → DB 소스 파싱 ──────────────────────────
     _DB_SOURCE_MAP: dict[str, str] = {
@@ -168,7 +252,7 @@ class ConnectorManager:
         """올바른 업무 DB 커넥터를 반환한다.
 
         외부망(external): 항상 info_db (PostgreSQL)
-        내부망(internal): db_source 또는 reason의 candidate_tables로 라우팅
+        내부망(internal): db_source 또는 reason의 explored_tables로 라우팅
 
         db_source를 직접 지정하면 reason보다 우선한다.
         """
@@ -185,7 +269,7 @@ class ConnectorManager:
         # reason에서 추출
         if reason is not None:
             sources: set[str] = set()
-            for ct in reason.candidate_tables:
+            for ct in reason.explored_tables:
                 src = ct.db_source or self.parse_db_source(
                     ct.table_name,
                 )

@@ -1,5 +1,7 @@
 """Sybase IQ 커넥터 — SAP Sybase IQ 16.1 읽기 전용 쿼리 실행.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 두 가지 연결 방식을 settings.sybase_driver 설정으로 전환할 수 있다.
 
 1. native (기본값): sqlanydb — SAP 공식 Python DB-API 2.0 드라이버.
@@ -30,7 +32,7 @@ import re
 from typing import Any
 
 from src.config import settings
-from src.connectors.interfaces import DatabaseConnector
+from src.connectors.interfaces import DatabaseConnector, sanitize_row
 from src.connectors.dummy_data import generate_dummy_data
 from src.utils.logger import get_logger
 
@@ -108,7 +110,7 @@ class SybaseIQConnector(DatabaseConnector):
     # ──────────────────────────────────────────────
 
     async def connect(self) -> None:
-        """Sybase IQ 연결 초기화."""
+        """Sybase IQ 연결을 초기화한다."""
         if self._use_dummy:
             logger.info("Sybase IQ Dummy 모드로 초기화")
             return
@@ -130,13 +132,13 @@ class SybaseIQConnector(DatabaseConnector):
         )
 
     async def disconnect(self) -> None:
-        """Sybase IQ 연결 종료."""
+        """Sybase IQ 연결을 종료한다."""
         if self._conn:
             await asyncio.to_thread(self._conn.close)
             self._conn = None
 
     async def health_check(self) -> bool:
-        """연결 상태 확인."""
+        """연결 상태를 확인한다."""
         if self._use_dummy:
             return True
         try:
@@ -148,7 +150,8 @@ class SybaseIQConnector(DatabaseConnector):
                 return True
 
             return await asyncio.to_thread(_ping)
-        except Exception:
+        except Exception as e:
+            logger.debug("health_check 실패", error=str(e))
             return False
 
     # ──────────────────────────────────────────────
@@ -186,7 +189,7 @@ class SybaseIQConnector(DatabaseConnector):
                 desc[0] for desc in cursor.description
             ]
             rows = [
-                dict(zip(columns, row))
+                sanitize_row(dict(zip(columns, row)))
                 for row in cursor.fetchall()
             ]
             cursor.close()

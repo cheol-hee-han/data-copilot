@@ -28,7 +28,7 @@ class TestImports:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
-            CandidateTable,
+            TableMeta,
             DeadEnd,
             ExecutionStep,
             Hypothesis,
@@ -66,11 +66,11 @@ class TestImports:
 
     def test_agentic_nodes_imports(self):
         from src.agents.nodes.reason.reasoning_preparer import reasoning_preparer_node
-        from src.agents.nodes.reason.knowledge_fetcher import (
-            knowledge_fetcher_node,
+        from src.agents.nodes.reason.context_retriever import (
+            context_retriever_node,
         )
-        from src.agents.nodes.reason.knowledge_interpreter import (
-            knowledge_interpreter_node,
+        from src.agents.nodes.reason.context_interpreter import (
+            context_interpreter_node,
         )
         from src.agents.nodes.reason.readiness_gate import (
             readiness_gate_node,
@@ -378,15 +378,12 @@ class TestSqlHintExtractor:
         assert len(merged["agg_expressions"]) == 1
 
     def test_get_real_tables(self):
-        from src.utils.sqlglot_analyzer import (
-            get_real_tables,
-            parse_sql_safe,
-        )
-        ast = parse_sql_safe(
+        from src.utils.sqlglot_analyzer import get_real_tables
+        sql = (
             "SELECT * FROM users u JOIN orders o "
-            "ON u.id = o.user_id",
+            "ON u.id = o.user_id"
         )
-        tables = get_real_tables(ast)
+        tables = get_real_tables(sql)
         assert "users" in tables
         assert "orders" in tables
 
@@ -413,7 +410,7 @@ class TestStateConversion:
         from src.agents.state.state import (
             PipelineState,
             ReasoningState,
-            CandidateTable,
+            TableMeta,
             ColumnInfo,
             FinalStatus,
             KnowledgeItem,
@@ -424,8 +421,8 @@ class TestStateConversion:
                 validated_sql="SELECT 1",
                 generated_sql="SELECT 1",
                 final_status=FinalStatus.SUCCESS,
-                candidate_tables=[
-                    CandidateTable(
+                explored_tables=[
+                    TableMeta(
                         table_name="TB_CUST",
                         description="고객",
                         columns=[
@@ -444,9 +441,9 @@ class TestStateConversion:
             ),
         )
         assert state.reason.validated_sql == "SELECT 1"
-        assert len(state.reason.candidate_tables) == 1
+        assert len(state.reason.explored_tables) == 1
         assert (
-            state.reason.candidate_tables[0].table_name
+            state.reason.explored_tables[0].table_name
             == "TB_CUST"
         )
 

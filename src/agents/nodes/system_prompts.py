@@ -1,5 +1,7 @@
 """시스템 프롬프트 모음 — resources/prompts/ 외부 파일 로더.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 Prompt Version: 2.0 (2026-03-26)
 변경 이력:
   v1.0 (2026-03-18): 초기 프롬프트 설계
@@ -31,15 +33,16 @@ Prompt Version: 2.0 (2026-03-26)
   예) analyzer_system.txt → ANALYZER_SYSTEM
 
 파일 매핑 (interpret/):
-  CONTEXT_CLASSIFIER_SYSTEM       ← context_classifier_system.txt
-  CONTEXT_CLASSIFIER_USER         ← context_classifier_user.txt
+  INTENT_CLASSIFIER_SYSTEM         ← intent_classifier_system.txt
+  INTENT_CLASSIFIER_USER           ← intent_classifier_user.txt
+  INTENT_CLASSIFIER_QUERY_REWRITER ← intent_classifier_query_rewriter.txt
   QUERY_NORMALIZER_PHASE1_SYSTEM  ← query_normalizer_phase1_system.txt
   QUERY_NORMALIZER_PHASE1_USER    ← query_normalizer_phase1_user.txt
   QUERY_NORMALIZER_PHASE2_SYSTEM  ← query_normalizer_phase2_system.txt
   QUERY_NORMALIZER_PHASE2_USER    ← query_normalizer_phase2_user.txt
 
 파일 매핑 (reason/):
-  KNOWLEDGE_INTERPRETER_SYSTEM  ← knowledge_interpreter_system.txt
+  CONTEXT_INTERPRETER_SYSTEM  ← context_interpreter_system.txt
   SQL_GENERATOR_SYSTEM        ← sql_generator_system.txt
   SQL_GENERATOR_FIX_SECTION   ← sql_generator_fix_section.txt
   SQL_VALIDATOR_SYSTEM        ← sql_validator_system.txt
@@ -52,8 +55,6 @@ Prompt Version: 2.0 (2026-03-26)
   ANALYZER_VIZ_JUDGMENT_USER      ← analyzer_viz_judgment_user.txt
   ANALYZER_VIZ_SVG_SYSTEM         ← analyzer_viz_svg_system.txt
   ANALYZER_VIZ_SVG_USER           ← analyzer_viz_svg_user.txt
-  FORMATTER_SYSTEM                ← formatter_system.txt
-  FORMATTER_USER                  ← formatter_user.txt
 """
 
 from src.utils.resource_loader import load_text_required
@@ -78,9 +79,12 @@ def _present(filename: str) -> str:
 # interpret/ — 질의 해석 계층
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# 통합 노드 프롬프트 (resolve_history + classify_intent → context_classifier)
-CONTEXT_CLASSIFIER_SYSTEM = _interpret("context_classifier_system.txt")
-CONTEXT_CLASSIFIER_USER = _interpret("context_classifier_user.txt")
+# 통합 노드 프롬프트 (resolve_history + classify_intent → intent_classifier)
+INTENT_CLASSIFIER_SYSTEM = _interpret("intent_classifier_system.txt")
+INTENT_CLASSIFIER_USER = _interpret("intent_classifier_user.txt")
+INTENT_CLASSIFIER_QUERY_REWRITER = _interpret(
+    "intent_classifier_query_rewriter.txt",
+)
 
 QUERY_NORMALIZER_PHASE1_SYSTEM = _interpret(
     "query_normalizer_phase1_system.txt",
@@ -103,7 +107,7 @@ QUERY_NORMALIZER_PHASE2_USER = _interpret(
 # 노드에서 .replace() 로 플레이스홀더를 치환해야 한다.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-KNOWLEDGE_INTERPRETER_SYSTEM = _reason("knowledge_interpreter_system.txt")
+CONTEXT_INTERPRETER_SYSTEM = _reason("context_interpreter_system.txt")
 SQL_GENERATOR_SYSTEM = _reason("sql_generator_system.txt")
 SQL_GENERATOR_FIX_SECTION = _reason(
     "sql_generator_fix_section.txt",
@@ -122,8 +126,6 @@ ANALYZER_VIZ_JUDGMENT_SYSTEM = _present("analyzer_viz_judgment_system.txt")
 ANALYZER_VIZ_JUDGMENT_USER = _present("analyzer_viz_judgment_user.txt")
 ANALYZER_VIZ_SVG_SYSTEM = _present("analyzer_viz_svg_system.txt")
 ANALYZER_VIZ_SVG_USER = _present("analyzer_viz_svg_user.txt")
-FORMATTER_SYSTEM = _present("formatter_system.txt")
-FORMATTER_USER = _present("formatter_user.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

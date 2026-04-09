@@ -1,17 +1,22 @@
-"""트레이스 타임라인 시각화 — 7섹션 보고서.
+"""트레이스 타임라인 시각화 — 5섹션 보고서.
+
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
 
 DataCopilotCallbackHandler가 기록한 EvaluationTrace를 기반으로
-7개 섹션 + Appendix 형태의 Markdown 보고서를 생성한다.
+5개 섹션 + Appendix 형태의 Markdown 보고서를 생성한다.
 
 섹션 구조:
     1. Executive Summary     — 규칙 기반 자연어 요약
-    2. Decision Trail        — 핵심 의사결정 phase별 시간순
-    3. Referenced Information — 소스별 그룹핑된 참조 정보
-    4. State Evolution       — 노드별 state 변화 compact 테이블
-    5. Node Flow             — 요약 다이어그램 (30+ → Flowchart, <30 → Sequence)
-    6. Performance           — 사이클별 Gantt + LLM 비용 분석
-    7. Automated Findings    — trace_analyzer 결과 통합
+    2. Reasoning Flow        — LLM 판단 흐름 서사형 렌더링 (기존 2+3+4 대체)
+    3. Node Flow             — 요약 다이어그램 (30+ → Flowchart, <30 → Sequence)
+    4. Performance           — 사이클별 Gantt + LLM 비용 분석
+    5. Automated Findings    — trace_analyzer 결과 통합
     [Appendix] Detailed Timeline — 부모-자식 들여쓰기 상세 테이블
+    [Appendix] Generated SQL — 생성된 SQL 원문
+
+하위 호환:
+    reasoning_flow가 빈 배열인 기존 trace → 기존 Decision Trail,
+    Referenced Information, State Evolution 함수를 fallback 호출.
 
 사용법::
 
@@ -28,6 +33,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from src.config import settings
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,13 +45,14 @@ _LAYER_ORDER = ["User", "interpret", "reason", "present"]
 _NODE_LAYER: dict[str, str] = {
     "preprocess": "interpret",
     "resolve_history": "interpret",
-    "classify_intent": "interpret",
+    "intent_classifier": "interpret",
+    "classify_intent": "interpret",  # 하위호환
     "normalize_query": "interpret",
     "clarify": "interpret",
     "reasoning_preparer": "reason",
     "context_explorer": "reason",
-    "knowledge_fetcher": "reason",
-    "knowledge_interpreter": "reason",
+    "context_retriever": "reason",
+    "context_interpreter": "reason",
     "readiness_gate": "reason",
     "recovery_agent": "reason",
     "sql_generator": "reason",
@@ -232,7 +239,7 @@ def render_executive_summary(
     if readiness_decs:
         last_r = readiness_decs[-1]
         detail = last_r.get("detail", {})
-        tables = detail.get("candidate_tables", [])
+        tables = detail.get("explored_tables", [])
         if tables:
             lines.append(
                 f"| 테이블 선택 | "
@@ -349,7 +356,7 @@ def render_decision_trail(
                     lines.append(f"  - {_sanitize(str(item), 80)}")
 
             # 후보 테이블
-            tables = detail.get("candidate_tables", [])
+            tables = detail.get("explored_tables", [])
             if tables:
                 lines.append(
                     f"- 후보 테이블: "
@@ -531,7 +538,624 @@ def render_state_evolution(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 5. Node Flow
+# 2-NEW. Reasoning Flow (기존 2+3+4 대체, fallback 보존)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 노드 이름 → 사람이 읽기 쉬운 표시명
+_NODE_DISPLAY: dict[str, str] = {
+    "intent_classifier": "Intent Classification",
+    "classify_intent": "Intent Classification",  # 하위호환
+    "normalize_query": "Query Normalization",
+    "reasoning_preparer": "Reasoning Preparer",
+    "context_retriever": "Context Retriever",
+    "context_interpreter": "Context Interpretation",
+    "readiness_gate": "Readiness Gate",
+    "recovery_agent": "Recovery Agent",
+    "sql_generator": "SQL Generation",
+    "sql_validator": "SQL Validation",
+    "execute_sql": "SQL Execution",
+    "analyze_data": "Data Analysis",
+    "format_response": "Response Formatting",
+    "preprocess": "Preprocess",
+    "resolve_history": "History Resolution",
+    "clarify": "Clarification",
+    "recovery_planner": "Recovery Planner",
+    "result_finalizer": "Result Finalizer",
+}
+
+
+def render_reasoning_flow(trace_data: dict[str, Any]) -> str:
+    """reasoning_flow를 시간순 서사형 Markdown으로 렌더링한다.
+
+    reasoning_flow가 있으면 서사형 렌더링, 없으면 기존 3개 함수 fallback.
+    """
+    reasoning_flow = trace_data.get("reasoning_flow", [])
+    if reasoning_flow:
+        return _render_from_reasoning_flow(reasoning_flow, trace_data)
+    # 하위 호환: 기존 3개 함수 호출
+    return (
+        render_decision_trail(trace_data)
+        + render_referenced_info(trace_data)
+        + render_state_evolution(trace_data)
+    )
+
+
+def _render_from_reasoning_flow(
+    steps: list[dict[str, Any]],
+    trace_data: dict[str, Any],
+) -> str:
+    """reasoning_flow 스텝 목록을 서사형 Markdown으로 렌더링한다."""
+    lines: list[str] = []
+    lines.append("## 2. Reasoning Flow")
+    lines.append("")
+
+    # ── 헤더 요약 ──
+    total_dur = trace_data.get("total_duration_ms", 0)
+    total_llm = trace_data.get("total_llm_calls", 0)
+    total_tok = trace_data.get("total_llm_tokens", 0)
+    node_path = trace_data.get("node_path", [])
+
+    lines.append(
+        f"> 총 소요 {_fmt_duration(total_dur)} · "
+        f"LLM {total_llm}회 · "
+        f"{_fmt_tokens(total_tok)}tok"
+    )
+
+    # 경로 요약
+    if node_path:
+        path_summary = _build_path_summary(node_path)
+        lines.append(f"> 경로: {path_summary}")
+
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # ── Phase/Round 그루핑 ──
+    groups = _group_steps_by_phase_round(steps)
+
+    for group in groups:
+        # 그룹 헤더
+        lines.append(f"### {group['header']}")
+        lines.append("")
+
+        # 가설 설명 (Round 시작 시)
+        if group.get("hypothesis_desc"):
+            lines.append(f"> 가설: \"{group['hypothesis_desc']}\"")
+            lines.append("")
+
+        # 각 스텝 렌더링
+        for step in group["steps"]:
+            step_lines = _render_single_step(step)
+            lines.extend(step_lines)
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_path_summary(node_path: list[str]) -> str:
+    """node_path를 압축된 경로 요약 문자열로 변환한다."""
+    # 연속 중복 제거 + 방문 횟수 표기
+    compressed: list[str] = []
+    visit_counts: dict[str, int] = {}
+    replan_seen = False
+
+    for node in node_path:
+        short = node.replace("classify_", "").replace("normalize_", "normalize")
+        short = short.replace("reasoning_", "").replace("context_", "")
+        short = short.replace("readiness_", "").replace("recovery_", "recovery")
+        short = short.replace("sql_", "").replace("analyze_", "analyze")
+        short = short.replace("format_", "format").replace("execute_", "execute")
+
+        visit_counts[node] = visit_counts.get(node, 0) + 1
+        count = visit_counts[node]
+
+        if node == "recovery_agent" and not replan_seen:
+            replan_seen = True
+            compressed.append(f"**REPLAN**")
+
+        if count > 1:
+            compressed.append(f"{short}②")
+        else:
+            compressed.append(short)
+
+    return " → ".join(compressed)
+
+
+def _group_steps_by_phase_round(
+    steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """스텝을 Phase/Round별 그룹으로 분류한다."""
+    groups: list[dict[str, Any]] = []
+    current_group: dict[str, Any] | None = None
+
+    for step in steps:
+        phase = step.get("phase", "")
+        rnd = step.get("round", 0)
+        step_type = step.get("step_type", "")
+        hyp_id = step.get("hypothesis_id", "")
+
+        # 그룹 키 결정
+        if step_type == "recovery":
+            group_key = f"recovery_{rnd + 1}"
+            header = f"◆ Recovery → Round {rnd + 1}"
+            hyp_desc = ""
+        elif phase == "interpret":
+            group_key = "interpret"
+            header = "Phase 1: Interpret"
+            hyp_desc = ""
+        elif phase == "present":
+            group_key = "present"
+            header = "Phase 3: Present"
+            hyp_desc = ""
+        else:
+            # reason phase
+            group_key = f"reason_r{rnd}"
+            hyp_label = f" ({hyp_id})" if hyp_id else ""
+            header = f"Phase 2: Reason — Round {rnd}{hyp_label}"
+            # 가설 설명은 reasoning_preparer 또는 recovery output에서 추출
+            hyp_desc = _extract_hypothesis_desc(step)
+
+        if current_group is None or current_group["key"] != group_key:
+            current_group = {
+                "key": group_key,
+                "header": header,
+                "hypothesis_desc": hyp_desc,
+                "steps": [],
+            }
+            groups.append(current_group)
+        elif hyp_desc and not current_group.get("hypothesis_desc"):
+            current_group["hypothesis_desc"] = hyp_desc
+
+        current_group["steps"].append(step)
+
+    return groups
+
+
+def _extract_hypothesis_desc(step: dict[str, Any]) -> str:
+    """스텝에서 가설 설명을 추출한다."""
+    output = step.get("output", {})
+    # reasoning_preparer의 hypothesis 필드
+    hyp = output.get("hypothesis", "")
+    if isinstance(hyp, str) and hyp:
+        # "H1: 유사SQL+..." → 콜론 뒤 부분
+        if ": " in hyp:
+            return hyp.split(": ", 1)[1]
+        return hyp
+    # recovery의 new_hypothesis
+    new_hyp = output.get("new_hypothesis", {})
+    if isinstance(new_hyp, dict):
+        return new_hyp.get("description", "")
+    return ""
+
+
+def _render_single_step(step: dict[str, Any]) -> list[str]:
+    """단일 reasoning step을 Markdown 행 목록으로 렌더링한다."""
+    lines: list[str] = []
+    seq = step.get("seq", 0)
+    node = step.get("node", "")
+    step_type = step.get("step_type", "")
+    dur_ms = step.get("duration_ms", 0)
+    tokens = step.get("tokens", 0)
+    hyp_id = step.get("hypothesis_id", "")
+
+    display = _NODE_DISPLAY.get(node, node)
+
+    # 가설 ID 보충
+    hyp_suffix = f" — {hyp_id}" if hyp_id else ""
+
+    # 메타 정보 (duration + tokens or rule-based)
+    if step_type == "rule_decision":
+        meta = "rule-based"
+    elif tokens > 0:
+        meta = f"{_fmt_duration(dur_ms)}, {_fmt_tokens(tokens)}tok"
+    else:
+        meta = _fmt_duration(dur_ms) if dur_ms else ""
+
+    header_meta = f" ({meta})" if meta else ""
+    lines.append(f"#### [{seq}] {display}{hyp_suffix}{header_meta}")
+    lines.append("")
+
+    inputs = step.get("inputs", {})
+    output = step.get("output", {})
+    routing = step.get("routing", {})
+
+    # ── 입력 섹션 ──
+    if inputs:
+        _render_inputs(lines, inputs, step_type)
+
+    # ── 출력 섹션 ──
+    if output:
+        _render_output(lines, output, step_type)
+
+    # ── 라우팅 ──
+    next_node = routing.get("next_node", "")
+    reason = routing.get("reason", "")
+    if next_node:
+        is_retry = routing.get("is_retry", False)
+        retry_mark = " (재시도)" if is_retry else ""
+        reason_text = f" — {reason}" if reason else ""
+        lines.append(f"→ **{next_node}**{reason_text}{retry_mark}")
+        lines.append("")
+
+    return lines
+
+
+def _render_inputs(
+    lines: list[str],
+    inputs: dict[str, Any],
+    step_type: str,
+) -> None:
+    """step의 inputs를 Markdown으로 렌더링한다."""
+    if step_type == "recovery":
+        # Recovery: 7개 입력을 각각 ► 소제목 형식으로
+        _render_recovery_inputs(lines, inputs)
+        return
+
+    if step_type == "tool_execution":
+        # tool_execution: 간결 표기
+        lines.append("► **입력**")
+        for key, val in inputs.items():
+            lines.append(f"  {key}: {_format_value_inline(val)}")
+        lines.append("")
+        return
+
+    # 일반 입력
+    lines.append("► **입력**")
+    for key, val in inputs.items():
+        _render_kv(lines, key, val, indent=2)
+    lines.append("")
+
+
+def _render_recovery_inputs(
+    lines: list[str],
+    inputs: dict[str, Any],
+) -> None:
+    """Recovery Agent의 7개 입력을 ► 소제목 형식으로 렌더링한다."""
+    # Recovery 입력 키 → 표시 소제목 매핑
+    recovery_labels: dict[str, str] = {
+        "entry_source": "진입 맥락",
+        "confirmed_knowledge": "확인된 지식",
+        "unresolved_items": "미해소 항목",
+        "tool_execution_history": "도구 실행 이력",
+        "explored_tables": "탐색된 테이블",
+        "dead_ends": "이전 실패 기록",
+        "sample_data": "샘플 데이터",
+    }
+    for key, label in recovery_labels.items():
+        val = inputs.get(key)
+        if val is None:
+            continue
+        lines.append(f"► **{label}**")
+        if isinstance(val, str):
+            for line in val.split("\n"):
+                lines.append(f"  {line}")
+        else:
+            lines.append(f"  {_format_value_inline(val)}")
+        lines.append("")
+
+    # recovery_labels에 없는 추가 키 처리
+    for key, val in inputs.items():
+        if key not in recovery_labels and val is not None:
+            lines.append(f"► **{key}**")
+            lines.append(f"  {_format_value_inline(val)}")
+            lines.append("")
+
+
+def _render_output(
+    lines: list[str],
+    output: dict[str, Any],
+    step_type: str,
+) -> None:
+    """step의 output을 Markdown으로 렌더링한다."""
+    # LLM vs rule 라벨
+    if step_type == "rule_decision":
+        lines.append("◄ **판단**")
+    elif step_type == "validation":
+        lines.append("◄ **검증 결과**")
+    elif step_type == "tool_execution":
+        _render_tool_results(lines, output)
+        return
+    elif step_type == "analysis":
+        _render_analysis_output(lines, output)
+        return
+    elif step_type == "recovery":
+        lines.append("◄ **LLM 판단**")
+        _render_recovery_output(lines, output)
+        return
+    else:
+        lines.append("◄ **LLM 판단**")
+
+    # ── 8-Slot 테이블 ──
+    slot_data = output.get("8_slot")
+    if slot_data and isinstance(slot_data, dict):
+        lines.append("")
+        lines.append("| Slot | 값 |")
+        lines.append("|------|---|")
+        for slot_key, slot_val in slot_data.items():
+            lines.append(f"| {slot_key} | {_format_value_inline(slot_val)} |")
+        lines.append("")
+
+    # ── table_decisions (Context Interpreter) ──
+    table_dec = output.get("table_decisions")
+    if table_dec and isinstance(table_dec, dict):
+        lines.append("  **테이블 선정**:")
+        selected = table_dec.get("SELECTED", [])
+        for item in selected:
+            lines.append(f"    ✅ {item}")
+        rejected = table_dec.get("REJECTED", [])
+        for item in rejected:
+            lines.append(f"    ❌ {item}")
+        lines.append("")
+
+    # ── knowledge_updates ──
+    updates = output.get("knowledge_updates")
+    if updates and isinstance(updates, list):
+        lines.append("  **지식 갱신**:")
+        for upd in updates:
+            if isinstance(upd, str):
+                # CONFIRMED → ✅, UNRESOLVED → ⚠
+                icon = "✅" if "CONFIRMED" in upd else "⚠"
+                lines.append(f"    {upd.replace('CONFIRMED', f'**CONFIRMED** {icon}').replace('UNRESOLVED', f'**UNRESOLVED** {icon}')}")
+            else:
+                lines.append(f"    {_format_value_inline(upd)}")
+        lines.append("")
+
+    # ── key_insights ──
+    insights = output.get("key_insights")
+    if insights and isinstance(insights, list):
+        lines.append("  **인사이트**:")
+        for ins in insights:
+            lines.append(f"    \"{ins}\"")
+        lines.append("")
+
+    # ── Layer 검증 결과 (sql_validator) ──
+    if step_type == "validation":
+        _render_validation_layers(lines, output)
+        return
+
+    # ── SQL 코드블록 ──
+    sql = output.get("sql")
+    if sql and isinstance(sql, str):
+        lines.append("")
+        lines.append("```sql")
+        lines.append(sql)
+        lines.append("```")
+        lines.append("")
+
+    # ── 일반 키-값 (위에서 처리하지 않은 것들) ──
+    handled_keys = {
+        "8_slot", "table_decisions", "knowledge_updates",
+        "key_insights", "sql",
+        "layer1_rule", "layer2a_structural", "layer3_execution",
+        "layer2b_semantic", "final_verdict",
+    }
+    remaining = {k: v for k, v in output.items() if k not in handled_keys}
+    for key, val in remaining.items():
+        _render_kv(lines, key, val, indent=2)
+
+    lines.append("")
+
+
+def _render_validation_layers(
+    lines: list[str],
+    output: dict[str, Any],
+) -> None:
+    """SQL Validator의 Layer별 검증 결과를 3열 테이블로 렌더링한다."""
+    lines.append("")
+    lines.append("| Layer | 결과 | 상세 |")
+    lines.append("|-------|------|------|")
+
+    layer_defs = [
+        ("layer1_rule", "L1 (safety+parse)"),
+        ("layer2a_structural", "L2a (structural)"),
+        ("layer3_execution", "L3 (execution)"),
+        ("layer2b_semantic", "L2b (semantic)"),
+    ]
+
+    for key, label in layer_defs:
+        layer = output.get(key, {})
+        if not layer:
+            continue
+        status = layer.get("status", "?")
+        icon = "✅" if status == "PASS" else "❌"
+        detail = layer.get("detail", "")
+        rows = layer.get("rows")
+        latency = layer.get("latency", "")
+        extra_parts = []
+        if rows is not None:
+            extra_parts.append(f"{rows}건")
+        if latency:
+            extra_parts.append(str(latency))
+        if detail:
+            extra_parts.append(str(detail))
+        detail_text = ", ".join(extra_parts) if extra_parts else ""
+        lines.append(f"| {label} | {icon} {status} | {detail_text} |")
+
+    lines.append("")
+
+    # L2b 상세 checks
+    l2b = output.get("layer2b_semantic", {})
+    checks = l2b.get("checks", {})
+    if checks:
+        lines.append("  L2b checks:")
+        for check_key, check_val in checks.items():
+            lines.append(f"    {check_key}: {check_val}")
+        lines.append("")
+
+    verdict = output.get("final_verdict", "")
+    if verdict:
+        lines.append(f"  **final_verdict: {verdict}**")
+        lines.append("")
+
+
+def _render_tool_results(
+    lines: list[str],
+    output: dict[str, Any],
+) -> None:
+    """tool_execution 스텝의 결과를 4열 테이블로 렌더링한다."""
+    results = output.get("results", [])
+    if not results:
+        for key, val in output.items():
+            _render_kv(lines, key, val, indent=0)
+        lines.append("")
+        return
+
+    lines.append("")
+    lines.append("| Step | Tool | 결과 | 요약 |")
+    lines.append("|-----:|------|-----:|------|")
+    for item in results:
+        step_num = item.get("step", "")
+        tool = item.get("tool", "")
+        count = item.get("count", "")
+        summary = _sanitize(item.get("summary", ""), 45)
+        count_text = f"{count}건" if count != "" else ""
+        lines.append(f"| {step_num} | {tool} | {count_text} | {summary} |")
+    lines.append("")
+
+
+def _render_analysis_output(
+    lines: list[str],
+    output: dict[str, Any],
+) -> None:
+    """분석 노드(analyzer)의 출력을 렌더링한다."""
+    summary = output.get("summary", "")
+    insights = output.get("insights", [])
+    recs = output.get("recommendations", [])
+    viz_judgment = output.get("viz_judgment", "")
+    chart_type = output.get("chart_type", "")
+
+    if summary:
+        lines.append(f"◄ **분석 LLM**")
+        lines.append(f"  summary: \"{summary}\"")
+
+    if insights:
+        lines.append("  insights:")
+        for i, ins in enumerate(insights, 1):
+            marker = _CYCLE_MARKERS[i - 1] if i <= len(_CYCLE_MARKERS) else f"{i}."
+            lines.append(f"    {marker} \"{ins}\"")
+
+    if recs:
+        lines.append("  recommendations:")
+        for rec in recs:
+            lines.append(f"    \"{rec}\"")
+    lines.append("")
+
+    if viz_judgment:
+        lines.append(f"◄ **시각화 판단 LLM**")
+        lines.append(f"  judgment: {viz_judgment}")
+        if chart_type:
+            lines.append(f"  chart_type: {chart_type}")
+        lines.append("")
+
+    # 기타 키
+    handled = {"summary", "insights", "recommendations", "viz_judgment", "chart_type"}
+    for key, val in output.items():
+        if key not in handled:
+            _render_kv(lines, key, val, indent=2)
+
+
+def _render_recovery_output(
+    lines: list[str],
+    output: dict[str, Any],
+) -> None:
+    """Recovery Agent 출력을 렌더링한다."""
+    analysis = output.get("analysis", "")
+    lessons = output.get("lessons_learned", "")
+    action = output.get("action", "")
+    new_hyp = output.get("new_hypothesis", {})
+    new_plan = output.get("new_plan", [])
+
+    if analysis:
+        lines.append(f"  analysis: \"{analysis}\"")
+    if lessons:
+        lines.append(f"  lessons: \"{lessons}\"")
+    if action:
+        lines.append(f"  action: **{action}**")
+
+    if isinstance(new_hyp, dict) and new_hyp:
+        hyp_id = new_hyp.get("id", "")
+        desc = new_hyp.get("description", "")
+        strategy = new_hyp.get("strategy", "")
+        lines.append(f"  new_hypothesis: {hyp_id} \"{desc}\"")
+        if strategy:
+            lines.append(f"    strategy: \"{strategy}\"")
+
+    if new_plan:
+        lines.append("  new_plan:")
+        for p in new_plan:
+            lines.append(f"    {p}")
+
+    lines.append("")
+
+    # 기타 키
+    handled = {"analysis", "lessons_learned", "action", "new_hypothesis", "new_plan"}
+    for key, val in output.items():
+        if key not in handled:
+            _render_kv(lines, key, val, indent=2)
+
+
+def _render_kv(
+    lines: list[str],
+    key: str,
+    val: Any,
+    indent: int = 0,
+) -> None:
+    """키-값 쌍을 적절한 형식으로 렌더링한다."""
+    prefix = " " * indent
+    if val is None:
+        return
+
+    if isinstance(val, str):
+        if "\n" in val:
+            lines.append(f"{prefix}{key}:")
+            for line in val.split("\n"):
+                lines.append(f"{prefix}  {line}")
+        else:
+            lines.append(f"{prefix}{key}: \"{val}\"" if len(val) > 0 else f"{prefix}{key}: (없음)")
+    elif isinstance(val, (int, float, bool)):
+        lines.append(f"{prefix}{key}: {val}")
+    elif isinstance(val, list):
+        if not val:
+            lines.append(f"{prefix}{key}: (없음)")
+        elif all(isinstance(v, str) and len(v) <= 50 for v in val):
+            # 짧은 리스트: 한 줄
+            lines.append(f"{prefix}{key}: [{', '.join(str(v) for v in val)}]")
+        else:
+            # 긴 리스트: 각 줄
+            lines.append(f"{prefix}{key}:")
+            for item in val:
+                lines.append(f"{prefix}  {_format_value_inline(item)}")
+    elif isinstance(val, dict):
+        lines.append(f"{prefix}{key}:")
+        for k, v in val.items():
+            _render_kv(lines, k, v, indent=indent + 2)
+    else:
+        lines.append(f"{prefix}{key}: {val}")
+
+
+def _format_value_inline(val: Any) -> str:
+    """값을 인라인 문자열로 변환한다."""
+    if val is None:
+        return "(없음)"
+    if isinstance(val, str):
+        return val if val else "(없음)"
+    if isinstance(val, (int, float, bool)):
+        return str(val)
+    if isinstance(val, list):
+        if not val:
+            return "(없음)"
+        if all(isinstance(v, str) and len(v) <= 50 for v in val):
+            return f"[{', '.join(str(v) for v in val)}]"
+        return json.dumps(val, ensure_ascii=False, default=str)
+    if isinstance(val, dict):
+        return json.dumps(val, ensure_ascii=False, default=str)
+    return str(val)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 5. Node Flow (기존 번호 유지 — render_full_report에서 ## 3으로 재번호)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -1121,7 +1745,16 @@ def _format_detail(
 def render_full_report(
     trace_data: dict[str, Any],
 ) -> str:
-    """트레이스 전체를 7섹션 Markdown 보고서로 렌더링한다.
+    """트레이스 전체를 5섹션 + Appendix Markdown 보고서로 렌더링한다.
+
+    섹션 구조:
+        1. Executive Summary
+        2. Reasoning Flow (기존 Decision Trail + Referenced Info + State Evolution 대체)
+        3. Node Flow
+        4. Performance
+        5. Automated Findings
+        Appendix: Detailed Timeline
+        Appendix: Generated SQL
 
     Args:
         trace_data: EvaluationTrace.model_dump() 결과
@@ -1137,21 +1770,30 @@ def render_full_report(
     parts.append(f"# Pipeline Trace: {run_id}")
     parts.append("")
 
-    # 7 섹션 + Appendix
+    # 1. Executive Summary
     parts.append(render_executive_summary(trace_data))
-    parts.append(render_decision_trail(trace_data))
-    parts.append(render_referenced_info(trace_data))
-    parts.append(render_state_evolution(trace_data))
-    parts.append(render_node_flow(trace_data))
-    parts.append(render_performance(trace_data))
-    parts.append(render_findings(trace_data))
 
-    # Appendix
+    # 2. Reasoning Flow (기존 2+3+4 대체, fallback 보존)
+    parts.append(render_reasoning_flow(trace_data))
+
+    # 3. Node Flow (기존 섹션 5 → 3으로 재번호)
+    node_flow = render_node_flow(trace_data)
+    parts.append(node_flow.replace("## 5. Node Flow", "## 3. Node Flow"))
+
+    # 4. Performance (기존 섹션 6 → 4로 재번호)
+    perf = render_performance(trace_data)
+    parts.append(perf.replace("## 6. Performance", "## 4. Performance"))
+
+    # 5. Automated Findings (기존 섹션 7 → 5로 재번호)
+    findings = render_findings(trace_data)
+    parts.append(findings.replace("## 7. Automated Findings", "## 5. Automated Findings"))
+
+    # Appendix: Detailed Timeline
     timeline = trace_data.get("timeline", [])
     if timeline:
         parts.append(render_detail_table(timeline))
 
-    # SQL 원문 (생성된 경우)
+    # Appendix: Generated SQL
     sql_rec = trace_data.get("sql") or {}
     if sql_rec.get("generated_sql"):
         parts.append("## Appendix: Generated SQL")
@@ -1179,9 +1821,7 @@ def save_report(
     """
     if output_path is None:
         run_id = trace_data.get("run_id", "unknown")
-        output_path = Path(
-            f"logs/traces/report_{run_id}.md"
-        )
+        output_path = Path(settings.eval_tracker_output_dir) / f"report_{run_id}.md"
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)

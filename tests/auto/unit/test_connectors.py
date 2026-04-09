@@ -126,11 +126,11 @@ async def test_mongo_search_code_meta():
 
 
 @pytest.mark.asyncio
-async def test_mongo_search_glossary():
-    """MongoDB 용어사전 검색 (Dummy)."""
+async def test_mongo_search_biz_terms():
+    """MongoDB 비즈니스 용어 검색 (Dummy)."""
     mongo = MongoConnector(use_dummy=True)
     await mongo.connect()
-    results = await mongo.search_glossary("여신")
+    results = await mongo.search_biz_terms("여신")
     assert isinstance(results, list)
 
 

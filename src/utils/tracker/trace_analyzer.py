@@ -1,17 +1,30 @@
-"""트레이스 자동 분석 유틸리티 — e2e 테스트 후 보완점 도출.
+"""트레이스 자동 분석 유틸리티 — e2e 테스트 후 보완점 자동 도출.
+
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
 
 DataCopilotCallbackHandler가 생성한 JSON 트레이스 파일을 읽어서
-SQL 정확도에 영향을 주는 병목, 실패 패턴, 개선 기회를 자동으로 도출한다.
+SQL 정확도에 영향을 주는 병목, 실패 패턴, 개선 기회를 규칙 기반으로
+자동 도출한다. 사람이 수백 건의 트레이스를 일일이 검토하는 대신,
+7개 분석 규칙(_check_context_retrieval, _check_llm_calls 등)을
+적용하여 CRITICAL/WARNING/INFO 심각도의 Finding을 생성한다.
 
-사용 방법:
-    from src.utils.tracker.trace_analyzer import analyze_trace, analyze_batch
+분석 규칙 범주:
+    - 컨텍스트 수집: 도구 호출 누락, 결과 0건, 응답 지연
+    - LLM 호출: 빈 응답, 과도한 호출 수, 높은 지연
+    - 의사결정: 낮은 확신도로 SQL 생성 진입, 의도 분류 불안정
+    - SQL 품질: 미생성, 검증 실패, 실행 실패, 결과 0건
+    - 파이프라인 흐름: 과도한 재계획, 최종 실패
+    - 노드 성능: 30초 초과 노드, 에러 발생 노드
+    - 타임라인: 도구 호출 실패, 연속 LLM 호출, 빈 노드
 
-    # 단일 트레이스 분석
+핵심 함수:
+    - analyze_trace: 단일 트레이스 파일 → TraceReport
+    - analyze_trace_data: dict 형태 트레이스 → TraceReport
+    - analyze_batch: 디렉토리 내 모든 트레이스 → BatchReport (종합 통계)
+
+사용 방법::
+
     findings = analyze_trace("traces/trace_001.json")
-    for f in findings:
-        print(f"{f.severity}: {f.message}")
-
-    # 배치 분석 (디렉토리 내 모든 트레이스)
     report = analyze_batch("traces/")
     print(report.summary)
 """
@@ -23,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.agents.nodes.reason.tools import _TABLE_META_TOOLS
 from src.models.enums import FinalStatus
 
 
@@ -214,12 +228,15 @@ def _check_context_retrieval(data: dict) -> list[Finding]:
         ))
 
     # 테이블 메타 검색 누락
-    if "search_table_meta" not in tool_counts:
+    if not any(t in tool_counts for t in _TABLE_META_TOOLS):
         findings.append(Finding(
             severity="CRITICAL",
             category="context",
             stage="context_explorer",
-            message="search_table_meta 호출 없음 — 후보 테이블을 찾지 못했을 수 있음",
+            message=(
+                "테이블 메타 검색 호출 없음"
+                " — 후보 테이블을 찾지 못했을 수 있음"
+            ),
         ))
 
     return findings

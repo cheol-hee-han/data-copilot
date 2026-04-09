@@ -1,5 +1,7 @@
 """커넥터 Dummy 모드용 샘플 데이터 — 폐쇄망 개발/테스트 지원.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 외부 인프라(ElasticSearch, PostgreSQL, Qdrant) 없이도 전체 파이프라인을
 end-to-end로 실행할 수 있도록 은행 도메인 기반 내장 샘플 데이터를 제공한다.
 ES용으로 테이블 메타 6종(고객/여신/수신/거래/지점/연체통계), 보고서 SQL 3종,
@@ -686,7 +688,7 @@ DUMMY_QDRANT_SQL_HISTORY = [
         "sql": (
             "SELECT LN_DCD, COUNT(*) AS cnt, "
             "SUM(LN_BAL_AMT) AS total "
-            "FROM biz_schema.TB_ADW_LNB301M "
+            "FROM ADWOWN.TB_ADW_LNB301M "
             "WHERE STD_DT = CURRENT_DATE "
             "GROUP BY LN_DCD"
         ),
@@ -698,7 +700,7 @@ DUMMY_QDRANT_SQL_HISTORY = [
         "sql": (
             "SELECT BLNG_BRCD, COUNT(*) AS cnt, "
             "SUM(BAL_AMT) AS total "
-            "FROM biz_schema.TB_ADW_DEP201P "
+            "FROM ADWOWN.TB_ADW_DEP201P "
             "WHERE STD_DT = CURRENT_DATE "
             "GROUP BY BLNG_BRCD "
             "ORDER BY total DESC"
@@ -710,7 +712,7 @@ DUMMY_QDRANT_SQL_HISTORY = [
     {
         "sql": (
             "SELECT CUS_GRD_CD, COUNT(*) AS cnt "
-            "FROM biz_schema.TB_ADW_CSC101M "
+            "FROM ADWOWN.TB_ADW_CSC101M "
             "WHERE STD_DT = CURRENT_DATE "
             "GROUP BY CUS_GRD_CD"
         ),
@@ -722,7 +724,7 @@ DUMMY_QDRANT_SQL_HISTORY = [
         "sql": (
             "SELECT AGE_GRP_CD, GENDER_CD, "
             "COUNT(*) AS cnt "
-            "FROM biz_schema.TB_ADW_CSC101M "
+            "FROM ADWOWN.TB_ADW_CSC101M "
             "WHERE STD_DT = CURRENT_DATE "
             "AND CUS_DCD = '01' "
             "GROUP BY AGE_GRP_CD, GENDER_CD"
@@ -737,7 +739,7 @@ DUMMY_QDRANT_SQL_HISTORY = [
         "sql": (
             "SELECT OVDU_GRD_CD, COUNT(*) AS cnt, "
             "SUM(OVDU_AMT) AS total_ovdu "
-            "FROM biz_schema.TB_ADW_LNB301M "
+            "FROM ADWOWN.TB_ADW_LNB301M "
             "WHERE STD_DT = CURRENT_DATE "
             "AND OVDU_DAYS > 0 "
             "GROUP BY OVDU_GRD_CD"
@@ -865,9 +867,13 @@ def search_dummy_manuals(
         if score > 0:
             scored.append((score, manual))
     scored.sort(key=lambda x: x[0], reverse=True)
-    if scored:
-        return [m for _, m in scored[:top_k]]
-    return DUMMY_MANUALS[:top_k]
+    results = (
+        [m for _, m in scored[:top_k]] if scored else DUMMY_MANUALS[:top_k]
+    )
+    return [
+        {**m, "_point_id": f"dummy-manual-{i}"}
+        for i, m in enumerate(results)
+    ]
 
 
 def search_dummy_qdrant_sql_history(
@@ -889,4 +895,7 @@ def search_dummy_qdrant_sql_history(
         )
         scored.append((score, {**item, "_score": score}))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [m for _, m in scored[:top_k]]
+    return [
+        {**m, "_point_id": f"dummy-sql-{i}"}
+        for i, (_, m) in enumerate(scored[:top_k])
+    ]

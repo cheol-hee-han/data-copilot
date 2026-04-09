@@ -1,13 +1,21 @@
 """명확화 컨텍스트 빌더 — resolved_signals를 LLM 프롬프트 섹션으로 변환.
 
-명확화 후 복귀하는 모든 노드(readiness_gate, normalize_query,
-sql_generator 등)가 LLM 프롬프트에 명확화 컨텍스트를 주입할 때 사용한다.
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+명확화(interrupt/resume) 사이클 후 복귀하는 모든 노드(readiness_gate,
+normalize_query, sql_generator 등)가 동일한 형식으로 명확화 결과를
+LLM 프롬프트에 주입해야 하므로, 이 로직을 별도 유틸리티로 분리하였다.
+노드마다 개별 구현하면 형식 불일치와 중복이 발생하기 때문이다.
+
+핵심 전략:
+    - ASK 시그널(사용자 직접 응답)과 INFER 시그널(자동 추론)을
+      별도 섹션으로 분리하여 LLM이 확정/추론 정보를 구분할 수 있게 한다.
+    - turn_id 기반 필터링으로 현재 턴의 시그널만 포함하여
+      이전 턴의 명확화가 혼입되지 않도록 한다.
 
 핵심 함수:
     - build_clarification_context: resolved_signals에서 ASK/INFER를
       분리하여 프롬프트 섹션 문자열을 구성
-    - build_auto_resolved_notice: INFER 항목을 사용자 응답 상단에
-      자연어로 안내하는 문자열을 구성
 """
 
 from __future__ import annotations
@@ -83,33 +91,3 @@ def build_clarification_context(state: PipelineState) -> str:
     return "\n".join(lines)
 
 
-def build_auto_resolved_notice(
-    state: PipelineState,
-) -> str:
-    """INFER 항목을 결과 상단에 자연어로 안내한다.
-
-    DTE 패턴: "왜 이렇게 처리했는지" 근거를 포함한다.
-
-    현재 턴(turn_id)에 해당하는 시그널만 필터링한다.
-    """
-    tid = state.turn_id
-    if not tid:
-        logger.warning(
-            "turn_id가 비어있음 — runner.py에서 UUID 생성 누락 가능성",
-        )
-        return ""
-
-    infers = [
-        s for s in state.resolved_signals
-        if s.decision == "INFER"
-        and s.turn_id is not None
-        and s.turn_id == tid
-    ]
-    if not infers:
-        return ""
-
-    lines = ["조회 기준 안내:"]
-    for s in infers:
-        lines.append(f"- {s.question} → {s.inferred_value}")
-    lines.append("(다른 기준을 원하시면 말씀해 주세요)")
-    return "\n".join(lines)

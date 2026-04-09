@@ -64,13 +64,12 @@ _SKIP_LIVE = pytest.mark.skipif(
 
 def _make_state(validated_sql: str):
     """테스트용 PipelineState 를 생성한다."""
-    from src.agents.state.state import ContextInfo, PipelineState, ReasoningState
+    from src.agents.state.state import PipelineState, ReasoningState
 
     return PipelineState(
         user_input="테스트 질의",
         preprocessed_input="테스트 질의",
         reason=ReasoningState(validated_sql=validated_sql),
-        context=ContextInfo(),
     )
 
 

@@ -147,19 +147,19 @@ class TestRealConnectorHealth:
         )
 
     @pytest.mark.asyncio
-    async def test_03_mongo_glossary_search(
+    async def test_03_mongo_biz_term_search(
         self, connector_mgr,
     ):
         """MongoDB 용어사전 검색."""
         t0 = time.perf_counter()
         try:
-            results = await connector_mgr.mongo.search_glossary(
+            results = await connector_mgr.mongo.search_biz_terms(
                 "여신",
             )
         except Exception as e:
             elapsed = (time.perf_counter() - t0) * 1000
             _record(
-                "connector", "mongo_glossary",
+                "connector", "mongo_biz_term",
                 "여신", {"error": str(e)[:120]},
                 "WARN", elapsed,
             )
@@ -175,7 +175,7 @@ class TestRealConnectorHealth:
             "elapsed_ms": round(elapsed, 1),
         }
         _record(
-            "connector", "mongo_glossary",
+            "connector", "mongo_biz_term",
             "여신", trace,
             "PASS" if len(results) > 0 else "WARN",
             elapsed,
@@ -334,16 +334,16 @@ class TestRealAgenticNodeFlow:
                 reason.knowledge_items,
             ),
             "candidates": len(
-                reason.candidate_tables,
+                reason.explored_tables,
             ),
             "candidate_names": [
                 ct.table_name
-                for ct in reason.candidate_tables
+                for ct in reason.explored_tables
             ][:5],
             "use_cases": len(
                 reason.explored_use_cases,
             ),
-            "searched_queries": reason.searched_queries,
+            "executed_tool_keys": list(reason.executed_tool_keys),
             "elapsed_ms": round(elapsed, 1),
         }
 
@@ -354,7 +354,7 @@ class TestRealAgenticNodeFlow:
             )
         if trace["hypotheses"] != 1:
             findings.append(
-                f"가설 {trace['hypotheses']}개 — H_INIT 1개 예상"
+                f"가설 {trace['hypotheses']}개 — H1 1개 예상"
             )
 
         _record(
@@ -381,8 +381,8 @@ class TestRealAgenticNodeFlow:
             ExecutionStep,
             Hypothesis,
         )
-        from src.agents.nodes.reason.knowledge_fetcher import (
-            knowledge_fetcher_node,
+        from src.agents.nodes.reason.context_retriever import (
+            context_retriever_node,
         )
 
         state = PipelineState(
@@ -410,7 +410,7 @@ class TestRealAgenticNodeFlow:
                     ),
                     ExecutionStep(
                         step=2,
-                        tool="search_glossary",
+                        tool="search_biz_terms",
                         input="여신",
                         purpose="여신 용어 정의 확인",
                         status="PENDING",
@@ -420,7 +420,7 @@ class TestRealAgenticNodeFlow:
         )
 
         t0 = time.perf_counter()
-        result = await knowledge_fetcher_node(state)
+        result = await context_retriever_node(state)
         elapsed = (time.perf_counter() - t0) * 1000
 
         reason = result["reason"]
@@ -435,8 +435,8 @@ class TestRealAgenticNodeFlow:
             "knowledge_items": len(
                 reason.knowledge_items,
             ),
-            "candidate_tables": len(
-                reason.candidate_tables,
+            "explored_tables": len(
+                reason.explored_tables,
             ),
             "step_insights": [
                 s.insight for s in plan if s.insight
@@ -459,7 +459,7 @@ class TestRealAgenticNodeFlow:
             )
 
         _record(
-            "explorer_real", "table_glossary_search",
+            "explorer_real", "table_biz_term_search",
             "고객 + 여신", trace,
             "PASS" if trace["done_steps"] > 0 else "FAIL",
             elapsed,
@@ -482,8 +482,8 @@ class TestRealAgenticNodeFlow:
         from src.agents.nodes.reason.reasoning_preparer import (
             reasoning_preparer_node,
         )
-        from src.agents.nodes.reason.knowledge_fetcher import (
-            knowledge_fetcher_node,
+        from src.agents.nodes.reason.context_retriever import (
+            context_retriever_node,
         )
 
         # Step 1: reasoning_preparer
@@ -503,7 +503,7 @@ class TestRealAgenticNodeFlow:
 
         # Step 2: explorer
         t0 = time.perf_counter()
-        explore_result = await knowledge_fetcher_node(state2)
+        explore_result = await context_retriever_node(state2)
         elapsed = (time.perf_counter() - t0) * 1000
 
         d2 = state2.model_dump()
@@ -519,13 +519,13 @@ class TestRealAgenticNodeFlow:
                 state2.reason.hypotheses,
             ),
             "preparer_candidates": len(
-                state2.reason.candidate_tables,
+                state2.reason.explored_tables,
             ),
             "explorer_knowledge": len(
                 state3.reason.knowledge_items,
             ),
             "explorer_candidates": len(
-                state3.reason.candidate_tables,
+                state3.reason.explored_tables,
             ),
             "explorer_tool_calls": (
                 state3.reason.loop_guard.total_tool_calls

@@ -1,5 +1,7 @@
 """보안 유틸리티 — 다층 방어를 위한 프롬프트 인젝션·SQL 인젝션·PII 마스킹 모듈.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 사용자 입력부터 SQL 실행까지 전 구간에 걸쳐 보안 위협을 차단하는
 다층 방어(Multi-layer Defense) 함수들을 제공한다.
 
@@ -151,10 +153,6 @@ FORBIDDEN_SQL_PATTERNS: list[tuple[str, str]] = [
     (r"--", "SQL 주석은 허용되지 않습니다"),
     (r"/\*", "SQL 블록 주석은 허용되지 않습니다"),
     (r"\bxp_\w+", "확장 저장 프로시저는 허용되지 않습니다"),
-    (
-        r"\bUNION\s+(?:ALL\s+)?SELECT\b",
-        "UNION SELECT는 허용되지 않습니다",
-    ),
 ]
 
 
@@ -204,7 +202,14 @@ def mask_pii(text: str) -> str:
 
     적용 순서: 주민등록번호 → 카드번호 → 계좌번호 → 전화번호 → 이메일
     (더 구체적인 패턴을 먼저 적용하여 부분 오탐 방지)
+
+    settings.pii_masking_enabled가 False이면 마스킹 없이 원문을 반환한다.
     """
+    from src.config import settings  # lazy import (순환 참조 방지)
+
+    if not settings.pii_masking_enabled:
+        return text
+
     result = text
     for _pii_type, pattern in PII_PATTERNS.items():
         result = pattern.sub(lambda m: _make_masked(m.group(0)), result)

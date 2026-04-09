@@ -7,7 +7,7 @@
 
 | 파일 | 적용 내용 |
 |------|-----------|
-| `interpret/context_classifier_system.txt` | `━━━` → `##`, `✓` → `-`, `■` 제거, 조건부 JSON 스키마 → 통합 스키마 |
+| `interpret/intent_classifier_system.txt` | `━━━` → `##`, `✓` → `-`, `■` 제거, 조건부 JSON 스키마 → 통합 스키마 |
 | `interpret/query_normalizer_phase1_system.txt` | `━━━[슬롯 N]━━━` → `## 슬롯 N`, 섹션 제목 `[...]` → `##` |
 | `interpret/query_normalizer_phase2_system.txt` | `━━━[...]━━━` → `##` |
 | `present/analyzer_system.txt` | `[규칙]` → `## 규칙` 등 섹션 제목 통일 |
@@ -15,7 +15,7 @@
 | `present/analyzer_viz_judgment_system.txt` | `━━━[...]━━━` → `##` |
 | `present/analyzer_user.txt` | 충돌하는 3필드 출력 스키마 제거 (system의 4필드 스키마로 통합) |
 | `reason/planner_system.txt` | 도구명 수정: `search_report_sql` 제거, `get_sample_data` → `get_sample_rows`, `get_date_distribution` 추가 |
-| `reason/knowledge_interpreter_system.txt` | 파일명 변경 (구 `context_explorer_batch_interpret.txt`) |
+| `reason/context_interpreter_system.txt` | 파일명 변경 (구 `context_explorer_batch_interpret.txt`) |
 | `reason/미사용_recovery_planner_system.txt` | 미사용 접두사 추가 |
 | `interpret/미사용_clarifier_system.txt` | 미사용 접두사 추가 |
 | `interpret/미사용_clarifier_user.txt` | 미사용 접두사 추가 |
@@ -52,7 +52,7 @@
 `reason/` 하위 활성 프롬프트들이 `##` 기반 포맷을 이미 사용하는지 전수 확인 필요:
 - `planner_system.txt`
 - `planner_user.txt`
-- `knowledge_interpreter_system.txt`
+- `context_interpreter_system.txt`
 - `sql_generator_system.txt`
 - `sql_generator_user.txt`
 - `sql_validator_system.txt`
@@ -60,7 +60,7 @@
 - `recovery_agent_system.txt`
 - `recovery_agent_user.txt`
 
-### 5. context_classifier_system.txt — Few-shot 예제 정합성
+### 5. intent_classifier_system.txt — Few-shot 예제 정합성
 
 통합 스키마로 변경했으나, Few-shot 예제들이 이전 조건부 스키마 형태의 출력을 보여줌.
 통합 스키마에 맞게 Few-shot 출력 예제도 정렬 필요 (예: `clarification` 필드가 불필요한 케이스에서 `null`로 명시).

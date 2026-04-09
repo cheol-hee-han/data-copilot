@@ -1,5 +1,7 @@
 """SQL 실행 노드 — 검증 완료된 SQL을 정보계 DB에서 실행하는 LangGraph 노드.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 이 노드는 직접 DB 드라이버를 다루지 않고 ConnectorManager.info_db에
 위임하는 얇은(thin) 노드로, 실행 전후 로직에 집중한다.
 
@@ -44,9 +46,13 @@ async def execute_sql_node(
     state: PipelineState,
 ) -> dict:
     """검증된 SQL을 실행한다."""
+    manager = get_connector_manager()
+    db = manager.get_query_db()
+    dialect = db.dialect
+
     logger.info(
         "SQL 실행 시작",
-        sql="\n" + format_sql(state.reason.validated_sql or ""),
+        sql="\n" + format_sql(state.reason.validated_sql or "", dialect),
     )
 
     # 이중 방어
@@ -62,13 +68,9 @@ async def execute_sql_node(
             "status": QueryStatus.ERROR,
             "error_message": ERR_SQL_SECURITY,
         }
-
-    manager = get_connector_manager()
     start_time = time.time()
 
     try:
-        # 멀티 DB 라우팅: context의 테이블에서 DB 소스 판별
-        db = manager.get_query_db()
         rows = await db.execute_query(
             state.reason.validated_sql,
         )

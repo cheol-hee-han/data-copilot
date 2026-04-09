@@ -1,8 +1,25 @@
 """Checkpointer 팩토리 — 전역 상태 없는 순수 함수.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
+LangGraph의 체크포인터(checkpoint saver)를 설정에 따라 생성·관리한다.
+체크포인터는 그래프 실행 중 상태를 영속화하여 다중턴 대화와
+interrupt/resume 흐름을 가능하게 하는 핵심 인프라 컴포넌트이다.
+
+설정 기반 백엔드 전환 전략:
+    - postgres: AsyncPostgresSaver + AsyncConnectionPool (운영 환경)
+    - memory: MemorySaver (테스트·개발 환경, 영속화 없음)
+
+msgpack 직렬화 시 State에서 사용하는 커스텀 타입(Enum, Pydantic 모델 등)을
+allowlist에 동적으로 등록하여 역직렬화 안정성을 보장한다.
+
 생명주기:
     - FastAPI lifespan에서 async context manager로 사용
     - 테스트에서는 MemorySaver 직접 사용 (setup/teardown 불필요)
+
+핵심 함수:
+    - create_checkpointer: 설정 기반 체크포인터 생성 (async context manager)
+    - _collect_src_types: State 커스텀 타입을 msgpack allowlist로 수집
 """
 
 from __future__ import annotations
@@ -10,11 +27,11 @@ from __future__ import annotations
 import importlib
 import inspect
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from src.config import CheckpointerConfig, DbConnectionInfo
+from src.config import DbConnectionInfo, settings
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,35 +39,40 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def create_checkpointer(
-    config: CheckpointerConfig,
     history_db: DbConnectionInfo,
-) -> AsyncIterator[BaseCheckpointSaver]:
+) -> AsyncIterator[tuple[BaseCheckpointSaver, Any]]:
     """설정에 따라 checkpointer를 생성하고 관리한다.
 
     AsyncContextManager — lifespan에서 async with로 사용.
     리소스 정리가 자동으로 보장된다.
+
+    Yields:
+        (checkpointer, pool) 튜플.
+        postgres 백엔드: (AsyncPostgresSaver, AsyncConnectionPool)
+        memory 백엔드: (MemorySaver, None)
+        pool은 turn_text_store 등 커스텀 테이블 접근 시 재사용한다.
     """
-    if config.backend == "postgres":
+    if settings.checkpointer_backend == "postgres":
         from psycopg_pool import AsyncConnectionPool
         from psycopg.rows import dict_row
         from langgraph.checkpoint.postgres.aio import (
             AsyncPostgresSaver,
         )
 
-        db = config.resolve_db(history_db)
-
         connection_kwargs = {
             "autocommit": True,       # 필수: psycopg3 기본값 False
             "prepare_threshold": 0,   # PgBouncer/pooler 호환
             "row_factory": dict_row,
-            "password": db.password,   # DSN에서 분리하여 로그 노출 방지
+            "password": history_db.password,   # DSN에서 분리하여 로그 노출 방지
+            "options": "-c search_path=bdptbl,public",  # checkpoint_dc_* 테이블 스키마 해석
         }
 
         pool = AsyncConnectionPool(
-            conninfo=db.dsn,
-            min_size=config.pool_min,
-            max_size=config.pool_max,
+            conninfo=history_db.dsn,
+            min_size=settings.checkpointer_pool_min,
+            max_size=settings.checkpointer_pool_max,
             kwargs=connection_kwargs,
+            open=False,
         )
         await pool.open()
         await pool.wait()
@@ -71,10 +93,10 @@ async def create_checkpointer(
 
         logger.info(
             "Checkpointer 초기화: AsyncPostgresSaver",
-            host=db.host,
+            host=history_db.host,
         )
         try:
-            yield checkpointer
+            yield checkpointer, pool
         finally:
             await pool.close()
             logger.info("Checkpointer 리소스 정리 완료")
@@ -82,14 +104,13 @@ async def create_checkpointer(
         from langgraph.checkpoint.memory import MemorySaver
 
         logger.info("Checkpointer 초기화: MemorySaver")
-        yield MemorySaver()
+        yield MemorySaver(), None
 
 
 # ── msgpack allowlist 동적 수집 ──────────────────────────
 
 _ALLOWLIST_MODULES = (
     "src.models.enums",
-    "src.models.context",
     "src.models.result",
     "src.models.trace",
     "src.agents.state.state",

@@ -1,5 +1,7 @@
 """커넥터 추상 인터페이스 — 외부 시스템 연동을 위한 계약 정의.
 
+작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+
 impl/ 패키지의 모든 커넥터 구현체가 준수해야 하는 공통 인터페이스를
 3단계 계층 구조로 정의한다.
 
@@ -17,9 +19,10 @@ impl/ 패키지의 모든 커넥터 구현체가 준수해야 하는 공통 인�
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 
 class BaseConnector(ABC):
@@ -96,4 +99,14 @@ def _to_json_safe(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, memoryview):
+        return bytes(value).decode("utf-8", errors="replace")
     return value

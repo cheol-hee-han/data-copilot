@@ -24,7 +24,7 @@ import pytest
 from src.agents.state.state import (
     PipelineState,
     ReasoningState,
-    CandidateTable,
+    TableMeta,
     ColumnInfo,
     ConfidenceStatus,
     DeadEnd,
@@ -51,8 +51,8 @@ from src.agents.nodes.reason.reasoning_preparer import (
     _initialize_knowledge_items,
     reasoning_preparer_node,
 )
-from src.agents.nodes.reason.knowledge_fetcher import (
-    knowledge_fetcher_node,
+from src.agents.nodes.reason.context_retriever import (
+    context_retriever_node,
 )
 from src.agents.nodes.reason.readiness_gate import (
     readiness_gate_node,
@@ -71,7 +71,6 @@ from src.agents.nodes.reason.recovery_agent import (
 )
 from src.agents.nodes.reason.result_finalizer import (
     result_finalizer_node,
-    _build_context_info,
     _build_success_summary,
 )
 from src.services.confidence_scorer import (
@@ -138,8 +137,8 @@ def _step(
 
 def _ct(
     name: str = "TB_CUST", cols: list | None = None,
-) -> CandidateTable:
-    return CandidateTable(
+) -> TableMeta:
+    return TableMeta(
         table_name=name, description="desc",
         columns=[ColumnInfo(name=c) for c in (cols or ["COL_A"])],
     )
@@ -166,22 +165,10 @@ class TestClearQueryAccuracy:
             "group_by": [],
             "order_limit": [],
         }
-        items = _initialize_knowledge_items(None, decomp)
+        items = _initialize_knowledge_items(decomp)
         assert len(items) == 2
         assert items[0].key == "measure:고객수"
         assert items[1].key == "filter:상태=정상"
-
-    def test_03_context_info_from_reason_state(self):
-        """ReasoningState에서 ContextInfo 구성."""
-        reason = ReasoningState(
-            candidate_tables=[_ct("TB_A", ["C1", "C2"])],
-            knowledge_items=[
-                _ki("table:TB_A", ConfidenceStatus.CONFIRMED, 0.7),
-            ],
-        )
-        ctx = _build_context_info(reason)
-        assert len(ctx.table_metas) == 1
-        assert ctx.table_metas[0].table_name == "TB_A"
 
     def test_07_structural_hints_prompt_text(self):
         """구조적 힌트 프롬프트 텍스트."""
@@ -325,11 +312,11 @@ class TestAmbiguousQueryHandling:
         )
         assert all_critical_confirmed(state.reason)
 
-    def test_08_empty_knowledge_medium_score(self):
-        """지식 없음 → 중립 점수."""
+    def test_08_empty_knowledge_zero_score(self):
+        """지식 없음 → 0점 (critical 항목·활용사례 모두 없음)."""
         state = _state()
         score = calculate_readiness(state.reason)
-        assert 0.2 <= score <= 0.5
+        assert score < 0.01
 
     def test_09_partial_knowledge_mid_score(self):
         """부분 지식 → 중간 점수."""
@@ -349,9 +336,9 @@ class TestAmbiguousQueryHandling:
                 _ki("table:A", ConfidenceStatus.CONFIRMED, 0.9),
                 _ki("table:B", ConfidenceStatus.CONFIRMED, 0.9),
             ],
-            candidate_tables=[
-                CandidateTable(table_name="A"),
-                CandidateTable(table_name="B"),
+            explored_tables=[
+                TableMeta(table_name="A"),
+                TableMeta(table_name="B"),
             ],
         )
         score = calculate_readiness(state.reason)
@@ -382,13 +369,13 @@ class TestExceptionHandling:
 
     def test_03_layer1_rejects_dml(self):
         """DML 구문 → Layer1 거부."""
-        reason = ReasoningState(candidate_tables=[_ct()])
+        reason = ReasoningState(explored_tables=[_ct()])
         r = _validate_layer1("DELETE FROM users", reason)
         assert r["status"] == "FAIL"
 
     def test_04_layer1_rejects_drop(self):
         """DDL 구문 → Layer1 거부."""
-        reason = ReasoningState(candidate_tables=[_ct()])
+        reason = ReasoningState(explored_tables=[_ct()])
         r = _validate_layer1("DROP TABLE users", reason)
         assert r["status"] == "FAIL"
 
@@ -746,16 +733,19 @@ class TestSessionTurnManagement:
         )
         assert len(state.reason.dead_ends) == 2
 
-    def test_06_searched_queries_dedup(self):
-        """검색 쿼리 중복 방지."""
-        state = _state(searched_queries=["a", "b", "a"])
-        assert "a" in state.reason.searched_queries
+    def test_06_executed_tool_keys_dedup(self):
+        """도구 실행 키 중복 방지 — tool:input 네임스페이스."""
+        keys = {"search_table_meta:예금", "lookup_code_meta:상태"}
+        state = _state(executed_tool_keys=keys)
+        assert "search_table_meta:예금" in state.reason.executed_tool_keys
+        # 같은 입력이라도 도구가 다르면 별도 키
+        assert "lookup_code_meta:예금" not in state.reason.executed_tool_keys
 
     def test_07_sampled_tables_via_sample_rows(self):
-        """샘플 테이블 추적 — CandidateTable.sample_rows로 판단."""
-        ct = CandidateTable(table_name="TB_A", sample_rows=[{"col": 1}])
-        state = _state(candidate_tables=[ct])
-        sampled = [t for t in state.reason.candidate_tables if t.sample_rows]
+        """샘플 테이블 추적 — TableMeta.sample_rows로 판단."""
+        ct = TableMeta(table_name="TB_A", sample_rows=[{"col": 1}])
+        state = _state(explored_tables=[ct])
+        sampled = [t for t in state.reason.explored_tables if t.sample_rows]
         assert any(t.table_name == "TB_A" for t in sampled)
 
     def test_10_execution_plan_mixed_status(self):
@@ -813,24 +803,9 @@ class TestIndependentQueryDuringConversation:
             "group_by": [{"term": "지점"}],
             "order_limit": [],
         }
-        items = _initialize_knowledge_items(None, decomp)
+        items = _initialize_knowledge_items(decomp)
         keys = [it.key for it in items]
         assert "measure:매출" in keys
-
-    @pytest.mark.skip(reason="_interpret_result 삭제됨 (simplify 리팩터링)")
-    @pytest.mark.asyncio
-    async def test_05_interpret_empty_result(self):
-        """빈 도구 결과 해석."""
-
-    @pytest.mark.skip(reason="_interpret_result 삭제됨 (simplify 리팩터링)")
-    @pytest.mark.asyncio
-    async def test_06_interpret_table_meta(self):
-        """테이블 메타 결과 해석."""
-
-    @pytest.mark.skip(reason="_interpret_result 삭제됨 (simplify 리팩터링)")
-    @pytest.mark.asyncio
-    async def test_07_interpret_code_meta(self):
-        """코드 메타 결과 해석 (MongoDB 형식 호환)."""
 
     def test_08_failure_type_direct_setting(self):
         """failure_type 직접 설정 확인."""

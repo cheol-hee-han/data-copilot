@@ -14,4 +14,8 @@
 - [project_hitl_clarification_unification.md](project_hitl_clarification_unification.md) — 5개 명확화 트리거 통합 (2026-03-30): clarification_handler 단일 노드+Strategy 패턴, ClarificationRequest 스키마로 UI 명세 포함, return_to로 복귀 지점 명시, 보고서 위치 포함
 - [project_clarification_context.md](project_clarification_context.md) — 명확화 컨텍스트 관리 Approach B 확정 (2026-03-30): original_query 불변+ClarificationEntry 누적, Query Rewriting 오류전파로 기각, AmbiSQL 패턴 선택적 적용, 보고서 위치 포함
 - [project_clarification_trigger.md](project_clarification_trigger.md) — 명확화 트리거 기준 확정 (2026-03-31): AmbiSQL 7종 분류 체계, 집중형 단일 노드 근거(Sphinteract+42%, EIG 76.6%), SELECT컬럼 모호성→복수SQL, 신뢰도임계값 기각, 보고서 위치 포함
-- [project_langgraph_cancel_abort.md](project_langgraph_cancel_abort.md) — LangGraph 실행 중단 패턴 (2026-04-04): asyncio.cancel() 서브그래프 미전파(#5682)·ToolNode 파손(#6726) 버그, interrupt()+thread 방기 권고, 폐쇄망=앱 레벨 플래그 필수
+- [project_langgraph_cancel_abort.md](project_langgraph_cancel_abort.md) — LangGraph 실행 중단 패턴 (2026-04-06 업데이트): #5682·#6726·#6950 전부 미해결, 1.0에 cancel 기능 미추가, 권고 변경 없음(interrupt()+thread 방기+앱 레벨 플래그), 업데이트 보고서: 20260406
+- [project_langgraph_parallel_patterns.md](project_langgraph_parallel_patterns.md) — LangGraph 병렬 fan-out/fan-in 패턴 확정 (2026-04-04): 정적 fan-out 권고, Annotated reducer 필수, 비균형 브랜치 서브그래프 캡슐화, defer=True, Send API 활용처
+- [project_depends_on_wave_scheduling.md](project_depends_on_wave_scheduling.md) — depends_on+wave scheduling 패턴 확정 (2026-04-04): LLMCompiler(ICML 2024)가 정식 선례, LangGraph 공식은 flat List[str]만 제공, Data Copilot 권고=패턴 A, 보고서 위치 포함
+- [project_langgraph_tool_node_patterns.md](project_langgraph_tool_node_patterns.md) — LangGraph tool-as-node 패턴 확정 (2026-04-04): 단일 ToolNode가 공식 권장, Data Copilot은 커스텀 노드(State 직접 갱신), ToolNode v1/v2 차이, 보고서 위치 포함
+- [project_conversation_history.md](project_conversation_history.md) — PostgreSQL 대화 이력 하이브리드 2-계층 확정 (2026-04-05): Checkpointer BYTEA 불투명→별도 JSONB 테이블 필수, conversation_turns 월별파티션+audit.agent_actions INSERT-only RLS, 보고서 위치 포함

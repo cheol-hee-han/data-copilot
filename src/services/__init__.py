@@ -3,7 +3,7 @@
 파이프라인 노드가 사용하는 서비스 계층:
   - domain/: 금융 도메인 정적 참조 데이터 (사전, 동의어)
   - input_sanitizer: 입력 정제 (정규화, 인젝션 감지, 명확화 합성)
-  - context_classifier: 연속 여부 판정 + 의도 분류 통합
+  - intent_classifier: 연속 여부 판정 + 의도 분류 통합
   - query_normalizer: 자연어 → 8-Slot 정규화
   - sql_prompt_assembler: SQL 생성 프롬프트 조립 + LLM 호출
   - sql_safety_checker: SQL 안전성 검증 (패턴/PII/구문)

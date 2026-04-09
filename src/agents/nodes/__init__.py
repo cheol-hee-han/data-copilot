@@ -7,7 +7,7 @@
   3. 결과를 상태에 넣는다
 
 Outer Head 노드:
-  - context_classifier: 연속 여부 판정 + 의도 분류 통합
+  - intent_classifier: 연속 여부 판정 + 의도 분류 통합
   - query_normalizer: 8-Slot 질의 정규화
 
 명확화 노드 (interpret/ 내):
@@ -15,8 +15,8 @@ Outer Head 노드:
 
 Agentic Core 노드 (agentic/ 서브패키지):
   - reasoning_preparer: 결정론적 reasoning 초기화 + 실행계획 생성
-  - knowledge_fetcher: 실행계획 도구 실행 + 관찰 데이터 수집
-  - knowledge_interpreter: 배치 LLM 해석 + 상태 반영
+  - context_retriever: 실행계획 도구 실행 + 관찰 데이터 수집
+  - context_interpreter: 배치 LLM 해석 + 상태 반영
   - readiness_gate: 확신도 평가 (rule-based)
   - sql_generator: 누적 지식 기반 SQL 생성
   - sql_validator: 3-레이어 SQL 검증
