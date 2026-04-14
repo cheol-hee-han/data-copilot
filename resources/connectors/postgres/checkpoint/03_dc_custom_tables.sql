@@ -12,10 +12,10 @@
 --
 --   체크포인터의 get_state_history()는 체크포인트당 500KB~1.2MB로
 --   UI 대화 목록 로딩에 과도한 I/O가 발생한다.
---   턴별 TEXT 기반 경량 테이블로 이를 해결한다.
+--   메시지별 TEXT 기반 경량 테이블로 이를 해결한다.
 --
 -- 테이블 목록:
---   1. checkpoint_dc_turn_texts      — 턴별 대화 이력 (월별 파티션)
+--   1. checkpoint_dc_messages        — 메시지별 대화 이력 (월별 파티션)
 --   2. checkpoint_dc_session_index   — 사용자별 세션 목록
 --
 -- 네이밍 규칙:
@@ -33,7 +33,7 @@ SET search_path TO BDPTBL, public;
 -- 1. PII 마스킹 함수
 -- ============================================================================
 -- 용도: 감사 로그에서 대화 내용 조회 시 개인정보를 마스킹
--- 사용 예: SELECT mask_pii(content) FROM checkpoint_dc_turn_texts WHERE ...
+-- 사용 예: SELECT mask_pii(content) FROM checkpoint_dc_messages WHERE ...
 --
 -- 마스킹 대상:
 --   - 주민등록번호 (123456-1234567 → ***-*******)
@@ -62,19 +62,19 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 -- 파티션 키: base_ymd (CHAR(8), 'YYYYMMDD')
 -- 파티션 단위: 월별 (YYYYMM01 ~ 다음달 01)
 --
--- turn_seq 채번:
---   INSERT 서브쿼리로 DB 레벨 원자적 채번 (MAX(turn_seq) + 1)
+-- seq 채번:
+--   INSERT 서브쿼리로 DB 레벨 원자적 채번 (MAX(seq) + 1)
 --   SELECT + INSERT 분리 시 race condition 가능 → 단일 SQL로 해결
 --
 -- metadata (JSONB):
 --   SVG 차트, trace_log, 분석 인사이트, SQL 실행 결과 등
 --   UI에서 Tier-2 로딩으로 개별 요청 (목록에서는 has_metadata 플래그만 반환)
 
-CREATE TABLE IF NOT EXISTS checkpoint_dc_turn_texts (
+CREATE TABLE IF NOT EXISTS checkpoint_dc_messages (
     -- ── 식별 ──
     thread_id     TEXT NOT NULL,                -- checkpointer thread_id (= session_id)
-    turn_seq      SMALLINT NOT NULL,            -- 턴 순번 (1부터 시작, 원자적 채번)
-    turn_id       UUID NOT NULL DEFAULT gen_random_uuid(),  -- 외부 참조용 고유 ID
+    seq           SMALLINT NOT NULL,            -- 세션 내 순번 (1부터 시작, 원자적 채번)
+    message_uuid  UUID NOT NULL DEFAULT gen_random_uuid(),  -- 외부 참조용 전역 유일 ID
 
     -- ── 대화 내용 ──
     role          TEXT NOT NULL                 -- 발화자
@@ -86,17 +86,17 @@ CREATE TABLE IF NOT EXISTS checkpoint_dc_turn_texts (
     user_agent    TEXT,                          -- 브라우저/클라이언트 정보
 
     -- ── 대화 분류 ──
-    turn_type     TEXT NOT NULL DEFAULT 'normal' -- 턴 유형
-                  CHECK (turn_type IN ('normal', 'clarification', 'error')),
+    message_type  TEXT NOT NULL DEFAULT 'normal' -- 메시지 유형
+                  CHECK (message_type IN ('normal', 'clarification', 'error')),
     intent        TEXT,                          -- IntentType (EXTRACT, AGGREGATE 등)
 
     -- ── 운영 메트릭 ──
     token_count   INT,                          -- LLM 토큰 사용량 (입력+출력)
-    latency_ms    INT,                          -- 해당 턴 전체 처리 소요 시간 (ms)
+    latency_ms    INT,                          -- 해당 메시지 전체 처리 소요 시간 (ms)
 
     -- ── 이슈 트래킹 ──
     request_id    TEXT,                          -- 서버 로그 교차 조회용 요청 ID
-    status        TEXT NOT NULL DEFAULT 'success' -- 턴 처리 결과
+    status        TEXT NOT NULL DEFAULT 'success' -- 메시지 처리 결과
                   CHECK (status IN ('success', 'failure', 'cancelled', 'timeout')),
     error_type    TEXT,                          -- 에러 분류 코드
     error_message TEXT,                          -- 간략 에러 메시지 (PII 제외)
@@ -111,6 +111,11 @@ CREATE TABLE IF NOT EXISTS checkpoint_dc_turn_texts (
     is_downloaded BOOLEAN NOT NULL DEFAULT false, -- 결과 다운로드 여부
     downloaded_at TIMESTAMPTZ,                  -- 최초 다운로드 시각
 
+    -- ── SQL 이력 (감사·재실행·이력 검색용) ──
+    executed_sql    TEXT,                        -- 검증 완료된 최종 실행 SQL (validated_sql)
+    sql_explanation TEXT,                        -- LLM이 생성한 SQL 1줄 요약 설명
+    target_db       TEXT,                        -- 실행 대상 DB 식별자 (postgres, sybase_iq, impala 등)
+
     -- ── UI 복원 + 확장용 ──
     metadata      JSONB DEFAULT '{}',           -- SVG, trace_log, insight, sql_result 등
 
@@ -118,7 +123,7 @@ CREATE TABLE IF NOT EXISTS checkpoint_dc_turn_texts (
     base_ymd      CHAR(8) NOT NULL DEFAULT to_char(now(), 'YYYYMMDD'),  -- 파티션 키
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    PRIMARY KEY (thread_id, turn_seq, base_ymd)
+    PRIMARY KEY (thread_id, seq, base_ymd)
 ) PARTITION BY RANGE (base_ymd);
 
 
@@ -136,9 +141,9 @@ BEGIN
     FOR m IN 0..3 LOOP
         ym := to_char(now() + (m || ' months')::interval, 'YYYYMM');
         next_ym := to_char(now() + ((m + 1) || ' months')::interval, 'YYYYMM');
-        tbl := 'checkpoint_dc_turn_texts_' || ym;
+        tbl := 'checkpoint_dc_messages_' || ym;
         EXECUTE format(
-            'CREATE TABLE IF NOT EXISTS %I PARTITION OF checkpoint_dc_turn_texts FOR VALUES FROM (%L) TO (%L)',
+            'CREATE TABLE IF NOT EXISTS %I PARTITION OF checkpoint_dc_messages FOR VALUES FROM (%L) TO (%L)',
             tbl, ym || '01', next_ym || '01'
         );
     END LOOP;
@@ -146,16 +151,16 @@ END $$;
 
 
 -- 인덱스 (파티션 테이블에 자동 전파)
-CREATE INDEX IF NOT EXISTS idx_turn_texts_turn_id
-    ON checkpoint_dc_turn_texts (turn_id);               -- 개별 턴 조회 (Tier-2 메타데이터)
-CREATE INDEX IF NOT EXISTS idx_turn_texts_thread_created
-    ON checkpoint_dc_turn_texts (thread_id, created_at);  -- 세션별 대화 이력 조회
-CREATE INDEX IF NOT EXISTS idx_turn_texts_status_created
-    ON checkpoint_dc_turn_texts (status, created_at DESC); -- 운영 모니터링 (실패/타임아웃)
-CREATE INDEX IF NOT EXISTS idx_turn_texts_request_id
-    ON checkpoint_dc_turn_texts (request_id);              -- 서버 로그 교차 조회
-CREATE INDEX IF NOT EXISTS idx_turn_texts_liked
-    ON checkpoint_dc_turn_texts (is_liked)                 -- 사용자 피드백 분석
+CREATE INDEX IF NOT EXISTS idx_messages_message_uuid
+    ON checkpoint_dc_messages (message_uuid);             -- 개별 메시지 조회 (Tier-2 메타데이터)
+CREATE INDEX IF NOT EXISTS idx_messages_thread_created
+    ON checkpoint_dc_messages (thread_id, created_at);    -- 세션별 대화 이력 조회
+CREATE INDEX IF NOT EXISTS idx_messages_status_created
+    ON checkpoint_dc_messages (status, created_at DESC);  -- 운영 모니터링 (실패/타임아웃)
+CREATE INDEX IF NOT EXISTS idx_messages_request_id
+    ON checkpoint_dc_messages (request_id);               -- 서버 로그 교차 조회
+CREATE INDEX IF NOT EXISTS idx_messages_liked
+    ON checkpoint_dc_messages (is_liked)                  -- 사용자 피드백 분석
     WHERE is_liked IS NOT NULL;
 
 
@@ -173,7 +178,7 @@ CREATE TABLE IF NOT EXISTS checkpoint_dc_session_index (
     title        TEXT,                                    -- 세션 제목 (첫 질의 자동 요약)
     is_archived  BOOLEAN NOT NULL DEFAULT false,          -- soft delete 플래그
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),      -- 세션 생성 시각
-    last_active  TIMESTAMPTZ NOT NULL DEFAULT now()       -- 마지막 활동 시각 (턴 저장 시 갱신)
+    last_active  TIMESTAMPTZ NOT NULL DEFAULT now()       -- 마지막 활동 시각 (메시지 저장 시 갱신)
 );
 
 -- 세션 목록 조회: 사용자별 최근 활동순, 아카이브 제외
@@ -183,8 +188,55 @@ CREATE INDEX IF NOT EXISTS idx_session_index_user_active
 
 
 -- ============================================================================
+-- 마이그레이션: executed_sql, sql_explanation 컬럼 추가
+-- ============================================================================
+-- 기존 테이블에 컬럼이 없으면 추가하고, metadata에서 기존 데이터를 backfill한다.
+-- 멱등(idempotent) — 이미 컬럼이 존재하면 무시.
+
+DO $$
+BEGIN
+    -- executed_sql 컬럼 추가
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'bdptbl'
+          AND table_name = 'checkpoint_dc_messages'
+          AND column_name = 'executed_sql'
+    ) THEN
+        ALTER TABLE checkpoint_dc_messages ADD COLUMN executed_sql TEXT;
+    END IF;
+
+    -- sql_explanation 컬럼 추가
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'bdptbl'
+          AND table_name = 'checkpoint_dc_messages'
+          AND column_name = 'sql_explanation'
+    ) THEN
+        ALTER TABLE checkpoint_dc_messages ADD COLUMN sql_explanation TEXT;
+    END IF;
+
+    -- target_db 컬럼 추가
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'bdptbl'
+          AND table_name = 'checkpoint_dc_messages'
+          AND column_name = 'target_db'
+    ) THEN
+        ALTER TABLE checkpoint_dc_messages ADD COLUMN target_db TEXT;
+    END IF;
+END $$;
+
+-- 기존 데이터 backfill: metadata->'executed_sql' → executed_sql 컬럼
+UPDATE checkpoint_dc_messages
+SET executed_sql = metadata->>'executed_sql'
+WHERE executed_sql IS NULL
+  AND metadata->>'executed_sql' IS NOT NULL;
+
+
+-- ============================================================================
 -- 검증 쿼리
 -- ============================================================================
 -- SELECT tablename FROM pg_tables WHERE schemaname = 'bdptbl' AND tablename LIKE 'checkpoint_dc_%';
 -- SELECT * FROM checkpoint_dc_session_index LIMIT 1;
 -- SELECT mask_pii('주민번호 850101-1234567 계좌 123-45-6789012');
+-- SELECT executed_sql, sql_explanation FROM checkpoint_dc_messages WHERE executed_sql IS NOT NULL LIMIT 5;

@@ -1,8 +1,0 @@
-{
-  "_comment": "resources/elasticsearch/code_meta_query.json — 코드값 정의 검색",
-  "query": {
-    "match": {
-      "code_field": "{query}"
-    }
-  }
-}

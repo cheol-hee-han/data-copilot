@@ -36,6 +36,7 @@ from src.agents.state.state import (
     QueryStatus,
     SelectionStatus,
 )
+from src.utils.sql_formatter import format_sql_tabular
 
 
 async def result_finalizer_node(state: PipelineState) -> dict:
@@ -89,7 +90,10 @@ async def result_finalizer_node(state: PipelineState) -> dict:
             state.turn_id,
         )
         if assumption_signals:
-            updates["resolved_signals"] = assumption_signals
+            updates["resolved_signals"] = [
+                *state.resolved_signals,
+                *assumption_signals,
+            ]
 
         return updates
 
@@ -149,7 +153,7 @@ def _build_failure_output(
     if reason.dead_ends:
         parts.append("시도한 접근 방식:")
         for de in reason.dead_ends:
-            parts.append(f"  - [{de.failure_type}] {de.reason}")
+            parts.append(f"  - `{de.failure_type.value}` {de.reason}")
 
     unresolved = reason.get_unresolved_knowledge()
     if unresolved:
@@ -159,7 +163,7 @@ def _build_failure_output(
     if reason.generated_sql and not reason.validated_sql:
         parts.append(
             "부분 SQL (미검증): "
-            f"{reason.generated_sql[:100]}...",
+            f"{format_sql_tabular(reason.generated_sql or '')}",
         )
 
     return "\n".join(parts)

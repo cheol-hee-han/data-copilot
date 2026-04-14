@@ -1,7 +1,7 @@
 """인프라 연결 및 단순 조회 검증 스크립트.
 
 폐쇄망 배포 후 각 데이터 소스의 연결 상태와 기본 조회가 정상인지 확인한다.
-대상: Qdrant, ElasticSearch, PostgreSQL (정보계/이력), Impala, Sybase IQ
+대상: Qdrant, PostgreSQL (정보계/이력), Impala, Sybase IQ
 
 사용법:
     # 전체 실행
@@ -9,7 +9,6 @@
 
     # 특정 인프라만 실행
     python -m pytest tests/test_infra_connectivity.py -v -k "postgres"
-    python -m pytest tests/test_infra_connectivity.py -v -k "elastic"
     python -m pytest tests/test_infra_connectivity.py -v -k "qdrant"
     python -m pytest tests/test_infra_connectivity.py -v -k "impala"
     python -m pytest tests/test_infra_connectivity.py -v -k "sybase"
@@ -40,29 +39,23 @@ except ImportError:
 # 환경변수에서 접속 정보 읽기
 # ──────────────────────────────────────────────────────────────
 
-# PostgreSQL (정보계)
-INFO_DB = {
-    "host": os.getenv("INFO_DB_HOST", "localhost"),
-    "port": int(os.getenv("INFO_DB_PORT", "5432")),
-    "dbname": os.getenv("INFO_DB_NAME", "info_db"),
-    "user": os.getenv("INFO_DB_USER", "readonly_user"),
-    "password": os.getenv("INFO_DB_PASSWORD", ""),
+# PostgreSQL (개발/테스트용 정보계)
+TEST_DB = {
+    "host": os.getenv("TEST_DB_HOST", "localhost"),
+    "port": int(os.getenv("TEST_DB_PORT", "5432")),
+    "dbname": os.getenv("TEST_DB_NAME", "test_db"),
+    "user": os.getenv("TEST_DB_USER", "readonly_user"),
+    "password": os.getenv("TEST_DB_PASSWORD", ""),
 }
 
-# PostgreSQL (이력)
-HISTORY_DB = {
-    "host": os.getenv("HISTORY_DB_HOST", "localhost"),
-    "port": int(os.getenv("HISTORY_DB_PORT", "5432")),
-    "dbname": os.getenv("HISTORY_DB_NAME", "history_db"),
-    "user": os.getenv("HISTORY_DB_USER", "history_user"),
-    "password": os.getenv("HISTORY_DB_PASSWORD", ""),
+# PostgreSQL (공통 - SQL 이력·체크포인터)
+POSTGRES_DB = {
+    "host": os.getenv("POSTGRES_DB_HOST", "localhost"),
+    "port": int(os.getenv("POSTGRES_DB_PORT", "5432")),
+    "dbname": os.getenv("POSTGRES_DB_NAME", "postgres_db"),
+    "user": os.getenv("POSTGRES_DB_USER", "postgres_user"),
+    "password": os.getenv("POSTGRES_DB_PASSWORD", ""),
 }
-
-# ElasticSearch
-ES_HOST = os.getenv("ES_HOST", "localhost")
-ES_PORT = int(os.getenv("ES_PORT", "9200"))
-ES_USER = os.getenv("ES_USER", "elastic")
-ES_PASSWORD = os.getenv("ES_PASSWORD", "")
 
 # Qdrant
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
@@ -129,12 +122,12 @@ def _print_result(name: str, success: bool, detail: str = "") -> None:
 # 1. PostgreSQL (정보계 DB)
 # ──────────────────────────────────────────────────────────────
 
-class TestPostgresInfoDB:
-    """정보계 PostgreSQL 연결 및 단순 조회."""
+class TestPostgresTestDB:
+    """개발/테스트용 PostgreSQL 연결 및 단순 조회."""
 
     @staticmethod
     def _connect():
-        return _pg_connect(**INFO_DB)
+        return _pg_connect(**TEST_DB)
 
     def test_connection(self):
         """정보계 DB 연결 확인."""
@@ -192,15 +185,15 @@ class TestPostgresInfoDB:
 
 
 # ──────────────────────────────────────────────────────────────
-# 2. PostgreSQL (이력 DB)
+# 2. PostgreSQL (공통 - SQL 이력·체크포인터)
 # ──────────────────────────────────────────────────────────────
 
-class TestPostgresHistoryDB:
-    """이력 PostgreSQL 연결 및 단순 조회."""
+class TestPostgresCommonDB:
+    """공통 PostgreSQL 연결 및 단순 조회."""
 
     @staticmethod
     def _connect():
-        return _pg_connect(**HISTORY_DB)
+        return _pg_connect(**POSTGRES_DB)
 
     def test_connection(self):
         """이력 DB 연결 확인."""
@@ -237,91 +230,7 @@ class TestPostgresHistoryDB:
 
 
 # ──────────────────────────────────────────────────────────────
-# 3. ElasticSearch
-# ──────────────────────────────────────────────────────────────
-
-class TestElasticSearch:
-    """ElasticSearch 연결 및 인덱스 확인."""
-
-    @staticmethod
-    def _client():
-        from elasticsearch import Elasticsearch
-        return Elasticsearch(
-            f"http://{ES_HOST}:{ES_PORT}",
-            basic_auth=(ES_USER, ES_PASSWORD) if ES_PASSWORD else None,
-            request_timeout=5,
-        )
-
-    def test_connection(self):
-        """ES 클러스터 연결 (ping)."""
-        es = self._client()
-        assert es.ping(), "ES ping 실패"
-
-    def test_cluster_health(self):
-        """클러스터 상태 확인 (yellow 이상)."""
-        es = self._client()
-        health = es.cluster.health()
-        status = health["status"]
-        print(f"    클러스터 상태: {status}")
-        assert status in ("green", "yellow"), f"클러스터 상태 비정상: {status}"
-
-    def test_list_indices(self):
-        """인덱스 목록 조회."""
-        es = self._client()
-        indices = list(es.indices.get_alias(index="*").keys())
-        # 시스템 인덱스 제외
-        user_indices = [i for i in indices if not i.startswith(".")]
-        print(f"    인덱스 ({len(user_indices)}건): {user_indices}")
-        assert len(user_indices) >= 1, "사용자 인덱스 없음"
-
-    def test_table_meta_search(self):
-        """table_meta 인덱스 단순 검색."""
-        es = self._client()
-        index = os.getenv("ES_TABLE_META_INDEX", "table_meta")
-        if not es.indices.exists(index=index):
-            pytest.skip(f"인덱스 '{index}' 없음")
-
-        resp = es.search(
-            index=index,
-            body={"query": {"match_all": {}}, "size": 1},
-        )
-        total = resp["hits"]["total"]["value"]
-        print(f"    {index} 문서 수: {total}")
-        assert total >= 1, f"{index} 문서 없음"
-
-    def test_report_sql_search(self):
-        """report_sql 인덱스 단순 검색."""
-        es = self._client()
-        index = os.getenv("ES_REPORT_SQL_INDEX", "report_sql")
-        if not es.indices.exists(index=index):
-            pytest.skip(f"인덱스 '{index}' 없음")
-
-        resp = es.search(
-            index=index,
-            body={"query": {"match_all": {}}, "size": 1},
-        )
-        total = resp["hits"]["total"]["value"]
-        print(f"    {index} 문서 수: {total}")
-        assert total >= 1, f"{index} 문서 없음"
-
-    def test_code_meta_search(self):
-        """code_meta 인덱스 단순 검색."""
-        es = self._client()
-        index = os.getenv("ES_CODE_META_INDEX", "code_meta")
-        if not es.indices.exists(index=index):
-            pytest.skip(f"인덱스 '{index}' 없음")
-
-        resp = es.search(
-            index=index,
-            body={"query": {"match_all": {}}, "size": 1},
-        )
-        total = resp["hits"]["total"]["value"]
-        print(f"    {index} 문서 수: {total}")
-        assert total >= 1, f"{index} 문서 없음"
-
-
-# ──────────────────────────────────────────────────────────────
-# 4. Qdrant
+# 3. Qdrant
 # ──────────────────────────────────────────────────────────────
 
 class TestQdrant:
@@ -562,32 +471,23 @@ def _run_standalone() -> None:
 
     results: list[tuple[str, bool, str]] = []
 
-    # ── PostgreSQL (정보계) ──
+    # ── PostgreSQL (테스트) ──
     try:
-        t = TestPostgresInfoDB()
+        t = TestPostgresTestDB()
         t.test_connection()
         t.test_simple_query()
-        results.append(("PostgreSQL (정보계)", True, f"{INFO_DB['host']}:{INFO_DB['port']}"))
+        results.append(("PostgreSQL (테스트)", True, f"{TEST_DB['host']}:{TEST_DB['port']}"))
     except Exception as e:
-        results.append(("PostgreSQL (정보계)", False, str(e)[:80]))
+        results.append(("PostgreSQL (테스트)", False, str(e)[:80]))
 
-    # ── PostgreSQL (이력) ──
+    # ── PostgreSQL (공통) ──
     try:
-        t = TestPostgresHistoryDB()
+        t = TestPostgresCommonDB()
         t.test_connection()
         t.test_simple_query()
-        results.append(("PostgreSQL (이력)", True, f"{HISTORY_DB['host']}:{HISTORY_DB['port']}"))
+        results.append(("PostgreSQL (공통)", True, f"{POSTGRES_DB['host']}:{POSTGRES_DB['port']}"))
     except Exception as e:
-        results.append(("PostgreSQL (이력)", False, str(e)[:80]))
-
-    # ── ElasticSearch ──
-    try:
-        t = TestElasticSearch()
-        t.test_connection()
-        t.test_cluster_health()
-        results.append(("ElasticSearch", True, f"{ES_HOST}:{ES_PORT}"))
-    except Exception as e:
-        results.append(("ElasticSearch", False, str(e)[:80]))
+        results.append(("PostgreSQL (공통)", False, str(e)[:80]))
 
     # ── Qdrant ──
     try:

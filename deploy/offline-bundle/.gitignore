@@ -1,0 +1,6 @@
+# 빌드 산출물 — 저장소에 커밋하지 않음
+dist/
+wheels/
+models/
+*.tar.gz
+requirements.txt

@@ -196,12 +196,15 @@ def _route_after_sql_generator(
 ) -> str:
     """sql_generator 후 라우팅.
 
-    3가지 분기:
-      1. GENERATION_FAILED → recovery_agent (정보 보충 후 재시도)
-      2. pending_signals → clarification_handler (Cross-DB INFER)
-      3. 정상 → sql_validator (검증)
+    4가지 분기:
+      1. GENERATION_FAILED + force-generate → conclude_failure (재시도 불가)
+      2. GENERATION_FAILED → recovery_agent (정보 보충 후 재시도)
+      3. pending_signals → clarification_handler (Cross-DB INFER)
+      4. 정상 → sql_validator (검증)
     """
     if state.reason.failure_type == FailureType.GENERATION_FAILED:
+        if state.reason.is_force_generated:
+            return "conclude_failure"
         return "replan"
     if state.pending_signals:
         return "clarification_handler"
@@ -228,17 +231,20 @@ def _route_after_sql_validator(
             return "conclude_success"
 
         case FailureType.SQL_SYNTAX:
-            if state.reason.loop_guard.generate_attempts < MAX_GENERATES:
-                return "fix_syntax"
-            return "conclude_failure"
+            lg = state.reason.loop_guard
+            if lg.should_escalate_to_structural():
+                return "replan"
+            if MAX_GENERATES > 0 and lg.generate_attempts >= MAX_GENERATES:
+                return "conclude_failure"
+            return "fix_syntax"
 
         case FailureType.SQL_SEMANTIC_LOCAL:
             lg = state.reason.loop_guard
             if lg.should_escalate_to_structural():
                 return "replan"
-            if lg.generate_attempts < MAX_GENERATES:
-                return "fix_local"
-            return "conclude_failure"
+            if MAX_GENERATES > 0 and lg.generate_attempts >= MAX_GENERATES:
+                return "conclude_failure"
+            return "fix_local"
 
         case (
             FailureType.SQL_STRUCTURAL
@@ -388,7 +394,8 @@ def _handle_error(state: PipelineState) -> dict:
     error_msg = state.error_message or ERR_GENERIC
 
     if (
-        state.reason.loop_guard.generate_attempts
+        MAX_GENERATES > 0
+        and state.reason.loop_guard.generate_attempts
         >= MAX_GENERATES
     ):
         user_message = ERR_SQL_RETRY_EXHAUSTED
@@ -403,6 +410,24 @@ def _handle_error(state: PipelineState) -> dict:
     }
 
 
+def _turn_reset(state: PipelineState) -> dict:
+    """턴 진입점 — 이전 턴의 작업 산출물을 일괄 초기화한다.
+
+    LangGraph checkpointer가 같은 thread_id에서 상태를 유지하므로,
+    새 턴 시작 시 세션 지속 필드를 제외한 턴 스코프 19개 필드를
+    명시적으로 초기값으로 덮어쓴다. 실제 필드 목록은 단일 진실
+    공급원인 PipelineState.turn_reset_updates()에 정의되어 있다.
+
+    interrupt 재개 경로(Command(resume=...))는 LangGraph resume
+    semantics에 의해 중단 노드부터 재개되므로 이 노드를 타지 않는다.
+    따라서 명확화 대기 중 사용자 응답의 상태 보존이 보장된다.
+
+    설계 배경: docs/todo/20260412-turn-boundary-state-reset-design.md
+    """
+    del state  # LangGraph 시그니처 호환용, 실제로는 사용하지 않음
+    return PipelineState.turn_reset_updates()
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 파이프라인 빌더
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -414,6 +439,12 @@ def build_pipeline() -> StateGraph:
     ``config={"callbacks": [handler]}`` 로 주입되어 자동 처리한다.
     """
     workflow = StateGraph(PipelineState)
+
+    # ── 턴 경계 ──
+    # 새 턴 진입 시 이전 턴 산출물을 리셋한다. interrupt 재개 경로는
+    # LangGraph resume semantics에 의해 이 노드를 타지 않으므로
+    # 명확화 대기 중 상태는 그대로 보존된다.
+    workflow.add_node("turn_reset", _turn_reset)
 
     # ── Interpret 계층 ──
     _cc = with_cancel_check
@@ -444,8 +475,10 @@ def build_pipeline() -> StateGraph:
     # 엣지 연결
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    # preprocess 제거 → intent_classifier가 시작 노드
-    workflow.set_entry_point("intent_classifier")
+    # START → turn_reset → intent_classifier
+    # turn_reset이 이전 턴 산출물을 리셋한 뒤 기존 Interpret 진입 노드로 연결.
+    workflow.set_entry_point("turn_reset")
+    workflow.add_edge("turn_reset", "intent_classifier")
 
     # ── Interpret 엣지 ──
     workflow.add_conditional_edges(

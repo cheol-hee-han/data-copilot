@@ -11,7 +11,7 @@
 > - 해당 모듈의 테스트(`test_context_collection.py`, `test_sql_generator.py`, `test_table_enricher.py`)도 삭제됨
 > - `conftest.py`가 `tests/conftest.py` (루트)로 이동
 > - 실행 명령: `pytest tests/auto/` (기본), `pytest tests/manual/` (인프라 필요)
-> - 상세: `docs/project-structure.md` 테스트 섹션 참조
+> - 상세: `docs/architecture/project-structure.md` 테스트 섹션 참조
 
 ---
 

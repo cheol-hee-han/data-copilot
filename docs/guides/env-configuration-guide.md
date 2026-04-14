@@ -102,7 +102,7 @@
 | `SQL_MAX_RETRY` | SQL 검증 실패 시 재생성 최대 횟수 | `2` | `2` — 3회 이상은 동일 오류 반복 가능성 높음 |
 | `CLARIFICATION_MAX_TURNS` | 명확화 질문 최대 왕복 횟수 | `2` | `2` — 3회 이상은 사용자 피로도 증가 |
 | `MAX_INPUT_LENGTH` | 사용자 입력 최대 문자 수 | `500` | `500` — DoS 방어 + 프롬프트 토큰 절약 |
-| `MAX_SESSIONS` | 동시 세션 최대 수 (메모리 백엔드) | `1000` | `1000` — Redis 백엔드에서는 TTL로 관리 |
+| ~~`MAX_SESSIONS`~~ | 제거됨 (세션 스토어 제거) | — | — |
 | `MIN_DESCRIPTION_LENGTH` | 테이블 설명 보강 판단 최소 길이 | `20` | `20` — 20자 미만이면 LLM 보강 실행 |
 | `MIN_ROWS_FOR_VISUALIZATION` | 시각화 판단 최소 행 수 | `3` | `3` — 2행 이하는 차트 의미 없음 |
 | `FORMAT_MAX_ROWS` | 포맷팅 프롬프트에 포함할 최대 행 수 | `50` | `50` — 프롬프트 토큰 제한 대응 |
@@ -122,25 +122,25 @@
 
 ## 7. PostgreSQL
 
-### 7.1 정보계 DB (읽기 전용 — 데이터 추출 대상)
+### 7.1 테스트 DB (개발/테스트용 — 폐쇄망 전환 시 제거)
 
 | 키 | 설명 | 값 예시 | 권장값 |
 | --- | --- | --- | --- |
-| `INFO_DB_HOST` | 호스트 | `localhost` \| `db.internal` | 환경별 상이 |
-| `INFO_DB_PORT` | 포트 | `5432` | `5432` |
-| `INFO_DB_NAME` | 데이터베이스명 | `info_db` | 환경별 상이 |
-| `INFO_DB_USER` | 사용자 (읽기 전용 계정) | `readonly_user` | SELECT 권한만 부여된 계정 사용 (보안) |
-| `INFO_DB_PASSWORD` | 비밀번호 | | |
+| `TEST_DB_HOST` | 호스트 | `localhost` \| `db.internal` | 환경별 상이 |
+| `TEST_DB_PORT` | 포트 | `5432` | `5432` |
+| `TEST_DB_NAME` | 데이터베이스명 | `test_db` | 환경별 상이 |
+| `TEST_DB_USER` | 사용자 (읽기 전용 계정) | `readonly_user` | SELECT 권한만 부여된 계정 사용 (보안) |
+| `TEST_DB_PASSWORD` | 비밀번호 | | |
 
-### 7.2 SQL 이력 DB (과거 SQL 참조용)
+### 7.2 공통 PostgreSQL DB (SQL 이력·체크포인터 — 폐쇄망에서도 유지)
 
 | 키 | 설명 | 값 예시 | 권장값 |
 | --- | --- | --- | --- |
-| `HISTORY_DB_HOST` | 호스트 | `localhost` | 환경별 상이 |
-| `HISTORY_DB_PORT` | 포트 | `5432` | `5432` |
-| `HISTORY_DB_NAME` | 데이터베이스명 | `history_db` | 환경별 상이 |
-| `HISTORY_DB_USER` | 사용자 | `history_user` | |
-| `HISTORY_DB_PASSWORD` | 비밀번호 | | |
+| `POSTGRES_DB_HOST` | 호스트 | `localhost` | 환경별 상이 |
+| `POSTGRES_DB_PORT` | 포트 | `5432` | `5432` |
+| `POSTGRES_DB_NAME` | 데이터베이스명 | `postgres_db` | 환경별 상이 |
+| `POSTGRES_DB_USER` | 사용자 | `postgres_user` | |
+| `POSTGRES_DB_PASSWORD` | 비밀번호 | | |
 
 ### 7.3 DB 타임아웃
 
@@ -211,14 +211,15 @@
 | `REDIS_DB` | 데이터베이스 번호 | `0` | `0` |
 | `REDIS_PASSWORD` | 비밀번호 (미설정 시 빈값) | | 운영: 비밀번호 설정 권장 |
 
-### 11.2 세션 관리
+### 11.2 CancelStore / ActiveRunStore
 
 | 키 | 설명 | 값 예시 | 권장값 |
 | --- | --- | --- | --- |
-| `SESSION_BACKEND` | 세션 저장소 백엔드 | `memory` \| `redis` | 개발: `memory`, 운영: `redis` (서버 재시작에도 세션 유지, 다중 워커 지원) |
-| `SESSION_TTL` | 대화 이력 TTL (초, 슬라이딩) | `1800` | `1800` (30분) — 매 메시지마다 갱신, 30분 무응답 시 만료 |
-| `SESSION_CLARIFY_TTL` | 명확화 대기 상태 TTL (초, 고정) | `300` | `300` (5분) — 명확화 질문 후 5분 내 응답 없으면 만료 |
-| `SESSION_MAX_HISTORY` | 대화 이력 최대 턴 수 | `20` | `20` — 초과 시 오래된 턴 자동 삭제 |
+| `REDIS_BACKEND` | CancelStore/ActiveRunStore 백엔드 | `memory` \| `redis` | 단일 워커: `memory`, 멀티 워커: `redis` (원자적 취소/크래시 감지) |
+| `ACTIVE_RUN_TTL_SECONDS` | 활성 파이프라인 TTL (초) | `1800` | `1800` (30분) — 워커 크래시 시 자동 만료 |
+
+> **참고**: 대화 이력은 DB(`checkpoint_dc_messages`)를 단일 소스로 사용합니다.
+> 세션 스토어(인메모리/Redis)는 더 이상 사용하지 않습니다.
 
 ---
 
@@ -351,7 +352,7 @@
 | 6 | `NORMALIZATION_PHASE2_ENABLED` | `false` | `true` (소형 LLM 품질 보완) |
 | 7 | `LLM_PARSE_MAX_RETRY` | `2` | `4` (소형 LLM 포맷 오류 대응) |
 | 8 | `LANGSMITH_ENABLED` | `true` | `false` (외부 통신 불가) |
-| 9 | `SESSION_BACKEND` | `redis` | `redis` (동일) |
+| 9 | `REDIS_BACKEND` | `redis` | `redis` (멀티 워커 시) |
 | 10 | `USE_DUMMY` | `false` | `false` |
 | 11 | 인프라 호스트 (DB/ES/Qdrant) | `localhost` | 폐쇄망 내부 주소 |
 

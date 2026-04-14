@@ -25,38 +25,17 @@ except ImportError:
 
 # 환경 변수 기본값 설정 (docker-compose.dev.yml 기준)
 _DEFAULTS = {
-    "ES_HOST": "localhost", "ES_PORT": "9200",
-    "ES_USER": "elastic", "ES_PASSWORD": "elastic_pass",
     "MONGO_HOST": "localhost", "MONGO_PORT": "27017",
     "MONGO_USER": "mongoadmin", "MONGO_PASSWORD": "mongo_pass",
     "MONGO_DATABASE": "meta_db",
     "NEO4J_HOST": "localhost", "NEO4J_PORT": "7687",
     "NEO4J_USER": "neo4j", "NEO4J_PASSWORD": "neo4j_pass",
-    "INFO_DB_HOST": "localhost", "INFO_DB_PORT": "5432",
-    "INFO_DB_USER": "readonly_user", "INFO_DB_PASSWORD": "",
+    "TEST_DB_HOST": "localhost", "TEST_DB_PORT": "5432",
+    "TEST_DB_USER": "readonly_user", "TEST_DB_PASSWORD": "",
     "QDRANT_HOST": "localhost", "QDRANT_PORT": "6333",
 }
 for key, val in _DEFAULTS.items():
     os.environ.setdefault(key, val)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ElasticSearch
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@pytest.mark.asyncio
-async def test_es_real_connection():
-    """ES 실 연결 + 헬스체크."""
-    from src.connectors.impl.elasticsearch_connector import ElasticSearchConnector
-
-    es = ElasticSearchConnector(use_dummy=False)
-    await es.connect()
-    try:
-        healthy = await es.health_check()
-        print(f"  ES health_check: {healthy}")
-        assert healthy
-    finally:
-        await es.disconnect()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -159,9 +138,9 @@ async def test_neo4j_real_search_empty():
 @pytest.mark.asyncio
 async def test_postgres_real_connection():
     """PostgreSQL 실 연결 + 헬스체크."""
-    from src.connectors.impl.postgres_connector import InfoDBConnector
+    from src.connectors.impl.test_connector import TESTConnector
 
-    db = InfoDBConnector(use_dummy=False)
+    db = TESTConnector(use_dummy=False)
     await db.connect()
     try:
         healthy = await db.health_check()

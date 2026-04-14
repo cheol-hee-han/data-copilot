@@ -213,39 +213,39 @@ def test_assess_confidence_no_reason():
     assert _assess_confidence(None) == "보통"
 
 
-def test_assess_confidence_no_loop_guard():
-    """loop_guard 없으면 '보통' 반환."""
+def test_assess_confidence_no_score():
+    """confidence_score 없으면 '보통' 반환."""
     assert _assess_confidence({}) == "보통"
 
 
-def test_assess_confidence_high_first_attempt():
-    """replan=0, generate=1이면 '높음'."""
-    reason = {"loop_guard": {"replan_count": 0, "generate_attempts": 1}}
-    assert _assess_confidence(reason) == "높음"
+def test_assess_confidence_high():
+    """score >= 0.8이면 '높음 (점수)'."""
+    reason = {"confidence_score": 0.92}
+    assert _assess_confidence(reason) == "높음 (0.92)"
 
 
-def test_assess_confidence_high_no_attempts():
-    """replan=0, generate=0이면 '높음' (generate_attempts <= 1)."""
-    reason = {"loop_guard": {"replan_count": 0, "generate_attempts": 0}}
-    assert _assess_confidence(reason) == "높음"
+def test_assess_confidence_high_boundary():
+    """score == 0.8이면 '높음 (점수)'."""
+    reason = {"confidence_score": 0.8}
+    assert _assess_confidence(reason) == "높음 (0.80)"
 
 
-def test_assess_confidence_medium_one_replan():
-    """replan=1, generate=2이면 '보통'."""
-    reason = {"loop_guard": {"replan_count": 1, "generate_attempts": 2}}
+def test_assess_confidence_medium():
+    """0.5 <= score < 0.8이면 '보통 (점수)'."""
+    reason = {"confidence_score": 0.65}
+    assert _assess_confidence(reason) == "보통 (0.65)"
+
+
+def test_assess_confidence_low():
+    """score < 0.5이면 '낮음 (점수)'."""
+    reason = {"confidence_score": 0.35}
+    assert _assess_confidence(reason) == "낮음 (0.35)"
+
+
+def test_assess_confidence_zero_score():
+    """score == 0.0이면 폴백 '보통' 반환."""
+    reason = {"confidence_score": 0.0}
     assert _assess_confidence(reason) == "보통"
-
-
-def test_assess_confidence_low_many_replans():
-    """replan=2, generate=3이면 '낮음'."""
-    reason = {"loop_guard": {"replan_count": 2, "generate_attempts": 3}}
-    assert _assess_confidence(reason) == "낮음"
-
-
-def test_assess_confidence_low_many_attempts():
-    """replan=0이어도 generate=3이면 '낮음'."""
-    reason = {"loop_guard": {"replan_count": 0, "generate_attempts": 3}}
-    assert _assess_confidence(reason) == "낮음"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

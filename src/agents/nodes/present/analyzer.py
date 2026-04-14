@@ -33,7 +33,8 @@ from src.agents.nodes.system_prompts import (
     ANALYZER_USER,
     ANALYZER_VIZ_JUDGMENT_SYSTEM,
     ANALYZER_VIZ_JUDGMENT_USER,
-    ANALYZER_VIZ_SVG_SYSTEM,
+    ANALYZER_VIZ_SVG_EXAMPLES,
+    ANALYZER_VIZ_SVG_SYSTEM_BASE,
     ANALYZER_VIZ_SVG_USER,
 )
 from src.agents.state.state import (
@@ -76,7 +77,8 @@ async def analyze_data_node(
             user_template=ANALYZER_USER,
             viz_judgment_prompt=ANALYZER_VIZ_JUDGMENT_SYSTEM,
             viz_judgment_user=ANALYZER_VIZ_JUDGMENT_USER,
-            viz_svg_system=ANALYZER_VIZ_SVG_SYSTEM,
+            viz_svg_base=ANALYZER_VIZ_SVG_SYSTEM_BASE,
+            viz_svg_examples=ANALYZER_VIZ_SVG_EXAMPLES,
             viz_svg_user=ANALYZER_VIZ_SVG_USER,
             min_rows_for_viz=(
                 settings.min_rows_for_visualization
@@ -97,9 +99,17 @@ async def analyze_data_node(
             ),
         }
 
+    if not analysis.reasoning_summary:
+        logger.warning(
+            "analyzer reasoning_summary 누락 — 깊이 검증 불가",
+        )
+
     logger.info(
         "데이터 분석 완료",
+        initial_reading_count=len(analysis.initial_reading),
         insights_count=len(analysis.insights),
+        action_items_count=len(analysis.action_items),
+        has_reasoning_summary=bool(analysis.reasoning_summary),
     )
 
     viz_detail = ""
@@ -129,9 +139,19 @@ async def analyze_data_node(
         },
         "output": {
             "summary": analysis.summary[:200] if analysis.summary else "",
+            "initial_reading": [
+                i[:100] for i in (analysis.initial_reading or [])[:5]
+            ],
             "insights": [
                 i[:100] for i in (analysis.insights or [])[:5]
             ],
+            "action_items": [
+                a[:100] for a in (analysis.action_items or [])[:3]
+            ],
+            "reasoning_summary": (
+                analysis.reasoning_summary[:200]
+                if analysis.reasoning_summary else ""
+            ),
             "recommendations": [],
             "viz_judgment": viz_judgment,
         },

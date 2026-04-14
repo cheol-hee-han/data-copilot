@@ -726,7 +726,7 @@ def _extract_hypothesis_desc(step: dict[str, Any]) -> str:
     # recovery의 new_hypothesis
     new_hyp = output.get("new_hypothesis", {})
     if isinstance(new_hyp, dict):
-        return new_hyp.get("description", "")
+        return str(new_hyp.get("description", ""))
     return ""
 
 
@@ -1599,7 +1599,7 @@ def render_findings(
     lines.append("")
 
     # 집계
-    counts = defaultdict(int)
+    counts: dict[str, int] = defaultdict(int)
     for f in all_findings:
         counts[f.severity] += 1
     summary_parts = [
@@ -1799,7 +1799,8 @@ def render_full_report(
         parts.append("## Appendix: Generated SQL")
         parts.append("")
         parts.append("```sql")
-        parts.append(sql_rec["generated_sql"])
+        from src.utils.sql_formatter import format_sql_tabular
+        parts.append(format_sql_tabular(sql_rec["generated_sql"]))
         parts.append("```")
         parts.append("")
 

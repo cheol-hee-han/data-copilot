@@ -142,6 +142,7 @@ def enrich_descriptions(
 
 
 def main():
+    """SQL 수행이력 문서를 LLM으로 보강하여 JSON 파일로 출력한다."""
     # 데이터 생성기 임포트
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from qdrant_data_generators import generate_sql_history_data

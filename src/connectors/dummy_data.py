@@ -2,9 +2,9 @@
 
 작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
 
-외부 인프라(ElasticSearch, PostgreSQL, Qdrant) 없이도 전체 파이프라인을
+외부 인프라(MongoDB, PostgreSQL, Qdrant) 없이도 전체 파이프라인을
 end-to-end로 실행할 수 있도록 은행 도메인 기반 내장 샘플 데이터를 제공한다.
-ES용으로 테이블 메타 6종(고객/여신/수신/거래/지점/연체통계), 보고서 SQL 3종,
+메타 검색용으로 테이블 메타 6종(고객/여신/수신/거래/지점/연체통계),
 코드 메타 7종(고객유형/등급/대출유형/거래유형/계좌상태/성별/연체여부)을 포함하고,
 PostgreSQL용으로 과거 SQL 수행이력 5건, Qdrant용으로 업무 매뉴얼 5건 및
 SQL 수행이력(벡터 검색용) 5건을 제공한다.
@@ -35,7 +35,7 @@ from typing import Any
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ElasticSearch Dummy 데이터
+# 메타 검색 Dummy 데이터
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -840,7 +840,7 @@ def search_dummy_sql_history(
         h
         for h in DUMMY_SQL_HISTORY
         if any(
-            word in h["query_text"].lower()
+            word in str(h["query_text"]).lower()
             for word in query_lower.split()
         )
     ]

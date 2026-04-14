@@ -209,6 +209,36 @@ def build_summary_line(
     return f"총 {row_count:,}건이 조회되었습니다."
 
 
+def build_analysis_report(analysis: Any) -> str:
+    """AnalysisResult를 사용자용 마크다운 보고서로 합성한다.
+
+    빈 배열/문자열 섹션은 생략한다. reasoning_summary는 시스템 검증용이므로
+    사용자 노출에서 제외한다.
+    """
+    parts: list[str] = []
+
+    summary = getattr(analysis, "summary", "") or ""
+    if summary:
+        parts.append(f"## 핵심 요약\n{summary}")
+
+    initial_reading = getattr(analysis, "initial_reading", []) or []
+    if initial_reading:
+        bullets = "\n".join(f"- {item}" for item in initial_reading)
+        parts.append(f"## 데이터 현황\n{bullets}")
+
+    insights = getattr(analysis, "insights", []) or []
+    if insights:
+        bullets = "\n".join(f"- {item}" for item in insights)
+        parts.append(f"## 분석 인사이트\n{bullets}")
+
+    action_items = getattr(analysis, "action_items", []) or []
+    if action_items:
+        bullets = "\n".join(f"- {item}" for item in action_items)
+        parts.append(f"## 후속 조치\n{bullets}")
+
+    return "\n\n".join(parts)
+
+
 def apply_code_mappings(
     rows: list[dict[str, Any]],
     code_map: dict[str, CodeMeta],

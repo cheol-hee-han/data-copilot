@@ -154,18 +154,18 @@ class TestTableMetaFromMeta:
         assert result.columns == []
 
     def test_db_source_adw_parsed(self):
-        """TB_ADW_* 형태 테이블명 → db_source='adw'."""
+        """TB_ADW_* 형태 테이블명 → db_source='ADW'."""
         meta = {"name": "TB_ADW_CUST001M"}
         result = TableMeta.from_meta(meta)
         assert result is not None
-        assert result.db_source == "adw"
+        assert result.db_source == "ADW"
 
     def test_db_source_bdp_parsed(self):
-        """TB_BDP_* 형태 테이블명 → db_source='bigdata'."""
+        """TB_BDP_* 형태 테이블명 → db_source='BDP'."""
         meta = {"name": "TB_BDP_LCT001L"}
         result = TableMeta.from_meta(meta)
         assert result is not None
-        assert result.db_source == "bigdata"
+        assert result.db_source == "BDP"
 
     def test_db_source_unknown_empty(self):
         """알 수 없는 시스템코드 → db_source 빈 문자열."""
@@ -515,10 +515,20 @@ class TestShouldTerminate:
         reason.loop_guard.replan_count = _settings.max_replans - 1
         assert should_terminate(reason) is False
 
-    def test_terminates_when_generate_at_limit(self):
-        """generate_attempts >= MAX_GENERATES 이면 종료."""
+    def test_generate_limit_disabled_when_zero(self):
+        """max_generates == 0 이면 generate_attempts 조건이 비활성화된다."""
         reason = self._reason_with_pending_hypothesis()
-        reason.loop_guard.generate_attempts = _settings.max_generates
+        reason.loop_guard.generate_attempts = 100  # 아무리 높아도
+        # max_generates 기본값이 0이므로 이 조건만으로는 종료되지 않음
+        assert _settings.max_generates == 0
+        assert should_terminate(reason) is False
+
+    def test_terminates_when_generate_at_limit_if_positive(self, monkeypatch):
+        """max_generates > 0 이면 generate_attempts 한도에서 종료."""
+        import src.agents.state.state as state_mod
+        monkeypatch.setattr(state_mod, "MAX_GENERATES", 5)
+        reason = self._reason_with_pending_hypothesis()
+        reason.loop_guard.generate_attempts = 5
         assert should_terminate(reason) is True
 
     def test_terminates_when_final_status_failure(self):

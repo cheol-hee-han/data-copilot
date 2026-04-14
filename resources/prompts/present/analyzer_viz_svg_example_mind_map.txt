@@ -1,0 +1,56 @@
+────────────────────────────────
+## 예제 8: mind_map (마인드맵)
+────────────────────────────────
+
+데이터:
+유형: 마인드맵
+중심: "AI 기술"
+가지: [
+  ("머신러닝", ["지도학습", "비지도학습", "강화학습"]),
+  ("딥러닝", ["CNN", "RNN", "Transformer"]),
+  ("응용 분야", ["자연어처리", "컴퓨터비전", "로보틱스"])
+]
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 중심 노드 -->
+  <rect x="335" y="215" width="130" height="50" rx="25" fill="#1a56db" stroke="none"/>
+  <text x="400" y="245" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">AI 기술</text>
+
+  <!-- === 가지 1: 머신러닝 (좌상) === -->
+  <path d="M335,230 C260,230 220,120 180,120" fill="none" stroke="#1a56db" stroke-width="2.5" opacity="0.6"/>
+  <rect x="95" y="100" width="110" height="38" rx="19" fill="#dbeafe" stroke="#1a56db" stroke-width="1.5"/>
+  <text x="150" y="124" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">머신러닝</text>
+  <!-- 하위 -->
+  <path d="M95,119 C60,119 50,70 40,70" fill="none" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="35" y="74" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">지도학습</text>
+  <path d="M95,119 C55,119 45,119 35,119" fill="none" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="30" y="123" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">비지도학습</text>
+  <path d="M95,119 C60,119 50,168 40,168" fill="none" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="35" y="172" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">강화학습</text>
+
+  <!-- === 가지 2: 딥러닝 (좌하) === -->
+  <path d="M335,250 C260,250 220,370 180,370" fill="none" stroke="#f59e0b" stroke-width="2.5" opacity="0.6"/>
+  <rect x="100" y="351" width="100" height="38" rx="19" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="150" y="375" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">딥러닝</text>
+  <!-- 하위 -->
+  <path d="M100,360 C60,360 50,320 40,320" fill="none" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="35" y="324" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">CNN</text>
+  <path d="M100,370 C55,370 45,370 35,370" fill="none" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="30" y="374" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">RNN</text>
+  <path d="M100,380 C60,380 50,420 40,420" fill="none" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="35" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">Transformer</text>
+
+  <!-- === 가지 3: 응용 분야 (우측) === -->
+  <path d="M465,240 C540,240 570,240 620,240" fill="none" stroke="#10b981" stroke-width="2.5" opacity="0.6"/>
+  <rect x="595" y="221" width="110" height="38" rx="19" fill="#d1fae5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="650" y="245" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">응용 분야</text>
+  <!-- 하위 -->
+  <path d="M705,230 C740,230 750,180 760,180" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="765" y="184" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">자연어처리</text>
+  <path d="M705,240 C745,240 755,240 765,240" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="770" y="244" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">컴퓨터비전</text>
+  <path d="M705,250 C740,250 750,300 760,300" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="765" y="304" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">로보틱스</text>
+</svg>

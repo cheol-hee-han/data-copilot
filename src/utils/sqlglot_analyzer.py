@@ -61,17 +61,19 @@ def extract_structural_hints(
         "join_patterns": _extract_join_patterns(ast, alias_map),
         "code_columns": _extract_code_columns(ast),
         "agg_expressions": _extract_agg_expressions(
-            ast, alias_map,
+            ast, alias_map, dialect=dialect,
         ),
         "date_filters": _extract_date_filters(ast),
         # 테이블 정보
         "source_tables": source_tables,
         # SELECT 출력 구조
         "select_columns": _extract_select_columns(
-            ast, alias_map,
+            ast, alias_map, dialect=dialect,
         ),
-        "group_by_columns": _extract_group_by(ast, alias_map),
-        "order_by_columns": _extract_order_by(ast),
+        "group_by_columns": _extract_group_by(
+            ast, alias_map, dialect=dialect,
+        ),
+        "order_by_columns": _extract_order_by(ast, dialect=dialect),
         "limit_value": _extract_limit(ast),
         "has_distinct": _has_distinct(ast),
         "has_subquery": _has_subquery(ast),
@@ -82,7 +84,7 @@ def extract_structural_hints(
 def parse_sql_safe(
     sql: str,
     dialect: str | None = None,
-) -> Optional[sqlglot.Expression]:
+) -> Optional[exp.Expression]:
     """sqlglot 안전 파싱 -- 실패 시 None 반환.
 
     힌트 추출은 보조 정보이므로 파싱 실패가 전체 흐름을 차단하지 않는다.
@@ -97,7 +99,7 @@ def parse_sql_safe(
         # Command 노드는 미지원 구문 -- 빈 힌트 폴백
         if isinstance(ast, exp.Command):
             return None
-        return ast
+        return ast  # type: ignore[return-value]
     except sqlglot.errors.ParseError:
         return None
 
@@ -214,7 +216,7 @@ def extract_select_alias_map(
     return alias_map
 
 
-def _extract_tables_from_ast(ast: sqlglot.Expression) -> list[str]:
+def _extract_tables_from_ast(ast: exp.Expression) -> list[str]:
     """CTE 오인을 방지하여 AST에서 실제 테이블명만 추출한다 (내부용).
 
     find_all(exp.Table) 대신 traverse_scope()를 사용하여
@@ -281,7 +283,7 @@ def get_real_tables(
     return ast_tables
 
 
-def get_real_columns(ast: sqlglot.Expression) -> list[str]:
+def get_real_columns(ast: exp.Expression) -> list[str]:
     """SQL AST에서 실제 참조되는 컬럼명만 추출한다.
 
     테이블 alias, 리터럴, 함수명, 와일드카드(*)는 제외한다.
@@ -306,7 +308,7 @@ def get_real_columns(ast: sqlglot.Expression) -> list[str]:
 # 내부 추출 함수
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _build_alias_map(ast: sqlglot.Expression) -> dict[str, str]:
+def _build_alias_map(ast: exp.Expression) -> dict[str, str]:
     """SQL AST에서 alias -> 테이블명 매핑을 구성한다."""
     alias_map: dict[str, str] = {}
     for scope in traverse_scope(ast):
@@ -329,7 +331,7 @@ def _resolve_column_table(
 
 
 def _extract_join_patterns(
-    ast: sqlglot.Expression,
+    ast: exp.Expression,
     alias_map: dict[str, str] | None = None,
 ) -> list[str]:
     """JOIN ON 절에서 조인 조건을 추출한다."""
@@ -355,7 +357,7 @@ def _extract_join_patterns(
 
 
 def _extract_code_columns(
-    ast: sqlglot.Expression,
+    ast: exp.Expression,
 ) -> dict[str, list[str]]:
     """WHERE/HAVING 절에서 코드성 컬럼과 리터럴 값을 추출한다."""
     code_cols: dict[str, list[str]] = {}
@@ -382,15 +384,16 @@ def _extract_code_columns(
 
 
 def _extract_agg_expressions(
-    ast: sqlglot.Expression,
+    ast: exp.Expression,
     alias_map: dict[str, str] | None = None,
+    dialect: str | None = None,
 ) -> list[str]:
     """SELECT 절에서 집계 함수를 추출한다."""
     if alias_map is None:
         alias_map = {}
     aggs: list[str] = []
     for agg_node in ast.find_all(exp.AggFunc):
-        agg_sql = agg_node.sql()
+        agg_sql = agg_node.sql(dialect=dialect)
         for alias_key, real_table in alias_map.items():
             if f"{alias_key}." in agg_sql:
                 agg_sql = agg_sql.replace(
@@ -402,7 +405,7 @@ def _extract_agg_expressions(
 
 
 def _extract_date_filters(
-    ast: sqlglot.Expression,
+    ast: exp.Expression,
 ) -> list[dict[str, str]]:
     """WHERE 절에서 날짜 컬럼과 포맷을 추출한다."""
     date_col_pattern = re.compile(
@@ -436,8 +439,9 @@ def _extract_date_filters(
 
 
 def _extract_select_columns(
-    ast: sqlglot.Expression,
+    ast: exp.Expression,
     alias_map: dict[str, str],
+    dialect: str | None = None,
 ) -> list[str]:
     """SELECT 절의 출력 컬럼을 추출한다."""
     select = ast.find(exp.Select)
@@ -445,7 +449,7 @@ def _extract_select_columns(
         return []
     columns: list[str] = []
     for sel_expr in select.expressions:
-        sql_text = sel_expr.sql()
+        sql_text = sel_expr.sql(dialect=dialect)
         for alias_key, real_table in alias_map.items():
             if f"{alias_key}." in sql_text:
                 sql_text = sql_text.replace(
@@ -457,8 +461,9 @@ def _extract_select_columns(
 
 
 def _extract_group_by(
-    ast: sqlglot.Expression,
+    ast: exp.Expression,
     alias_map: dict[str, str],
+    dialect: str | None = None,
 ) -> list[str]:
     """GROUP BY 컬럼을 추출한다."""
     group = ast.find(exp.Group)
@@ -466,7 +471,7 @@ def _extract_group_by(
         return []
     columns: list[str] = []
     for g_expr in group.expressions:
-        sql_text = g_expr.sql()
+        sql_text = g_expr.sql(dialect=dialect)
         for alias_key, real_table in alias_map.items():
             if f"{alias_key}." in sql_text:
                 sql_text = sql_text.replace(
@@ -477,15 +482,18 @@ def _extract_group_by(
     return columns
 
 
-def _extract_order_by(ast: sqlglot.Expression) -> list[str]:
+def _extract_order_by(
+    ast: exp.Expression,
+    dialect: str | None = None,
+) -> list[str]:
     """ORDER BY 절을 추출한다."""
     order = ast.find(exp.Order)
     if not order:
         return []
-    return [o.sql() for o in order.expressions]
+    return [o.sql(dialect=dialect) for o in order.expressions]
 
 
-def _extract_limit(ast: sqlglot.Expression) -> int | None:
+def _extract_limit(ast: exp.Expression) -> int | None:
     """LIMIT 값을 추출한다."""
     limit = ast.find(exp.Limit)
     if limit and limit.expression:
@@ -496,17 +504,17 @@ def _extract_limit(ast: sqlglot.Expression) -> int | None:
     return None
 
 
-def _has_distinct(ast: sqlglot.Expression) -> bool:
+def _has_distinct(ast: exp.Expression) -> bool:
     """DISTINCT 사용 여부를 확인한다."""
     return bool(ast.find(exp.Distinct))
 
 
-def _has_subquery(ast: sqlglot.Expression) -> bool:
+def _has_subquery(ast: exp.Expression) -> bool:
     """서브쿼리 존재 여부를 확인한다."""
     return bool(ast.find(exp.Subquery))
 
 
-def _has_having(ast: sqlglot.Expression) -> bool:
+def _has_having(ast: exp.Expression) -> bool:
     """HAVING 절 존재 여부를 확인한다."""
     return bool(ast.find(exp.Having))
 

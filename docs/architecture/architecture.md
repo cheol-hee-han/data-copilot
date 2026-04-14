@@ -2,8 +2,8 @@
 
 > 은행 임직원의 자연어 데이터 추출/분석 요청을 LangGraph 파이프라인(Pipeline)으로 처리하는 AI 에이전트의 전체 구조, 컴포넌트 간 관계, 데이터 흐름을 정의한다.
 
-**버전**: 2.2
-**최종 수정**: 2026-04-03
+**버전**: 2.3
+**최종 수정**: 2026-04-13
 **대상 독자**: 본 프로젝트의 설계·구현·운영에 참여하는 모든 구성원 및 AI 서브에이전트(Sub-Agent)
 
 ---
@@ -80,11 +80,11 @@ v2.0에서 **3계층 16노드 에이전틱 파이프라인**으로 전면 재설
                          │
    ┌──────────┬──────────┬──────────┬──────────┐
    ▼          ▼          ▼          ▼          ▼
-┌──────────┐┌──────────┐┌──────────┐┌──────────┐┌──────────┐
-│Elastic   ││ MongoDB  ││PostgreSQL││  Qdrant  ││  Neo4j   │
-│Search    ││메타·코드 ││정보계    ││업무매뉴얼││온톨로지  │
-│보고서SQL ││용어사전  ││·이력DB   ││SQL이력   ││JOIN경로  │
-└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
+┌──────────┐┌──────────┐┌──────────┐┌──────────┐
+│ MongoDB  ││PostgreSQL││  Qdrant  ││  Neo4j   │
+│메타·코드 ││정보계    ││업무매뉴얼││온톨로지  │
+│용어사전  ││·이력DB   ││SQL이력   ││JOIN경로  │
+└──────────┘└──────────┘└──────────┘└──────────┘
 ```
 
 ---
@@ -136,7 +136,10 @@ workflow.add_node("format_response",     format_response_node)     # 보고서 �
 workflow.add_node("simple_responder",    simple_responder_node)    # 비데이터 의도 경량 응답
 workflow.add_node("error_end",           _handle_error)            # 에러 메시지 생성
 
-workflow.set_entry_point("intent_classifier")
+workflow.add_node("turn_reset",          _turn_reset)              # 이전 턴 산출물 초기화
+
+workflow.set_entry_point("turn_reset")
+workflow.add_edge("turn_reset", "intent_classifier")
 ```
 
 **노드 명명 규칙**: 그래프 노드 이름 = 파일명 = 함수명(`_node` 접미사 제외).
@@ -413,7 +416,7 @@ class ReasoningState(BaseModel):
     # ── 누적 지식 ──
     knowledge_items: list[KnowledgeItem]     # 탐색 중 축적된 지식 단위
     explored_use_cases: list[dict]           # 검색된 활용사례 SQL
-    candidate_tables: list[CandidateTable]   # 후보 테이블 (ES/DB 파싱 결과)
+    candidate_tables: list[CandidateTable]   # 후보 테이블 (MongoDB/DB 파싱 결과)
     searched_queries: list[str]              # 중복 검색 방지용
     discovered_facts: list[str]              # 도구 실행 결과 해석 누적
     code_map: dict[str, CodeMeta]            # 코드 컬럼별 코드값 매핑
@@ -465,10 +468,10 @@ class ReasoningState(BaseModel):
                     │
     ┌───────────────┼──────────────────────────┐
     ▼               ▼               ▼          ▼
- ES 메타검색     보고서 SQL       과거 SQL    Qdrant
+MongoDB 메타    과거 SQL(Qdrant) 과거 SQL(DB) Qdrant
     │               │               │          │
- TB_LOAN_INFO    연체율 추이      유사 SQL    연체 관리
- 컬럼 정의       보고서 SQL       검증된 패턴 분류기준
+ TB_LOAN_INFO    유사 SQL         유사 SQL    연체 관리
+ 컬럼 정의       벡터 검색        키워드 검색  분류기준
     │               │               │          │
     └───────────────┴───────────────┴──────────┘
                     │
@@ -485,7 +488,7 @@ class ReasoningState(BaseModel):
 - 업무 매뉴얼은 **업무 규정**(연체 분류 기준 등)을 제공하여 조건식 정확도를 높인다
 
 v2.0에서는 이 수집이 `context_retriever` + `context_interpreter` 2단계로 분리되었다.
-`context_retriever`가 도구 기반으로 ES/Qdrant/DB 검색을 실행하고,
+`context_retriever`가 도구 기반으로 MongoDB/Qdrant/DB 검색을 실행하고,
 `context_interpreter`가 결과를 해석하여 `KnowledgeItem`으로 승격한다.
 `readiness_gate`가 준비도를 판정하여 추가 탐색 또는 SQL 생성으로 분기한다.
 
@@ -506,18 +509,17 @@ preprocessed_input
   ├─ Step 4: 동의어 확장 ("여신"→"대출","론","대여금")
   ├─ Step 5: 유사 테이블 신호어 수집
   └─ Step 6: 소스별 쿼리 특화
-       ├─ ES table:   domain_cd 주입 + 테이블명 부스트 + 시간어 제거
-       ├─ ES report:  시간 표현 제거 + 카테고리 보강
-       ├─ History DB:  핵심 키워드 + 동의어 확장 + 테이블명 (15개 제한)
-       └─ Qdrant:      원본 유지 + 도메인 설명 보강 (벡터 의미 강화)
+       ├─ MongoDB table: domain_cd 주입 + 테이블명 부스트 + 시간어 제거
+       ├─ History DB:    핵심 키워드 + 동의어 확장 + 테이블명 (15개 제한)
+       └─ Qdrant:        원본 유지 + 도메인 설명 보강 (벡터 의미 강화)
 ```
 
-**domain_cd 주입**: ES table_meta의 `table_name`이 keyword 타입이라 부분 검색이 불가하므로,
+**domain_cd 주입**: MongoDB table_meta의 검색 효율을 높이기 위해,
 카테고리에서 추론한 `domain_cd`(LON, DEP, CUS, CRD, TRX 등)를 쿼리 선두에 주입하여
 535개 테이블에서 도메인 필터링 효과를 얻는다.
 
 **검증 결과 (골든셋 90건 E2E)**:
-- ES table_meta: 98.9% (89/90)
+- MongoDB table_meta: 98.9% (89/90)
 - Qdrant sql_history: 85.6% (77/90)
 - Qdrant biz_manual: 88.9% (80/90)
 - 종합: 91.1% (246/270)
@@ -577,7 +579,7 @@ LLM이 코드값이나 테이블명을 추론하지 않고 **사전에서 정확
     │
     ├─ 도메인 사전: "연체율" → TB_LOAN_OVERDUE_STAT
     ├─ 보고서 SQL: "연체율 추이" 보고서 → 해당 테이블
-    └─ ES 메타: 두 테이블 모두 반환, 설명+갱신주기로
+    └─ MongoDB 메타: 두 테이블 모두 반환, 설명+갱신주기로
        LLM이 판단
 ```
 
@@ -604,7 +606,7 @@ LLM이 코드값이나 테이블명을 추론하지 않고 **사전에서 정확
 **코드 메타 자동 매핑:**
 
 ```python
-# ES에서 코드 메타를 검색하여 도메인 용어에 자동 추가
+# MongoDB에서 코드 메타를 검색하여 도메인 용어에 자동 추가
 # "01" → "신용대출", "02" → "담보대출" 등의 매핑을
 # SQL 생성 프롬프트에 직접 주입
 for code_val, code_desc in codes.items():
@@ -630,7 +632,7 @@ SQL 생성 시 테이블의 용도와 특성을 정확히 파악하기 어렵다
 ```
  컨텍스트 수집 (context_retriever → context_interpreter)
      │
-     ├─ [1] ES/MongoDB에서 테이블 메타 수집
+     ├─ [1] MongoDB에서 테이블 메타 수집
      │
      ├─ [2] 테이블 설명 보강 (table_meta_enricher.py)
      │       │
@@ -687,8 +689,8 @@ SQL 생성 시 테이블의 용도와 특성을 정확히 파악하기 어렵다
     └─ "연체 관리 기준" 문서에서 산출식 확인
     │
     ▼ (매뉴얼에도 없는 경우)
-3순위: 보고서 SQL (ES)
-    └─ "연체율 추이" 보고서 SQL에서 산출식 역추출
+3순위: 과거 SQL 이력 (Qdrant sql_history)
+    └─ "연체율 추이" 유사 SQL에서 산출식 역추출
     │
     ▼ (모든 소스에서 확인 불가)
 4순위: 사용자에게 확인 요청 (clarification_handler → AmbiguitySignal)
@@ -731,13 +733,13 @@ SQL 생성 시 LLM에 제공하는 프롬프트 구조:
 │  1. 절대 규칙 (10개)                          │
 │     SELECT 전용, 단일 쿼리, PII 보호 등       │
 │                                              │
-│  2. 테이블 정보 (ES 메타 + LLM 보강)          │
+│  2. 테이블 정보 (MongoDB 메타 + LLM 보강)      │
 │     테이블명, 원본 설명, 갱신주기              │
 │     [상세 설명] LLM 보강 3관점 설명            │
 │     컬럼명, 타입, 설명, PII 여부               │
 │                                              │
-│  3. 보고서 SQL (ES 보고서 저장소)              │
-│     유사 보고서의 검증된 SQL                    │
+│  3. 과거 SQL 이력 (Qdrant sql_history)         │
+│     유사 요청의 검증된 SQL (벡터 검색)           │
 │                                              │
 │  4. 과거 SQL 이력 (이력 DB)                   │
 │     유사 요청에 사용된 기존 SQL                 │
@@ -920,7 +922,7 @@ class TraceEntry(BaseModel):
 | intent_classifier | 이력 해소 + 분류 결과 | CONTINUE + DATA_EXTRACTION (97%) |
 | normalize_query | 8-Slot 정규화 결과 | 대상: 고객, 기간: 이번 달, ... |
 | reasoning_preparer | 실행 계획 수립 | 가설 2건, 실행 계획 3스텝 |
-| context_retriever | 도구 실행 결과 | ES 테이블 3건, SQL 이력 2건 |
+| context_retriever | 도구 실행 결과 | MongoDB 테이블 3건, SQL 이력 2건 |
 | context_interpreter | 지식 승격 결과 | KnowledgeItem 5건 CONFIRMED |
 | readiness_gate | 준비도 판정 | generate_sql (score: 0.82) |
 | sql_generator | 사용 테이블 + dialect | 사용 테이블: TB_CUST_INFO (PostgreSQL) |
@@ -997,7 +999,7 @@ class TraceEntry(BaseModel):
 
 ### 5.6 검색 실행 노드 (context_retriever)
 
-**책임**: reasoning_preparer의 `execution_plan`에 따라 도구(ES, Qdrant, DB)를 호출하여 검색을 수행한다.
+**책임**: reasoning_preparer의 `execution_plan`에 따라 도구(MongoDB, Qdrant, DB)를 호출하여 검색을 수행한다.
 
 | 항목 | 내용 |
 |------|------|
@@ -1183,11 +1185,11 @@ WebSocket 응답 JSON
     ├─ "message": "마크다운 보고서 텍스트"
     │
     └─ "visualization": {
-           "type": "svg",
-           "code": "<svg>...</svg>",
+           "svg_code": "<svg>...</svg>",
            "chart_type": "bar_chart",
            "title": "지점별 실적 비교"
        }
+       (WebSocket 전송 시: 위 필드 + 최상위 "type": "viz" 디스크리미네이터)
          │
          ▼
     sanitizeSVG()
@@ -1224,23 +1226,23 @@ WebSocket 응답 JSON
 ```
                     ConnectorManager (싱글턴)
                             │
- ┌──────────┬───────────┬───┼───────┬──────────┬──────────┐
- ▼          ▼           ▼   ▼       ▼          ▼          ▼
-Elastic   MongoDB     InfoDB      HistoryDB  Qdrant     Neo4j
-Search    Connector   Connector   Connector  Connector  Connector
-Connector (메타·코드  (정보계     (이력 DB)  (업무매뉴얼 (온톨로지
-(보고서SQL  용어사전)    외부:PG              SQL이력    그래프
- 하위호환            내부:Sybase             벡터)     테이블관계
- table_meta)          +Impala)                         JOIN경로)
- │          │           │         │          │          │
- │  use_dummy=True/False (전체 공통)          │          │
- │          │           │         │          │          │
- ▼          ▼           ▼         ▼          ▼          ▼
-Dummy      Dummy       Dummy     Dummy      Dummy      Dummy
- or         or          or        or         or         or
-실제 ES   실제 Mongo  실제 PG/  실제 PG   실제       실제
-연결       연결       Sybase/   연결      Qdrant     Neo4j
-                      Impala              연결       연결
+ ┌───────────┬───────────┬───┼───────┬──────────┬──────────┐
+ ▼           ▼           ▼   ▼       ▼          ▼          ▼
+MongoDB    InfoDB      HistoryDB  Qdrant     Neo4j
+Connector  Connector   Connector  Connector  Connector
+(메타·코드  (정보계     (이력 DB)  (업무매뉴얼 (온톨로지
+ 용어사전)    외부:PG              SQL이력    그래프
+            내부:Sybase             벡터)     테이블관계
+              +Impala)                         JOIN경로)
+ │           │         │          │          │
+ │  use_dummy=True/False (전체 공통)          │
+ │           │         │          │          │
+ ▼           ▼         ▼          ▼          ▼
+Dummy       Dummy     Dummy      Dummy      Dummy
+ or          or        or         or         or
+실제 Mongo  실제 PG/  실제 PG   실제       실제
+연결       Sybase/   연결      Qdrant     Neo4j
+            Impala              연결       연결
 ```
 
 **설정 파일 하나로 Dummy↔실제 전환:**
@@ -1263,20 +1265,10 @@ client = get_llm_client()
 # llm_provider="openai_compatible" → AsyncOpenAI (Groq, OpenRouter 등)
 ```
 
-### 6.1 인프라 변경 사항 (2026-03-20)
+### 6.1 인프라 변경 사항
 
-**ES nori 한글 분석기 적용:**
-
-```text
-devtools/scripts/seed_elasticsearch.py
-  SHARD_SETTINGS에 korean analyzer 정의 (nori_tokenizer + nori_readingform)
-  모든 text 필드: "analyzer": "standard" → "analyzer": "korean"
-
-devtools/docker/docker-compose.dev.yml
-  elasticsearch 서비스에서 nori 플러그인이 포함된 이미지를 사용
-```
-
-**효과:** "여신" 검색 2건→29건, "대출" 0건→7건, "고객" 0건→41건 (535개 테이블 기준)
+> **Note:** ElasticSearch는 제거되었으며 메타데이터 검색은 MongoDB로 전환되었다.
+> 과거 ES nori 한글 분석기 관련 설정은 더 이상 사용되지 않는다.
 
 **Qdrant 임베딩 모델 통일:**
 
@@ -1322,3 +1314,4 @@ devtools/docker/docker-compose.dev.yml
 | 2.0 | 2026-04-01 | v2.0 3계층 파이프라인 전면 재설계 반영: 10노드→16노드, Interpret/Reason/Present 3계층 분리, 에이전틱 추론 루프(planner-fetcher-interpreter-gate-generator-validator-recovery-finalizer), 통합 명확화(clarification_handler + AmbiguitySignal + T1~T5), PipelineState+ReasoningState 2계층 중첩 상태, resolve_history·normalize_query 노드 추가, preprocessor 제거(runner.py로 이관), IntentType 6종(CASUAL_TALK/META_QUESTION 추가), FailureType 기반 SQL 검증 라우팅, Fast-Path·Dialect 라우팅, 노드 디렉토리 구조 반영 | doc-writer |
 | 2.1 | 2026-04-02 | 구현 코드 정합성 반영: planner→reasoning_preparer 리네임(규칙 기반, LLM 미사용), Fast-Path 메커니즘 제거(직접 에지로 변경), fast_path_triggered 상태 필드 제거, inference_notes 필드 추가, 라우팅 함수 10→8곳으로 정정(_route_after_planner 제거), sql_validator에서 explore_after_fast_path 분기 제거, 커넥터 아키텍처에 MongoDB·Neo4j 추가 | doc-writer |
 | 2.2 | 2026-04-03 | 구현 정합성 전면 재검증: server.py→main.py 정정, 라우팅 함수 8→9곳 정정(_route_after_execution 포함), 노드 디렉토리에서 존재하지 않는 history_resolver.py/intent_classifier.py 제거, search_query_builder.py→SearchKeywords(normalization.py) 반영, 8-Slot 명칭 정정(INTENT/ENTITY/MEASURE/DIMENSION/FILTER/TIME/MODIFIER/OUTPUT_HINT), chart_generator.py 경로 정정(services/visualization/), ES Dockerfile 참조 제거, services/history_resolver.py 참조 제거 | doc-writer |
+| 2.3 | 2026-04-13 | ElasticSearch 참조 전면 제거(MongoDB/Qdrant로 대체), turn_reset 엔트리포인트 추가, 커넥터 아키텍처 도식에서 ES 제거·Neo4j 반영(6종→5종), state.py W/R 약어 현행화(EXP→FET, EVL→RDG, RET→INT) | doc-writer |

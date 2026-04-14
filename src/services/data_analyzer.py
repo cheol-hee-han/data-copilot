@@ -97,8 +97,11 @@ def parse_analysis_json(text: str) -> AnalysisResult:
 
     return AnalysisResult(
         summary=parsed.get("summary", ""),
+        initial_reading=parsed.get("initial_reading", []),
         insights=parsed.get("insights", []),
         statistics=parsed.get("statistics", {}),
+        action_items=parsed.get("action_items", []),
+        reasoning_summary=parsed.get("reasoning_summary", ""),
     )
 
 
@@ -145,10 +148,27 @@ async def generate_svg_via_llm(
     chart_title: str,
     data_summary: str,
     *,
-    system_prompt: str,
+    system_base: str,
+    system_examples: dict[str, str],
     user_template: str,
 ) -> str:
-    """LLM에게 SVG 코드를 직접 생성시킨다."""
+    """LLM에게 SVG 코드를 직접 생성시킨다.
+
+    chart_type에 해당하는 예제 1개만 system 프롬프트에 주입하여
+    전체 토큰을 15K → 약 5K로 줄인다. 매핑되지 않은 chart_type은
+    빈 문자열을 반환하여 템플릿 폴백으로 넘어간다.
+    """
+    example = system_examples.get(chart_type)
+    if example is None:
+        logger.warning(
+            "SVG 예제 미매핑, LLM 호출 건너뜀",
+            chart_type=chart_type,
+        )
+        return ""
+    system_prompt = system_base.replace(
+        "{example_block}", example,
+    )
+
     client = get_llm_client()
     user_message = user_template.format(
         chart_type=chart_type,
@@ -205,7 +225,8 @@ async def build_visualization(
     *,
     viz_judgment_prompt: str,
     viz_judgment_user: str,
-    viz_svg_system: str,
+    viz_svg_base: str,
+    viz_svg_examples: dict[str, str],
     viz_svg_user: str,
     is_cancelled: Callable[[], Awaitable[bool]] | None = None,
 ) -> VisualizationData:
@@ -242,7 +263,8 @@ async def build_visualization(
         chart_type.value,
         chart_title,
         data_summary,
-        system_prompt=viz_svg_system,
+        system_base=viz_svg_base,
+        system_examples=viz_svg_examples,
         user_template=viz_svg_user,
     )
 
@@ -277,7 +299,8 @@ async def analyze_data(
     user_template: str,
     viz_judgment_prompt: str,
     viz_judgment_user: str,
-    viz_svg_system: str,
+    viz_svg_base: str,
+    viz_svg_examples: dict[str, str],
     viz_svg_user: str,
     min_rows_for_viz: int,
     is_cancelled: Callable[[], Awaitable[bool]] | None = None,
@@ -289,7 +312,8 @@ async def analyze_data(
         sql_result: SQL 실행 결과.
         system_prompt: 분석 시스템 프롬프트.
         user_template: 분석 유저 프롬프트 템플릿.
-        viz_svg_system: SVG 생성 시스템 프롬프트 (규칙+few-shot).
+        viz_svg_base: SVG 생성 base 프롬프트(예제 슬롯 `{example_block}` 포함).
+        viz_svg_examples: chart_type → 예제 본문 매핑.
         viz_svg_user: SVG 생성 유저 프롬프트 템플릿 ({chart_type},{data} 등).
         min_rows_for_viz: 시각화 최소 행 수.
 
@@ -364,7 +388,8 @@ async def analyze_data(
             sql_result,
             viz_judgment_prompt=viz_judgment_prompt,
             viz_judgment_user=viz_judgment_user,
-            viz_svg_system=viz_svg_system,
+            viz_svg_base=viz_svg_base,
+            viz_svg_examples=viz_svg_examples,
             viz_svg_user=viz_svg_user,
             is_cancelled=is_cancelled,
         )

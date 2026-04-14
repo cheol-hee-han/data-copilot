@@ -5,7 +5,7 @@ LLM API(Groq/OpenAI Compatible)를 사용하여
 에이전트의 전체 흐름을 추적하고 검증한다.
 
 실행 조건:
-  - Docker 컨테이너 실행 중 (dc-postgres, dc-elasticsearch, dc-qdrant, dc-mongodb)
+  - Docker 컨테이너 실행 중 (dc-postgres, dc-qdrant, dc-mongodb)
   - .env에 USE_DUMMY=false, 실제 API 키 설정
   - pytest -m real_e2e 로 실행
 """
@@ -177,60 +177,6 @@ class TestRealConnectorHealth:
         _record(
             "connector", "mongo_biz_term",
             "여신", trace,
-            "PASS" if len(results) > 0 else "WARN",
-            elapsed,
-        )
-
-    @pytest.mark.asyncio
-    async def test_04_es_table_meta_search(
-        self, connector_mgr,
-    ):
-        """ES 테이블 메타 검색."""
-        t0 = time.perf_counter()
-        results = await connector_mgr.es.search_table_meta(
-            "고객 마스터",
-        )
-        elapsed = (time.perf_counter() - t0) * 1000
-
-        trace = {
-            "result_count": len(results),
-            "elapsed_ms": round(elapsed, 1),
-        }
-
-        _record(
-            "connector", "es_table_meta",
-            "고객 마스터", trace,
-            "PASS" if len(results) > 0 else "WARN",
-            elapsed,
-        )
-
-    @pytest.mark.asyncio
-    async def test_05_es_report_sql_search(
-        self, connector_mgr,
-    ):
-        """ES 보고서 SQL 검색."""
-        t0 = time.perf_counter()
-        try:
-            results = await connector_mgr.es.search_report_sql(
-                "여신 잔액",
-            )
-        except Exception as e:
-            elapsed = (time.perf_counter() - t0) * 1000
-            _record(
-                "connector", "es_report_sql",
-                "여신 잔액", {"error": str(e)[:120]},
-                "WARN", elapsed,
-            )
-            return
-
-        elapsed = (time.perf_counter() - t0) * 1000
-        trace = {
-            "result_count": len(results),
-            "elapsed_ms": round(elapsed, 1),
-        }
-        _record(
-            "connector", "es_report_sql",
-            "여신 잔액", trace,
             "PASS" if len(results) > 0 else "WARN",
             elapsed,
         )

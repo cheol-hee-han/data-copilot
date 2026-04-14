@@ -42,18 +42,23 @@ Prompt Version: 2.0 (2026-03-26)
   QUERY_NORMALIZER_PHASE2_USER    ← query_normalizer_phase2_user.txt
 
 파일 매핑 (reason/):
-  CONTEXT_INTERPRETER_SYSTEM  ← context_interpreter_system.txt
-  SQL_GENERATOR_SYSTEM        ← sql_generator_system.txt
-  SQL_GENERATOR_FIX_SECTION   ← sql_generator_fix_section.txt
-  SQL_VALIDATOR_SYSTEM        ← sql_validator_system.txt
-  RECOVERY_AGENT_SYSTEM       ← recovery_agent_system.txt
+  CONTEXT_INTERPRETER_SYSTEM        ← context_interpreter_system.txt
+  SQL_GENERATOR_SYSTEM_BY_DIALECT   ← sql_generator_system_{db}.txt (4종)
+    tsql    ← sql_generator_system_sybase_iq.txt
+    hive    ← sql_generator_system_impala.txt
+    oracle  ← sql_generator_system_oracle.txt
+    postgres← sql_generator_system_postgres.txt
+  SQL_GENERATOR_FIX_SECTION         ← sql_generator_fix_section.txt
+  SQL_VALIDATOR_SYSTEM              ← sql_validator_system.txt
+  RECOVERY_AGENT_SYSTEM             ← recovery_agent_system.txt
 
 파일 매핑 (present/):
   ANALYZER_SYSTEM                 ← analyzer_system.txt
   ANALYZER_USER                   ← analyzer_user.txt
   ANALYZER_VIZ_JUDGMENT_SYSTEM    ← analyzer_viz_judgment_system.txt
   ANALYZER_VIZ_JUDGMENT_USER      ← analyzer_viz_judgment_user.txt
-  ANALYZER_VIZ_SVG_SYSTEM         ← analyzer_viz_svg_system.txt
+  ANALYZER_VIZ_SVG_SYSTEM_BASE    ← analyzer_viz_svg_system_base.txt
+  ANALYZER_VIZ_SVG_EXAMPLES       ← analyzer_viz_svg_example_{chart_type}.txt
   ANALYZER_VIZ_SVG_USER           ← analyzer_viz_svg_user.txt
 """
 
@@ -108,7 +113,28 @@ QUERY_NORMALIZER_PHASE2_USER = _interpret(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CONTEXT_INTERPRETER_SYSTEM = _reason("context_interpreter_system.txt")
-SQL_GENERATOR_SYSTEM = _reason("sql_generator_system.txt")
+
+# SQL Generator는 대상 DB(dialect)에 따라 최적화된 프롬프트를 선택한다.
+# dialect → prompt 매핑. 키는 DatabaseConnector.dialect 반환값.
+SQL_GENERATOR_SYSTEM_BY_DIALECT: dict[str, str] = {
+    "tsql": _reason("sql_generator_system_sybase_iq.txt"),
+    "hive": _reason("sql_generator_system_impala.txt"),
+    "oracle": _reason("sql_generator_system_oracle.txt"),
+    "postgres": _reason("sql_generator_system_postgres.txt"),
+}
+
+
+def get_sql_generator_system(dialect: str) -> str:
+    """dialect에 맞는 SQL 생성 시스템 프롬프트를 반환한다.
+
+    알 수 없는 dialect는 postgres 프롬프트로 폴백한다(외부망 기본값).
+    """
+    return SQL_GENERATOR_SYSTEM_BY_DIALECT.get(
+        dialect,
+        SQL_GENERATOR_SYSTEM_BY_DIALECT["postgres"],
+    )
+
+
 SQL_GENERATOR_FIX_SECTION = _reason(
     "sql_generator_fix_section.txt",
 )
@@ -124,7 +150,24 @@ ANALYZER_SYSTEM = _present("analyzer_system.txt")
 ANALYZER_USER = _present("analyzer_user.txt")
 ANALYZER_VIZ_JUDGMENT_SYSTEM = _present("analyzer_viz_judgment_system.txt")
 ANALYZER_VIZ_JUDGMENT_USER = _present("analyzer_viz_judgment_user.txt")
-ANALYZER_VIZ_SVG_SYSTEM = _present("analyzer_viz_svg_system.txt")
+ANALYZER_VIZ_SVG_SYSTEM_BASE = _present(
+    "analyzer_viz_svg_system_base.txt",
+)
+# 차트 타입별 예제. 키는 VisualizationType.value와 동일해야 한다.
+ANALYZER_VIZ_SVG_EXAMPLES: dict[str, str] = {
+    "bar_chart": _present("analyzer_viz_svg_example_bar_chart.txt"),
+    "line_chart": _present("analyzer_viz_svg_example_line_chart.txt"),
+    "pie_chart": _present("analyzer_viz_svg_example_pie_chart.txt"),
+    "horizontal_bar": _present(
+        "analyzer_viz_svg_example_horizontal_bar.txt",
+    ),
+    "flowchart": _present("analyzer_viz_svg_example_flowchart.txt"),
+    "timeline": _present("analyzer_viz_svg_example_timeline.txt"),
+    "donut_chart": _present(
+        "analyzer_viz_svg_example_donut_chart.txt",
+    ),
+    "mind_map": _present("analyzer_viz_svg_example_mind_map.txt"),
+}
 ANALYZER_VIZ_SVG_USER = _present("analyzer_viz_svg_user.txt")
 
 

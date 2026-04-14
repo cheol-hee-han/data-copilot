@@ -74,7 +74,7 @@ SQL을 생성하여 데이터를 추출하거나, 데이터 기반 분석 결과
 
 ## Reference Docs
 
-- 프로젝트 구조: `docs/project-structure.md`
+- 프로젝트 구조: `docs/architecture/project-structure.md`
 - 파이프라인 아키텍처: `docs/architecture/pipeline-architecture.md`
 - 코드 스타일/컨벤션: `.claude/rules/code-style.md`
 - 보안 규칙: `.claude/rules/data-security.md`

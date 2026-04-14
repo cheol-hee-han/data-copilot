@@ -162,14 +162,14 @@ async def normalize_query_node(
                 confidence=amb.get("confidence", "LOW"),
                 question=amb.get("question", ""),
                 question_type=amb.get("question_type", "single_select"),
-                options=amb.get("options", []),
+                options=amb.get("options") or [],
                 inferred_value=amb.get("inferred_value"),
                 reasoning=amb.get("reasoning", ""),
                 turn_id=state.turn_id,
             )
             for amb in normalized.ambiguities
         ]
-        result["resolved_signals"] = signals
+        result["resolved_signals"] = [*state.resolved_signals, *signals]
         logger.info(
             "T3 AmbiguitySignal 생성 (INFER)",
             count=ambiguity_count,
@@ -184,9 +184,7 @@ async def normalize_query_node(
         "hypothesis_id": "",
         "inputs": {
             "raw_query": raw_query,
-            "clarification_context": (
-                clarification_ctx[:200] if clarification_ctx else "(없음)"
-            ),
+            "clarification_context": clarification_ctx or "(없음)",
         },
         "output": {
             "rewritten_query": getattr(normalized, "rewritten_query", ""),
@@ -205,7 +203,7 @@ async def normalize_query_node(
                 {
                     "type": a.get("ambiguity_type", ""),
                     "decision": a.get("decision", ""),
-                    "question": a.get("question", "")[:100],
+                    "question": a.get("question", ""),
                 }
                 for a in normalized.ambiguities
             ],

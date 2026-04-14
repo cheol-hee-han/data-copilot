@@ -55,7 +55,8 @@ def extract_json(
     # 1. 코드펜스 내부 추출 시도
     stripped = _strip_code_fence(raw)
     try:
-        return json.loads(stripped)
+        parsed: dict[str, Any] = json.loads(stripped)
+        return parsed
     except json.JSONDecodeError:
         pass
 
@@ -63,7 +64,8 @@ def extract_json(
     match = _JSON_PATTERN.search(raw)
     if match:
         try:
-            return json.loads(match.group())
+            parsed2: dict[str, Any] = json.loads(match.group())
+            return parsed2
         except json.JSONDecodeError:
             pass
 

@@ -1,0 +1,73 @@
+────────────────────────────────
+## 예제 2: line_chart (선 그래프)
+────────────────────────────────
+
+데이터:
+컬럼: [월, 매출액, 영업이익]
+행: [("1월",2400,320), ("2월",2800,410), ("3월",3100,380), ("4월",3600,520), ("5월",3200,450)]
+
+계산 과정:
+  y_max = 3600 × 1.15 ≈ 4140 → 올림 → 4000
+  plot: x=[90,760], y=[60,420], width=670, height=360
+  X간격: 670/(5-1) = 167.5
+  x좌표: 90, 257.5, 425, 592.5, 760
+  매출 y좌표: 420-(2400/4000)*360=204, 420-(2800/4000)*360=168, ...
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">월별 매출 및 영업이익 추이</text>
+
+  <!-- Y축 그리드 -->
+  <line x1="90" y1="420" x2="760" y2="420" stroke="#d1d5db" stroke-width="1"/>
+  <text x="80" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">0</text>
+  <line x1="90" y1="330" x2="760" y2="330" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="334" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">1,000</text>
+  <line x1="90" y1="240" x2="760" y2="240" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="244" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">2,000</text>
+  <line x1="90" y1="150" x2="760" y2="150" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="154" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">3,000</text>
+  <line x1="90" y1="60" x2="760" y2="60" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="64" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">4,000</text>
+
+  <!-- 축선 -->
+  <line x1="90" y1="60" x2="90" y2="420" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- X축 레이블 -->
+  <text x="90" y="450" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">1월</text>
+  <text x="257" y="450" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">2월</text>
+  <text x="425" y="450" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">3월</text>
+  <text x="592" y="450" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">4월</text>
+  <text x="760" y="450" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">5월</text>
+
+  <!-- 매출액 선 -->
+  <polyline points="90,204 257,168 425,141 592,96 760,132"
+            fill="none" stroke="#1a56db" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- 매출액 마커 -->
+  <circle cx="90" cy="204" r="4" fill="white" stroke="#1a56db" stroke-width="2.5"/>
+  <text x="90" y="192" text-anchor="middle" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">2,400</text>
+  <circle cx="257" cy="168" r="4" fill="white" stroke="#1a56db" stroke-width="2.5"/>
+  <text x="257" y="156" text-anchor="middle" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">2,800</text>
+  <circle cx="425" cy="141" r="4" fill="white" stroke="#1a56db" stroke-width="2.5"/>
+  <text x="425" y="129" text-anchor="middle" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">3,100</text>
+  <circle cx="592" cy="96" r="4" fill="white" stroke="#1a56db" stroke-width="2.5"/>
+  <text x="592" y="84" text-anchor="middle" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">3,600</text>
+  <circle cx="760" cy="132" r="4" fill="white" stroke="#1a56db" stroke-width="2.5"/>
+  <text x="760" y="120" text-anchor="middle" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">3,200</text>
+
+  <!-- 영업이익 선 -->
+  <polyline points="90,391 257,383 425,386 592,373 760,379"
+            fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="90" cy="391" r="4" fill="white" stroke="#f59e0b" stroke-width="2.5"/>
+  <circle cx="257" cy="383" r="4" fill="white" stroke="#f59e0b" stroke-width="2.5"/>
+  <circle cx="425" cy="386" r="4" fill="white" stroke="#f59e0b" stroke-width="2.5"/>
+  <circle cx="592" cy="373" r="4" fill="white" stroke="#f59e0b" stroke-width="2.5"/>
+  <circle cx="760" cy="379" r="4" fill="white" stroke="#f59e0b" stroke-width="2.5"/>
+
+  <!-- 범례 -->
+  <rect x="280" y="473" width="12" height="12" fill="#1a56db" rx="2"/>
+  <text x="298" y="484" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">매출액</text>
+  <rect x="400" y="473" width="12" height="12" fill="#f59e0b" rx="2"/>
+  <text x="418" y="484" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">영업이익</text>
+</svg>

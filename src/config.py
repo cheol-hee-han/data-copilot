@@ -12,7 +12,7 @@ pydantic-settings 기반으로 .env 파일 및 환경 변수에서
 모듈 수준 싱글턴 settings 를 export 하여 전역에서 참조한다.
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -32,7 +32,6 @@ class DbConnectionInfo(BaseModel):
             f"host={self.host} port={self.port} "
             f"dbname={self.name} user={self.user}"
         )
-
 
 
 class Settings(BaseSettings):
@@ -56,38 +55,27 @@ class Settings(BaseSettings):
     openai_referer: str = "https://data-copilot.local"
     openai_title: str = "Data Copilot"
 
-    # 정보계 DB (읽기 전용)
-    info_db_host: str = "localhost"
-    info_db_port: int = 5432
-    info_db_name: str = "info_db"
-    info_db_user: str = "readonly_user"
-    info_db_password: str = ""
-    info_db_default_schema: str = "ADWOWN"
+    # 개발/테스트용 DB (읽기 전용, 폐쇄망 전환 시 제거)
+    # 폐쇄망에서는 Sybase IQ/Impala/Oracle 로 대체된다.
+    test_db_host: str = "localhost"
+    test_db_port: int = 5432
+    test_db_name: str = "test_db"
+    test_db_user: str = "readonly_user"
+    test_db_password: str = ""
+    test_db_default_schema: str = "ADWOWN"
 
-    # SQL 이력 DB
-    history_db_host: str = "localhost"
-    history_db_port: int = 5432
-    history_db_name: str = "history_db"
-    history_db_user: str = "history_user"
-    history_db_password: str = ""
+    # PostgreSQL DB (SQL 이력 + checkpointer 영속화 등 공통 메타 저장소)
+    postgres_db_host: str = "localhost"
+    postgres_db_port: int = 5432
+    postgres_db_name: str = "postgres_db"
+    postgres_db_user: str = "postgres_user"
+    postgres_db_password: str = ""
 
     # ── Checkpointer ──
     checkpointer_backend: str = "memory"  # "memory" | "postgres"
     checkpointer_pool_min: int = 2
     checkpointer_pool_max: int = 10
     checkpointer_thread_ttl_days: int = 30  # 0=무제한
-
-    # --- ElasticSearch (미사용, 향후 재사용 가능성 있어 주석 보존) ---
-    # es_host: str = "localhost"
-    # es_port: int = 9200
-    # es_user: str = "elastic"
-    # es_password: str = ""
-    # es_table_meta_index: str = "table_meta"
-    # es_report_sql_index: str = "report_sql"
-    # es_code_meta_index: str = "code_meta"
-    # es_table_meta_size: int = 10
-    # es_report_sql_size: int = 5
-    # es_code_meta_size: int = 20
 
     # Qdrant
     qdrant_host: str = "localhost"
@@ -99,7 +87,8 @@ class Settings(BaseSettings):
     qdrant_sql_history_top_k: int = 5  # Reranker 후 최종 반환 건수
     qdrant_sql_history_prefetch_limit: int = 20  # 하이브리드 검색 후보 수
     qdrant_max_prefetch: int = 100  # exclude_ids 누적 시 prefetch 상한
-    qdrant_manual_max_limit: int = 30  # search_manual exclude_ids 누적 시 limit 상한
+    # search_manual exclude_ids 누적 시 limit 상한
+    qdrant_manual_max_limit: int = 30
 
     # MongoDB (테이블 메타 + 코드 메타 + 비즈 메타)
     mongo_host: str = "localhost"
@@ -136,12 +125,15 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str = ""
 
-    # 세션 백엔드: "memory" (인메모리 dict) 또는 "redis"
-    session_backend: str = "memory"
-    session_ttl: int = 1800  # 대화 이력 TTL (초, 기본 30분, 슬라이딩)
-    session_clarify_ttl: int = 300  # 명확화 상태 TTL (초, 기본 5분)
-    session_max_history: int = 20  # 대화 이력 최대 턴 수
-    prompt_history_window: int = 4  # LLM 프롬프트에 포함할 최근 대화 턴 수
+    # CancelStore/ActiveRunStore 백엔드: "memory" 또는 "redis"
+    # 멀티 워커 배포 시 "redis"로 설정하여 원자적 취소/크래시 감지 활성화.
+    redis_backend: str = "memory"
+    # 턴 단위: 사용자 1건 + AI 1건 = 2턴 (단방향 메시지 기준)
+    prompt_history_window: int = 0  # LLM 프롬프트에 포함할 최근 턴 수 (0=전체)
+    # 활성 파이프라인 레지스트리 TTL (Redis 백엔드 사용 시 stale 안전망)
+    # 워커 kill -9 등으로 unregister 가 실행되지 못한 엔트리의 자동 만료 시간.
+    # 파이프라인 최대 실행시간보다 길게 잡는다.
+    active_run_ttl_seconds: int = 1800
 
     # ── 임베딩 모델 (BGE-M3, Dense + Sparse 하이브리드) ──
     embedding_model: str = "BAAI/bge-m3"
@@ -197,9 +189,20 @@ class Settings(BaseSettings):
     sybase_database: str = ""
     sybase_user: str = ""
     sybase_password: str = ""
-    sybase_odbc_driver: str = "SQL Anywhere 16"  # ODBC 방식 전용 (odbcinst -q -d로 확인)
+    # ODBC 방식 전용 (odbcinst -q -d 로 확인)
+    sybase_odbc_driver: str = "SQL Anywhere 16"
     sybase_charset: str = "UTF-8"
     sybase_query_timeout: int = 60
+
+    # ── Oracle (19c/21c, python-oracledb) ──
+    oracle_host: str = "localhost"
+    oracle_port: int = 1521
+    oracle_service_name: str = ""     # SID 대신 SERVICE_NAME 권장
+    oracle_user: str = ""
+    oracle_password: str = ""
+    oracle_default_schema: str = ""   # 기본 스키마 (비어있으면 사용자 기본)
+    oracle_thick_mode: bool = False   # True 시 Instant Client 필요
+    oracle_query_timeout: int = 60
 
     # DB 커넥션 풀 (멀티워커 시 workers × pool_size ≤ DB max_connections 확인)
     db_pool_timeout: int = 30            # 커넥션 풀 대기 타임아웃 (초)
@@ -209,50 +212,65 @@ class Settings(BaseSettings):
     # 쿼리 실행 타임아웃 (초, asyncpg command_timeout)
     db_query_timeout: int = 60
 
-    # ES / Qdrant 타임아웃
-    # es_request_timeout: int = 10       # ES 미사용
+    # Qdrant 타임아웃
     qdrant_request_timeout: int = 10     # Qdrant 검색 요청 타임아웃 (초)
     health_check_timeout: float = 5.0    # 커넥터별 health_check 타임아웃 (초)
 
     # Dummy 모드: True 면 외부 시스템 없이 내장 샘플 데이터로 동작
     use_dummy: bool = True
 
-    # 배포 모드: "external" (외부망, PostgreSQL) | "internal" (내부망, ADW+BDP)
-    deployment_mode: str = "external"
+    # ── 멀티 DB 라우팅 ──
+    # 업무 DB 시스템 override — 외부망 테스트 환경 전환용.
+    # 비어 있으면 identity 매핑 (ADW→ADW, BDP→BDP, CRP→CRP).
+    # 외부망 테스트 환경에서만 {"ADW": "TEST"} 로 설정.
+    # 폐쇄망 전환 시 이 값을 제거하거나 {} 로 두면 identity 동작.
+    system_db_overrides: dict[str, str] = {}
 
-    # 활성 커넥터 — 여기 포함된 커넥터만 connect/disconnect/health_check 수행.
-    # 미포함 커넥터는 dummy 모드 인스턴스로 유지되어 빈 결과를 반환한다.
-    # .env 에서 쉼표 구분 문자열로 지정: ENABLED_CONNECTORS=mongodb,qdrant,info_db,history_db
-    enabled_connectors: set[str] = {
-        "mongodb",
-        "qdrant",
-        "info_db",
-        "history_db",
-        # "elasticsearch",   # 보고서 SQL 검색 (현재 미사용)
-        # "neo4j",           # 온톨로지 그래프 (현재 미사용)
+    # push-down 필터링용 시스템 코드 → 스키마명 매핑.
+    # target_db_schema_map 의 키 집합이 "알려진 시스템 코드의 단일 진실원" 역할을 겸한다.
+    # 시스템 추가 시 이 dict 과 manager.py factory 두 곳에만 등록하면 된다.
+    target_db_schema_map: dict[str, str] = {
+        "ADW": "ADWOWN",
+        # "BDP": "BDPOWN",
+        # "CRP": "CRPOWN",
     }
+
+    # 강제 타깃 시스템 코드 (미지정이면 SELECTED 테이블 기반 동적 결정).
+    # 값은 target_db_schema_map 의 키(시스템코드) 중 하나여야 한다 (예: "ADW").
+    target_db_code: str = "ADW"
+
+    @property
+    def target_schema(self) -> str:
+        """target_db_code 에 매핑된 schema_name (push-down 필터용)."""
+        return self.target_db_schema_map.get(self.target_db_code, "")
+
+    def resolve_system_connector(self, system_code: str) -> str:
+        """시스템 코드 → 실제 커넥터 이름 (override 적용).
+
+        외부망: {"ADW":"TEST"} 로 override → "TEST" 반환.
+        폐쇄망: {} → identity, "ADW" 반환.
+        """
+        return self.system_db_overrides.get(system_code, system_code)
 
     # ── 파이프라인 제어 ──
     sql_max_retry: int = 2              # SQL 재생성 최대 재시도 횟수
-    clarification_max_turns: int = 3    # 명확화 최대 왕복 횟수
     max_input_length: int = 500         # 사용자 입력 최대 길이 (문자 수)
-    max_sessions: int = 1000            # 동시 세션 최대 수
+    clarification_max_turns: int = 3    # 명확화 최대 왕복 횟수
 
     # ── 에이전틱 코어 ──
     validate_layer2b_enabled: bool = True  # Layer 2b LLM 의미 검증 활성화
     # 에이전틱 코어 타임아웃 (초)
     agentic_tool_timeout: float = 10.0  # 개별 도구 호출 타임아웃 (C-12)
-    agentic_total_timeout: float = 120.0  # 서브그래프 전체 타임아웃
+    agentic_total_timeout: float = 180.0  # 서브그래프 전체 타임아웃
     # 에이전틱 루프 제어 상수
     max_tool_calls: int = 40            # 도구 호출 총량 한도
     max_replans: int = 10               # 재계획 최대 횟수
-    max_generates: int = 5              # SQL 생성 시도 최대 횟수
+    max_generates: int = 0              # SQL 생성 시도 최대 횟수 (0 = 무제한, MAX_TOOL_CALLS·MAX_REPLANS·MAX_LOCAL_FIXES가 상한 역할)
     max_local_fixes: int = 5            # 로컬 문법 교정 최대 횟수
-    force_generate_after_replans: int = 3  # N회 replan 후 강제 SQL 생성 진입
+    force_generate_after_replans: int = 5  # N회 replan 후 강제 SQL 생성 진입
 
     # ── Recovery Agent ──
     max_conflicted_bounces: int = 2         # CONFLICTED 왕복 가드
-    max_same_failure_repeats: int = 3       # 동일 failure_type 연속 반복 시 강제 give_up
 
     # ── LLM 호출 ──
     llm_transport_max_retry: int = 5    # SDK 레벨 전송 재시도 (429/500/503/네트워크)
@@ -278,12 +296,6 @@ class Settings(BaseSettings):
     format_max_rows: int = 50           # 포맷팅 프롬프트에 포함할 최대 행 수
     analysis_max_rows: int = 100        # 분석/시각화 프롬프트에 포함할 최대 행 수
     ui_result_max_rows: int = 500       # stream.end result_data에 포함할 최대 행 수
-
-    # LangSmith (외부망 개발 환경 전용, 폐쇄망에서는 False)
-    langsmith_enabled: bool = False
-    langsmith_api_key: str = ""
-    langsmith_project: str = "data-copilot"
-    langsmith_endpoint: str = "https://api.smith.langchain.com"
 
     # Evaluation Tracker (자체 트래킹, 폐쇄망 호환)
     eval_trace_json_enabled: bool = True        # 기계 분석용 JSON
@@ -320,14 +332,14 @@ class Settings(BaseSettings):
     krw_man_threshold: int = 1_0000        # 만원 기준 (1만)
 
     @property
-    def history_db(self) -> DbConnectionInfo:
-        """SQL 이력 DB 연결 정보를 Value Object로 반환한다."""
+    def postgres_db(self) -> DbConnectionInfo:
+        """PostgreSQL 공통 DB(이력/체크포인터 등) 연결 정보를 Value Object로 반환한다."""
         return DbConnectionInfo(
-            host=self.history_db_host,
-            port=self.history_db_port,
-            name=self.history_db_name,
-            user=self.history_db_user,
-            password=self.history_db_password,
+            host=self.postgres_db_host,
+            port=self.postgres_db_port,
+            name=self.postgres_db_name,
+            user=self.postgres_db_user,
+            password=self.postgres_db_password,
         )
 
     # 민감 필드 키워드 — logger.py의 _SENSITIVE_KEY_PARTS와 동일 기준
@@ -346,7 +358,48 @@ class Settings(BaseSettings):
                 safe[key] = val
         return f"Settings({safe})"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    @model_validator(mode="after")
+    def _validate_target_db_code(self) -> "Settings":
+        """target_db_code 와 system_db_overrides 유효성 검증.
+
+        target_db_schema_map 의 키 집합이 "알려진 시스템 코드의 단일 진실원"
+        역할을 하며, known_connectors 는 거기에 외부망 테스트 전용 TEST 를
+        더한 파생값이다. 신규 시스템 추가 시 target_db_schema_map 한 곳만
+        갱신하면 validator 도 자동 반영된다.
+        """
+        known_systems = set(self.target_db_schema_map.keys())
+        known_connectors = known_systems | {"TEST"}
+
+        if self.target_db_code:
+            normalized = self.target_db_code.strip().upper()
+            if normalized not in known_systems:
+                raise ValueError(
+                    f"target_db_code='{self.target_db_code}' 는 "
+                    f"target_db_schema_map 키 집합 "
+                    f"{sorted(known_systems)} 에 없습니다."
+                )
+            self.target_db_code = normalized
+
+        for sys_code, conn_name in self.system_db_overrides.items():
+            if sys_code not in known_systems:
+                raise ValueError(
+                    f"system_db_overrides 키 '{sys_code}' 는 "
+                    f"target_db_schema_map {sorted(known_systems)} "
+                    f"에 없습니다."
+                )
+            if conn_name not in known_connectors:
+                raise ValueError(
+                    f"system_db_overrides['{sys_code}']="
+                    f"'{conn_name}' 는 알려진 커넥터 "
+                    f"{sorted(known_connectors)} 에 없습니다."
+                )
+        return self
+
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 settings = Settings()

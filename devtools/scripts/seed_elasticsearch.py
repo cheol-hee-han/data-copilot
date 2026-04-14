@@ -1,19 +1,19 @@
-"""ElasticSearch 메타데이터 시딩.
+"""메타 시딩 공통 데이터/헬퍼 모듈 (ES 의존성 제거 완료).
 
-PG ADWOWN 스키마의 실제 테이블/컬럼 구조를 읽어서
-table_meta, column_meta, code_meta, report_sql, term_dict 인덱스를 생성한다.
+PG ADWOWN 스키마 추출, 코드 메타, 용어 사전, 컬럼명 매핑 등
+seed_mongodb.py / seed_postgres.py 가 공유하는 정적 데이터와 헬퍼를 제공한다.
+
+과거에는 ElasticSearch 시딩 진입점도 포함하였으나, ES 사용 중단(MongoDB +
+Qdrant 대체)으로 ES 연결/적재 코드는 모두 제거하였다. 파일명은 하위
+import 호환을 위해 유지한다 (seed_mongodb.py 등에서 from seed_elasticsearch
+import ... 형태로 참조).
 
 TYPE-2: code_meta에 공식 코드만 등록 (PG 미정의 코드 의도적 누락)
 TYPE-3: table/column 설명 품질 혼재 (BEST 15% / GOOD 25% / POOR 40% / MISSING 20%)
-
-사용법:
-    pip install elasticsearch psycopg2-binary python-dotenv
-    python standalone/scripts/seed_elasticsearch.py
 """
 from __future__ import annotations
 
 import hashlib
-import os
 import random
 import re
 import subprocess
@@ -25,32 +25,7 @@ from dotenv import load_dotenv
 _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(_env_path, encoding="utf-8")
 
-ES_URL = (
-    f"http://{os.getenv('ES_HOST', 'localhost')}"
-    f":{os.getenv('ES_PORT', '9200')}"
-)
-ES_USER = os.getenv("ES_USER", "elastic")
-ES_PASSWORD = os.getenv("ES_PASSWORD", "elastic_pass")
-
 SCHEMA = "adwown"
-SHARD_SETTINGS = {
-    "number_of_shards": 1,
-    "number_of_replicas": 0,
-    "analysis": {
-        "analyzer": {
-            "korean": {
-                "type": "custom",
-                "tokenizer": "nori_tokenizer",
-                "filter": ["nori_readingform", "lowercase"],
-            },
-            "korean_search": {
-                "type": "custom",
-                "tokenizer": "nori_tokenizer",
-                "filter": ["nori_readingform", "lowercase"],
-            },
-        },
-    },
-}
 
 # ══════════════════════════════════════════════════════════════
 # 요구사항 문서 파싱
@@ -129,7 +104,7 @@ def _get_pg_schema() -> dict[str, list[dict]]:
     )
     cmd = [
         "docker", "exec", "dc-postgres", "psql",
-        "-U", "postgres", "-d", "info_db",
+        "-U", "postgres", "-d", "test_db",
         "-t", "-A", "-F|", "-c", query,
     ]
     result = subprocess.run(
@@ -760,262 +735,7 @@ TERM_DICT_DOCS = [
 
 
 # ══════════════════════════════════════════════════════════════
-# 메인 시딩 로직
+# 주의: ES 시딩 진입점은 제거되었다 (MongoDB + Qdrant로 대체).
+# 본 파일은 상수/헬퍼 공유 모듈로만 유지되며, 직접 실행 대상이 아니다.
 # ══════════════════════════════════════════════════════════════
 
-def seed_elasticsearch():
-    from elasticsearch import Elasticsearch
-    from elasticsearch.helpers import bulk
-
-    random.seed(42)  # 재실행 시 동일 결과
-
-    es = Elasticsearch(
-        ES_URL, basic_auth=(ES_USER, ES_PASSWORD), request_timeout=60
-    )
-    if not es.ping():
-        print("ERROR: ES 연결 실패")
-        sys.exit(1)
-    print(f"  ES {es.info()['version']['number']} 연결 확인")
-
-    # ── 요구사항 파싱 ──
-    req_tables = _parse_requirements()
-    print(f"  요구사항 테이블 수: {len(req_tables)}")
-
-    # ── PG 스키마 추출 ──
-    pg_schema = _get_pg_schema()
-    total_cols = sum(len(v) for v in pg_schema.values())
-    print(f"  PG 테이블 수: {len(pg_schema)}, 총 컬럼 수: {total_cols}")
-
-    # ── 인덱스 재생성 헬퍼 ──
-    def recreate(name, body):
-        if es.indices.exists(index=name):
-            es.indices.delete(index=name)
-        es.indices.create(index=name, body=body)
-        print(f"  인덱스 '{name}' 생성")
-
-    _SHARD = {"settings": SHARD_SETTINGS}
-
-    # ========================================
-    # 1. table_meta (nested 구조)
-    # ========================================
-    print("\n[table_meta]")
-    recreate("table_meta", {
-        **_SHARD,
-        "mappings": {"properties": {
-            "table_name": {"type": "keyword"},
-            "table_nm_ko": {"type": "text", "analyzer": "korean"},
-            "table_desc": {"type": "text", "analyzer": "korean"},
-            "schema": {"type": "keyword"},
-            "domain_cd": {"type": "keyword"},
-            "std_dt_col": {"type": "keyword"},
-            "is_partitioned": {"type": "boolean"},
-            "update_cycle": {"type": "keyword"},
-            "columns": {"type": "nested", "properties": {
-                "name": {"type": "keyword"},
-                "type": {"type": "keyword"},
-                "desc": {"type": "text", "analyzer": "korean"},
-                "pk": {"type": "boolean"},
-                "pii": {"type": "boolean"},
-                "fk": {"type": "keyword"},
-                "code_ref": {"type": "keyword"},
-            }},
-        }},
-    })
-
-    table_meta_actions = []
-    for tbl_upper, cols in pg_schema.items():
-        # 파티션 자식 테이블은 건너뛰기
-        if re.match(r"TB_ADW_TRX701L_\d{6}", tbl_upper):
-            continue
-
-        req = req_tables.get(tbl_upper, {})
-        ko_name = req.get("ko_name", tbl_upper)
-        domain = req.get("domain", "COM")
-
-        # 기준일 컬럼 찾기
-        std_dt_col = None
-        for c in cols:
-            if c["name"] in ("STD_DT", "BASE_DT", "TRX_DT"):
-                std_dt_col = c["name"]
-                break
-
-        desc = _table_desc_quality(tbl_upper, ko_name, domain)
-        is_part = tbl_upper == "TB_ADW_TRX701L"
-
-        es_cols = []
-        for c in cols:
-            col_desc = _col_desc_quality(tbl_upper, c["name"])
-            es_type = _pg_type_to_es(c["data_type"], c["max_length"])
-            is_pii = c["name"] in PII_COLS
-            # code_ref: 코드 컬럼이면 code_meta의 code_field 참조
-            code_ref = None
-            if (c["name"].endswith("_CD")
-                    or c["name"].endswith("_YN")):
-                code_ref = c["name"]
-
-            es_cols.append({
-                "name": c["name"],
-                "type": es_type,
-                "desc": col_desc,
-                "pk": c["is_pk"],
-                "pii": is_pii,
-                "code_ref": code_ref,
-            })
-
-        doc = {
-            "table_name": tbl_upper,
-            "table_nm_ko": ko_name,
-            "table_desc": desc,
-            "schema": SCHEMA,
-            "domain_cd": domain,
-            "std_dt_col": std_dt_col,
-            "is_partitioned": is_part,
-            "update_cycle": random.choice(["일배치", "실시간", "월배치", "수시"]),
-            "columns": es_cols,
-        }
-        table_meta_actions.append({
-            "_index": "table_meta", "_id": tbl_upper, "_source": doc,
-        })
-
-    ok, errors = bulk(es, table_meta_actions, raise_on_error=False)
-    print(f"  table_meta: {ok}건 적재 (오류: {len(errors) if errors else 0}건)")
-
-    # ========================================
-    # 2. column_meta (개별 컬럼)
-    # ========================================
-    print("\n[column_meta]")
-    recreate("column_meta", {
-        **_SHARD,
-        "mappings": {"properties": {
-            "table_name": {"type": "keyword"},
-            "col_name": {"type": "keyword"},
-            "col_nm_ko": {"type": "text", "analyzer": "korean"},
-            "col_desc": {"type": "text", "analyzer": "korean"},
-            "data_type": {"type": "keyword"},
-            "pk_yn": {"type": "keyword"},
-            "nullable": {"type": "keyword"},
-            "code_ref": {"type": "keyword"},
-        }},
-    })
-
-    col_meta_actions = []
-    for tbl_upper, cols in pg_schema.items():
-        if re.match(r"TB_ADW_TRX701L_\d{6}", tbl_upper):
-            continue
-        for c in cols:
-            col_desc = _col_desc_quality(tbl_upper, c["name"])
-            ko = _col_ko_name(c["name"])
-            es_type = _pg_type_to_es(c["data_type"], c["max_length"])
-            is_code = (
-                c["name"].endswith("_CD") or c["name"].endswith("_YN")
-            )
-            code_ref = c["name"] if is_code else None
-            doc_id = f"{tbl_upper}.{c['name']}"
-            col_meta_actions.append({"_index": "column_meta", "_id": doc_id, "_source": {  # noqa: E501
-                "table_name": tbl_upper,
-                "col_name": c["name"],
-                "col_nm_ko": ko,
-                "col_desc": col_desc,
-                "data_type": es_type,
-                "pk_yn": "Y" if c["is_pk"] else "N",
-                "nullable": c["nullable"],
-                "code_ref": code_ref,
-            }})
-
-    ok, errors = bulk(
-        es, col_meta_actions, raise_on_error=False, chunk_size=500
-    )
-    print(
-        f"  column_meta: {ok}건 적재 "
-        f"(오류: {len(errors) if errors else 0}건)"
-    )
-
-    # ========================================
-    # 3. code_meta
-    # ========================================
-    print("\n[code_meta]")
-    recreate("code_meta", {
-        **_SHARD,
-        "mappings": {"properties": {
-            "code_field": {"type": "keyword"},
-            "code_field_desc": {"type": "text", "analyzer": "korean"},
-            "table_name": {"type": "keyword"},
-            "codes": {"type": "object", "enabled": False},
-        }},
-    })
-
-    code_actions = []
-    for i, doc in enumerate(CODE_META_DOCS):
-        code_actions.append({
-            "_index": "code_meta", "_id": str(i), "_source": doc,
-        })
-    ok, _ = bulk(es, code_actions, raise_on_error=False)
-    print(f"  code_meta: {ok}건 적재")
-
-    # ========================================
-    # 4. report_sql
-    # ========================================
-    print("\n[report_sql]")
-    recreate("report_sql", {
-        **_SHARD,
-        "mappings": {"properties": {
-            "report_nm": {"type": "text", "analyzer": "korean"},
-            "report_desc": {"type": "text", "analyzer": "korean"},
-            "sql_text": {"type": "text", "index": False},
-            "tables_used": {"type": "keyword"},
-            "domain_cd": {"type": "keyword"},
-        }},
-    })
-
-    report_actions = []
-    for i, doc in enumerate(REPORT_SQL_DOCS):
-        report_actions.append({
-            "_index": "report_sql", "_id": str(i), "_source": doc,
-        })
-    ok, _ = bulk(es, report_actions, raise_on_error=False)
-    print(f"  report_sql: {ok}건 적재")
-
-    # ========================================
-    # 5. term_dict
-    # ========================================
-    print("\n[term_dict]")
-    recreate("term_dict", {
-        **_SHARD,
-        "mappings": {"properties": {
-            "term_ko": {"type": "text", "analyzer": "korean"},
-            "col_pattern": {"type": "text"},
-            "table_hint": {"type": "text"},
-            "definition": {"type": "text", "analyzer": "korean"},
-            "synonym": {"type": "text"},
-            "caution": {"type": "text"},
-        }},
-    })
-
-    term_actions = []
-    for i, doc in enumerate(TERM_DICT_DOCS):
-        term_actions.append({
-            "_index": "term_dict", "_id": str(i), "_source": doc,
-        })
-    ok, _ = bulk(es, term_actions, raise_on_error=False)
-    print(f"  term_dict: {ok}건 적재")
-
-    # ── 최종 건수 ──
-    es.indices.refresh(index="_all")
-    print("\n[적재 결과]")
-    for idx in (
-        "table_meta", "column_meta", "code_meta", "report_sql", "term_dict"
-    ):
-        cnt = es.count(index=idx)["count"]
-        print(f"  {idx:<15}: {cnt:>5}건")
-
-    es.close()
-
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("ElasticSearch 메타데이터 시딩")
-    print("=" * 60)
-    seed_elasticsearch()
-    print("\n" + "=" * 60)
-    print("ElasticSearch 시딩 완료!")
-    print("=" * 60)

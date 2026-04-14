@@ -1,12 +1,13 @@
 # 프롬프트 · 노드 · 서비스 매핑표
 
-> **Version 1.4** (2026-04-02)
+> **Version 1.5** (2026-04-13)
 > 프롬프트 변수, 템플릿 파일, 노드, 서비스/유틸리티 간의 전체 매핑을 정리한다.
 >
 > v1.1: `sql_hint_extractor.py` → `utils/sqlglot_analyzer.py` 이동 반영, 횡단 관심사 위치 컬럼 추가
 > v1.2: 전체 노드 재검증 — LLM 직접 호출 여부, `utils/llm/` 모듈 매핑, `batch_interpret_system.txt` 변수 추가(`{unresolved_items}`) 반영
 > v1.3: 노드 리네임 반영 — `context_explorer` → `context_retriever` + `context_interpreter` 분리, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent`, `preprocessor` 제거(sanitize → runner.py 이관), `clarifier` → `clarification_handler`(규칙 기반, 프롬프트 미사용)
 > v1.4: `planner` → `reasoning_preparer` 리네임 반영 (규칙 기반, LLM/프롬프트 미사용). `PLANNER_SYSTEM` 프롬프트 미사용 처리.
+> v1.5: `미사용_` 접두사 프롬프트 파일 4건 삭제 확인 반영 (파일 잔존 → 파일 삭제됨으로 정정).
 
 ---
 
@@ -29,8 +30,8 @@
 | --- | --- | --- | --- | --- |
 | `INTENT_CLASSIFIER_SYSTEM` | `interpret/intent_classifier_system.txt` | `intent_classifier.py` | `intent_classifier.py` — 이력해소 + 의도분류 통합 | **서비스 위임** |
 | `INTENT_CLASSIFIER_USER` | `interpret/intent_classifier_user.txt` | 〃 | 〃 | 〃 |
-| ~~`INTENT_CLASSIFIER_SYSTEM`~~ | `interpret/미사용_intent_classifier_system.txt` | ~~`intent_classifier.py`~~ → `intent_classifier.py` | 통합됨 — 프롬프트 미사용 (파일은 `미사용_` 접두사로 잔존) | 없음 |
-| ~~`HISTORY_RESOLVER_SYSTEM`~~ | `interpret/미사용_history_resolver_system.txt` | ~~`history_resolver.py`~~ → `intent_classifier.py` | 통합됨 — 프롬프트 미사용 (파일은 `미사용_` 접두사로 잔존) | 없음 |
+| ~~`INTENT_CLASSIFIER_SYSTEM`~~ | *(파일 삭제됨)* | ~~`intent_classifier.py`~~ → `intent_classifier.py` | 통합됨 — 프롬프트 미사용, 파일도 삭제됨 | 없음 |
+| ~~`HISTORY_RESOLVER_SYSTEM`~~ | *(파일 삭제됨)* | ~~`history_resolver.py`~~ → `intent_classifier.py` | 통합됨 — 프롬프트 미사용, 파일도 삭제됨 | 없음 |
 | `QUERY_NORMALIZER_PHASE1_SYSTEM` | `interpret/query_normalizer_phase1_system.txt` | `query_normalizer.py` | `query_normalizer.py` — `run_normalization()` | 서비스 위임 |
 | `QUERY_NORMALIZER_PHASE1_USER` | `interpret/query_normalizer_phase1_user.txt` | 〃 | 〃 | 〃 |
 | `QUERY_NORMALIZER_PHASE2_SYSTEM` | `interpret/query_normalizer_phase2_system.txt` | 〃 | 〃 | 〃 |
@@ -43,11 +44,11 @@
 
 | 프롬프트 변수 | 프롬프트 파일 | 노드 | 서비스 / 유틸리티 | LLM 호출 |
 | --- | --- | --- | --- | --- |
-| ~~`PLANNER_SYSTEM`~~ | `reason/미사용_planner_system.txt` | ~~`planner.py`~~ → `reasoning_preparer.py` | 통합됨 — **프롬프트 미사용** (규칙 기반, LLM 호출 없음). 파일은 `미사용_` 접두사로 잔존 | 없음 |
+| ~~`PLANNER_SYSTEM`~~ | *(파일 삭제됨)* | ~~`planner.py`~~ → `reasoning_preparer.py` | 통합됨 — **프롬프트 미사용** (규칙 기반, LLM 호출 없음). 파일도 삭제됨 | 없음 |
 | *(프롬프트 없음)* | — | `reasoning_preparer.py` | 규칙 기반 가설 생성·탐색 계획 수립 (deterministic, LLM 호출 없음) | 없음 |
 | *(프롬프트 없음)* | — | `context_retriever.py` | `tools.py` — 도구 실행 + 관찰 데이터 수집 (rule-based) | 없음 |
 | `CONTEXT_INTERPRETER_SYSTEM` | `reason/context_interpreter_system.txt` | `context_interpreter.py` | `utils/llm/response` — `extract_json()`, `utils/llm/prompt` — `render_prompt()` | **노드 직접** |
-| ~~`TABLE_COMPARISON_SYSTEM`~~ | `reason/미사용_table_comparison_system.txt` | 〃 | 통합됨 — 프롬프트 미사용 (파일은 `미사용_` 접두사로 잔존) | 없음 |
+| ~~`TABLE_COMPARISON_SYSTEM`~~ | *(파일 삭제됨)* | 〃 | 통합됨 — 프롬프트 미사용, 파일도 삭제됨 | 없음 |
 | `SQL_GENERATOR_SYSTEM` | `reason/sql_generator_system.txt` | `sql_generator.py` | `utils/llm/prompt` — `serialize_decomp_slots()` | **노드 직접** |
 | `SQL_GENERATOR_FIX_SECTION` | `reason/sql_generator_fix_section.txt` | 〃 | 〃 | 〃 |
 | `SQL_VALIDATOR_SYSTEM` | `reason/sql_validator_system.txt` | `sql_validator.py` | `sql_safety_checker.py` (L1), `sqlglot_analyzer.py` (L1 AST), `utils/llm/prompt` — `serialize_decomp_slots()` (L2b) | **조건부** (L2b만) |

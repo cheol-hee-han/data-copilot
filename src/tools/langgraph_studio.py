@@ -15,4 +15,4 @@ tracker=None으로 파이프라인을 컴파일하여 추적 오버헤드 없이
 
 from src.agents.graph.pipeline import create_app
 
-graph = create_app(tracker=None)
+graph = create_app()

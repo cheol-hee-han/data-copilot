@@ -28,11 +28,20 @@ biz_manual은 5건의 은행 업무 매뉴얼 샘플을, sql_history는 5건의 
 
 from __future__ import annotations
 
+import asyncio
+import os
 import time as _time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.config import settings
+# ── HuggingFace/Transformers 로딩 노이즈 억제 ──
+# FlagEmbedding/transformers import 전에 환경변수를 설정해야
+# 모델 로딩 시 "Fetching N files" tqdm 바는 출력하고, tokenizer 경고는 억제한다.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
+from src.config import settings  # noqa: E402
 from src.connectors.interfaces import SearchConnector
 from src.connectors.dummy_data import (
     search_dummy_manuals,
@@ -42,6 +51,30 @@ from src.utils.logger import get_logger
 from src.utils.truncate import truncate_log, truncate_trace
 
 logger = get_logger(__name__)
+
+_EXECUTOR_NOT_READY_MSG = (
+    "임베딩 executor 미초기화 — connect() 미호출 또는 dummy 모드"
+)
+
+
+def _parse_point_ids(
+    ids: list[str | int],
+) -> list[int | str]:
+    """문자열로 저장된 point ID를 정수로 복원한다.
+
+    Qdrant는 정수 ID 컬렉션에 문자열 ID 필터를 넘기면
+    condition 파싱 오류(400)를 반환하므로, int 변환을 시도한다.
+    """
+    parsed: list[int | str] = []
+    for v in ids:
+        if isinstance(v, int):
+            parsed.append(v)
+            continue
+        try:
+            parsed.append(int(v))
+        except (ValueError, TypeError):
+            parsed.append(v)
+    return parsed
 
 
 @dataclass
@@ -72,11 +105,27 @@ class QdrantConnector(SearchConnector):
         self._use_dummy = use_dummy
         self._client: Any = None
         self._embed_model: Any = None
+        # 임베딩/리랭커 전용 단일 워커 executor.
+        # BGE-M3, Reranker는 모델 인스턴스 동시 접근이 안전하지 않으므로
+        # max_workers=1로 직렬화한다.
+        self._embed_executor: ThreadPoolExecutor | None = None
+        # tracker dispatch용 fire-and-forget task 강참조 보관
+        # (Python 공식: create_task 반환 Task를 참조하지 않으면 GC로 취소됨)
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def connect(self) -> None:
-        """Qdrant 연결을 초기화한다."""
+        """Qdrant 연결과 임베딩/리랭커 모델을 초기화한다.
+
+        기동 시점에 BGE-M3 모델을 선로딩하고 워밍업하여,
+        첫 질의 시 이벤트 루프가 16초 블록되는 문제를 방지한다.
+        로딩 실패는 상위로 예외 전파 (fail-fast).
+        """
         if self._use_dummy:
             logger.info("Qdrant Dummy 모드로 초기화")
+            return
+
+        # 멱등 가드: 중복 호출 시 executor/client 누수 방지
+        if self._client is not None:
             return
 
         from qdrant_client import AsyncQdrantClient
@@ -88,10 +137,48 @@ class QdrantConnector(SearchConnector):
         )
         logger.info("Qdrant 연결 완료")
 
+        # 임베딩 전용 단일 워커 executor 생성
+        self._embed_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="qdrant-embed",
+        )
+
+        # BGE-M3 선로딩 + 워밍업 (이벤트 루프 블로킹 없이)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            self._embed_executor, self._ensure_embed_model,
+        )
+        await loop.run_in_executor(
+            self._embed_executor, self._warmup_embed_model,
+        )
+
     async def disconnect(self) -> None:
-        """Qdrant 연결을 종료한다."""
+        """Qdrant 연결과 임베딩 executor를 종료한다.
+
+        종료 순서:
+            1. 진행 중인 tracker dispatch task 완료 대기 (2초 타임아웃)
+            2. executor shutdown (in-flight encode/rerank 완료 대기)
+            3. Qdrant client close
+        """
+        # (1) tracker dispatch task 정리
+        if self._background_tasks:
+            pending = list(self._background_tasks)
+            _, still_pending = await asyncio.wait(
+                pending, timeout=2.0,
+            )
+            for t in still_pending:
+                t.cancel()
+            self._background_tasks.clear()
+
+        # (2) executor 종료 (in-flight encode/rerank 완료 대기)
+        if self._embed_executor is not None:
+            self._embed_executor.shutdown(wait=True)
+            self._embed_executor = None
+
+        # (3) client close
         if self._client:
             await self._client.close()
+            self._client = None
 
     async def health_check(self) -> bool:
         """연결 상태를 확인한다."""
@@ -120,7 +207,10 @@ class QdrantConnector(SearchConnector):
     # ──────────────────────────────────────────────────────
 
     def _ensure_embed_model(self) -> None:
-        """BGE-M3 모델을 로드한다 (최초 1회)."""
+        """BGE-M3 모델을 로드한다 (최초 1회).
+
+        로딩 실패는 상위로 예외 전파 (fail-fast).
+        """
         if self._embed_model is not None:
             return
 
@@ -141,8 +231,35 @@ class QdrantConnector(SearchConnector):
         self._embed_model = BGEM3FlagModel(**kwargs)
         logger.info("BGE-M3 모델 로딩 완료")
 
+    def _warmup_embed_model(self) -> None:
+        """BGE-M3 첫 forward pass 비용을 기동 시에 소진한다.
+
+        encode_batch를 그대로 호출하여 실사용 경로(dense+sparse 생성 및
+        결과 변환)를 전부 예열한다. 내부 JIT, 토크나이저 캐시,
+        sparse 정렬 루프까지 한 번씩 돌린다.
+        """
+        self.encode_batch(["워밍업"])
+        logger.info("BGE-M3 워밍업 완료")
+
+    def _spawn_background(self, coro: Any) -> None:
+        """create_task + 강참조 보관으로 GC로 인한 취소 방지.
+
+        Python 공식: create_task의 반환 Task를 강참조하지 않으면 GC에
+        의해 코루틴이 실행 전 취소될 수 있다.
+        """
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
     def encode(self, text: str) -> EmbeddingResult:
-        """단일 텍스트를 Dense + Sparse 벡터로 변환한다."""
+        """단일 텍스트를 Dense + Sparse 벡터로 변환한다 (sync).
+
+        이 메서드는 sync 컨텍스트(배치 스크립트 등)에서도 직접 호출 가능.
+        async 코드에서는 _encode_async()를 사용할 것.
+
+        latency 로깅은 유지 (seed_sql_history.py 검증 단계 의존).
+        tracker dispatch는 async 호출자(_encode_async)가 수행.
+        """
         start = _time.perf_counter()
         results = self.encode_batch([text])
         elapsed = (_time.perf_counter() - start) * 1000
@@ -154,33 +271,53 @@ class QdrantConnector(SearchConnector):
             sparse_nnz=len(results[0].sparse_indices),
             latency_ms=round(elapsed, 1),
         )
-
-        # 임베딩 추적: sync 메서드이므로 fire-and-forget으로 디스패치
-        from src.utils.tracker.dispatch import (
-            dispatch_tracking_event,
-            CONTEXT_EMBEDDING,
-        )
-        import asyncio as _asyncio
-        try:
-            loop = _asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop and loop.is_running():
-            loop.create_task(dispatch_tracking_event(
-                CONTEXT_EMBEDDING, {
-                    "source": "embedding_encode",
-                    "query": truncate_trace(text),
-                    "results_count": 1,
-                    "results_summary": [
-                        f"dense_dim={len(results[0].dense)}",
-                        f"sparse_nnz="
-                        f"{len(results[0].sparse_indices)}",
-                    ],
-                    "latency_ms": elapsed,
-                },
-            ))
-
         return results[0]
+
+    async def _encode_async(self, text: str) -> EmbeddingResult:
+        """executor 경유 안전 encode + tracker dispatch.
+
+        encode() 내부에서 latency 로그를 찍으므로 여기선 로깅 생략.
+        tracker dispatch는 async 컨텍스트에서 GC 안전하게 fire-and-forget.
+        """
+        if self._embed_executor is None:
+            raise RuntimeError(_EXECUTOR_NOT_READY_MSG)
+
+        loop = asyncio.get_running_loop()
+        start = _time.perf_counter()
+        result = await loop.run_in_executor(
+            self._embed_executor, self.encode, text,
+        )
+        elapsed = (_time.perf_counter() - start) * 1000
+
+        from src.utils.tracker.dispatch import (
+            CONTEXT_EMBEDDING,
+            dispatch_tracking_event,
+        )
+        self._spawn_background(dispatch_tracking_event(
+            CONTEXT_EMBEDDING, {
+                "source": "embedding_encode",
+                "query": truncate_trace(text),
+                "results_count": 1,
+                "results_summary": [
+                    f"dense_dim={len(result.dense)}",
+                    f"sparse_nnz={len(result.sparse_indices)}",
+                ],
+                "latency_ms": elapsed,
+            },
+        ))
+        return result
+
+    async def _encode_dense_async(self, text: str) -> list[float]:
+        """executor 경유 안전 dense-only encode.
+
+        tracker dispatch 없음 — 기존 비대칭 유지 (P2에서 해소).
+        """
+        if self._embed_executor is None:
+            raise RuntimeError(_EXECUTOR_NOT_READY_MSG)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._embed_executor, self.encode_dense_only, text,
+        )
 
     def encode_batch(
         self, texts: list[str],
@@ -238,7 +375,8 @@ class QdrantConnector(SearchConnector):
             return_sparse=False,
             return_colbert_vecs=False,
         )
-        return output["dense_vecs"][0].tolist()
+        result: list[float] = output["dense_vecs"][0].tolist()
+        return result
 
     # ──────────────────────────────────────────────────────
     # biz_manual 검색 (Dense)
@@ -267,14 +405,14 @@ class QdrantConnector(SearchConnector):
         if exclude_ids:
             from qdrant_client.models import Filter, HasIdCondition
             query_filter = Filter(
-                must_not=[HasIdCondition(has_id=exclude_ids)],
+                must_not=[HasIdCondition(has_id=_parse_point_ids(exclude_ids))],
             )
             effective_limit = min(
                 top_k + len(exclude_ids),
                 settings.qdrant_manual_max_limit,
             )
 
-        embedding = self.encode_dense_only(query)
+        embedding = await self._encode_dense_async(query)
 
         start = _time.perf_counter()
         results = await self._client.search(
@@ -345,14 +483,14 @@ class QdrantConnector(SearchConnector):
         effective_prefetch = prefetch_limit
         if exclude_ids:
             query_filter = Filter(
-                must_not=[HasIdCondition(has_id=exclude_ids)],
+                must_not=[HasIdCondition(has_id=_parse_point_ids(exclude_ids))],
             )
             effective_prefetch = min(
                 prefetch_limit + len(exclude_ids),
                 settings.qdrant_max_prefetch,
             )
 
-        emb = self.encode(query)
+        emb = await self._encode_async(query)
 
         sparse_vector = SparseVector(
             indices=emb.sparse_indices,
@@ -399,19 +537,25 @@ class QdrantConnector(SearchConnector):
         )
 
         # Reranker 재순위
-        return self._rerank(query, payloads, top_k)
+        return await self._rerank(query, payloads, top_k)
 
-    def _rerank(
+    async def _rerank(
         self,
         query: str,
         candidates: list[dict[str, Any]],
         top_k: int,
     ) -> list[dict[str, Any]]:
-        """검색 결과를 Reranker로 재순위한다.
+        """검색 결과를 Reranker로 재순위한다 (async).
 
         Reranker 비활성 시 RRF _score 기준 상위 top_k건을 반환한다.
         반환 dict에 similarity 필드를 추가한다.
+
+        Reranker.rerank()는 sync + CPU 바운드이므로 executor 경유로 호출.
+        tracker dispatch는 여기서 수행 (async 컨텍스트, GC 안전).
         """
+        if self._embed_executor is None:
+            raise RuntimeError(_EXECUTOR_NOT_READY_MSG)
+
         from src.connectors.impl.reranker import (
             RerankCandidate,
             get_reranker,
@@ -431,9 +575,42 @@ class QdrantConnector(SearchConnector):
         ]
 
         reranker = get_reranker()
-        reranked = reranker.rerank(
-            query, rerank_candidates, top_k=top_k,
+        loop = asyncio.get_running_loop()
+        # 주의: lambda 내부에서 raise된 예외는 Future로 래핑되어
+        # await 지점에서 재발생한다. try/except 없이 상위로 전파한다.
+        reranked, stats = await loop.run_in_executor(
+            self._embed_executor,
+            lambda: reranker.rerank(
+                query, rerank_candidates, top_k=top_k,
+            ),
         )
+
+        # tracker dispatch (async 컨텍스트, GC 안전)
+        from src.utils.tracker.dispatch import (
+            CONTEXT_RERANKED,
+            dispatch_tracking_event,
+        )
+        self._spawn_background(dispatch_tracking_event(
+            CONTEXT_RERANKED, {
+                "source": "reranker",
+                "query": truncate_trace(query),
+                "results_count": len(reranked),
+                "results_summary": [
+                    f"backend={settings.reranker_backend}",
+                    f"input={stats.input_count}",
+                    f"filtered={stats.filtered_count}",
+                    f"output={len(reranked)}",
+                    *(
+                        truncate_trace(
+                            f"{c.payload.get('description', '?')}"
+                            f" (score={c.rerank_score:.3f})"
+                        )
+                        for c in reranked[:3]
+                    ),
+                ],
+                "latency_ms": stats.latency_ms,
+            },
+        ))
 
         result: list[dict[str, Any]] = []
         for item in reranked:

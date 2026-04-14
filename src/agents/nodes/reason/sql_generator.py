@@ -7,9 +7,9 @@ CONFIRMED knowledge_items와 explored_tables를 기반으로 SQL을 생성한다
 dead_ends를 참고하여 이전 실패 패턴을 반복하지 않는다.
 
 멀티 DB 라우팅:
-    explored_tables의 db_source(테이블명 시스템코드에서 자동 파싱)를 확인하여
-    SQL dialect(postgres, sybase, impala)을 결정한다.
-    크로스 DB(ADW+BDP 혼재) 감지 시 AmbiguitySignal(INFER)로 자동 선택한다.
+    readiness_gate 가 GENERATING 진입 시 reason.target_db 를 확정한다
+    (단일 진실원). sql_generator 는 이 값을 그대로 신뢰하여 커넥터를 받고
+    dialect 만 추출한다. cross-DB 감지/INFER 분기는 수행하지 않는다.
 
 프롬프트 구성 ({슬롯} 치환 방식):
     - 기본: SQL_GENERATOR_SYSTEM (dialect 힌트 내장)
@@ -32,6 +32,7 @@ dead_ends를 참고하여 이전 실패 패턴을 반복하지 않는다.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from src.agents.models.clarification import (
@@ -49,29 +50,24 @@ from src.agents.state.state import (
     SelectionStatus,
     TableMeta,
 )
-from src.connectors.manager import (
-    ConnectorManager,
-    get_connector_manager,
-)
+from src.connectors.manager import get_connector_manager
 from src.agents.nodes.system_prompts import (
-    SQL_GENERATOR_SYSTEM,
     SQL_GENERATOR_FIX_SECTION,
+    get_sql_generator_system,
 )
 from src.config import settings
 from src.utils.llm import llm_call_with_parse_retry
 from src.utils.llm.response import extract_json
-from src.utils.llm.prompt import (
-    render_prompt,
-    serialize_decomp_slots,
-)
+from src.utils.llm.prompt import render_prompt
 from src.utils.logger import get_logger
+from src.utils.sqlglot_analyzer import get_real_tables
 from src.utils.timezone import today_kst
 from src.utils.tracker import record_prompt_variables
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
     REASONING_STEP,
 )
-from src.utils.truncate import format_sql
+from src.utils.sql_formatter import format_sql_tabular
 
 logger = get_logger(__name__)
 
@@ -219,8 +215,9 @@ def _format_codes_for_tables(
 async def sql_generator_node(state: PipelineState) -> dict:
     """누적 지식을 컨텍스트로 SQL을 생성한다.
 
-    CONFIRMED knowledge_items와 explored_tables를 프롬프트에 주입하고,
-    크로스 DB 감지 시 AmbiguitySignal(INFER)로 자동 선택한다.
+    CONFIRMED knowledge_items와 explored_tables(SELECTED)를 프롬프트에 주입한다.
+    DB 라우팅은 readiness_gate 가 reason.target_db 에 이미 결정한 값을 신뢰하며
+    cross-DB 감지/INFER 분기는 수행하지 않는다.
     재진입 시 failure_reason을 fix_section으로 포함하여 재시도한다.
     """
     reason = state.reason.model_copy(deep=True)
@@ -235,83 +232,25 @@ async def sql_generator_node(state: PipelineState) -> dict:
     # generator가 정보 부족으로 거부(fail)한 경우까지 카운터를 소비하면
     # validator의 local_fix 기회가 사라지는 문제가 있다. (20260407 trace 분석)
 
-    # dialect 결정 (커넥터에서 직접 가져옴)
+    # dialect 결정 — readiness_gate 가 결정한 reason.target_db 를 그대로 사용
     db = get_connector_manager().get_query_db(reason)
     dialect = db.dialect
 
-    # 크로스 DB 감지
-    sources = {
-        ct.db_source or ConnectorManager.parse_db_source(ct.table_name)
-        for ct in reason.explored_tables
-        if ct.table_name
-    }
-    sources.discard("")
-
-    if len(sources) > 1:
-        # ── T4: Cross-DB → AmbiguitySignal(INFER) ──
-        # 전략 §2.3 T4: 사용자는 DB 아키텍처를 모르므로
-        # 항상 INFER — 현재 접근 가능한 DB(primary)를 자동 선택
-        primary_source = dialect  # 현재 커넥터 기준 DB
-        chosen_tables = [
-            ct.qualified_name
-            for ct in reason.explored_tables
-            if (
-                ct.db_source
-                or ConnectorManager.parse_db_source(
-                    ct.table_name,
-                )
-            ) == primary_source
-            or not ct.db_source
-        ]
-        other_tables = [
-            ct.qualified_name
-            for ct in reason.explored_tables
-            if ct.qualified_name not in chosen_tables
-        ]
-        signal = AmbiguitySignal(
-            source_node="sql_generator",
-            ambiguity_type=AmbiguityType.TABLE,
-            decision="INFER",
-            confidence=ConfidenceLevel.MEDIUM,
-            question=(
-                "요청하신 데이터가 서로 다른 "
-                "시스템에 분산되어 있습니다."
-            ),
-            inferred_value=(
-                f"{primary_source} DB에서 조회 "
-                f"({', '.join(chosen_tables)})"
-            ),
-            reasoning=(
-                f"현재 접근 가능한 {primary_source} "
-                "DB의 테이블을 우선 사용합니다. "
-                f"제외된 테이블: {', '.join(other_tables)}"
-            ),
-        )
-        logger.info(
-            "T4 Cross-DB INFER",
-            primary=primary_source,
-            chosen=chosen_tables,
-            excluded=other_tables,
-        )
-        return {
-            "reason": reason,
-            "pending_signals": [signal],
-        }
-
     # agentic 전용 프롬프트 조립
-    prompt, prompt_vars = _build_agentic_prompt(
+    prompt, user_message, prompt_vars = _build_agentic_prompt(
         reason, state.preprocessed_input, dialect, state,
     )
 
     try:
         result = await _call_llm_for_sql(
-            prompt, state.preprocessed_input,
+            prompt, user_message,
         )
     except Exception as e:
         logger.error("SQL 생성 LLM 호출 오류", error=str(e))
         result = {
             "status": "fail",
             "sql": "",
+            "reasoning_summary": "",
             "failure_reasons": [f"LLM 호출 오류: {type(e).__name__}"],
             "assumptions": [],
             "explanation": "",
@@ -326,15 +265,12 @@ async def sql_generator_node(state: PipelineState) -> dict:
     if result["status"] == "success" and result["sql"]:
         reason.loop_guard.increment_generate()
         reason.generated_sql = result["sql"]
+        reason.sql_explanation = result.get("explanation", "")
         reason.failure_type = None
         reason.failure_reason = None
         reason.pending_assumptions = result.get("assumptions", [])
-        logger.info(
-            "SQL 생성 완료",
-            dialect=dialect,
-            attempt=attempt,
-            tables=table_names,
-            sql="\n" + format_sql(result["sql"], dialect),
+        _log_success_with_reasoning_check(
+            result, dialect, attempt, table_names,
         )
     else:
         reason.generated_sql = None
@@ -385,7 +321,7 @@ async def sql_generator_node(state: PipelineState) -> dict:
                 if ki.status.value in ("CONFIRMED", "PROBABLE")
             ],
             "dead_ends": [
-                f"[{de.failure_type}] {de.reason}"
+                f"`{de.failure_type.value}` {de.reason}"
                 for de in reason.dead_ends
             ],
             "failure_reason": reason.failure_reason,
@@ -408,11 +344,12 @@ def _build_agentic_prompt(
     original_query: str,
     dialect: str,
     state: PipelineState,
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, str, dict[str, str]]:
     """SQL_GENERATOR_SYSTEM 템플릿에 상태를 주입한다.
 
     Returns:
-        (치환된 프롬프트, 치환 변수 사전) 튜플.
+        (치환된 시스템 프롬프트, LLM에 전달할 user 메시지, 치환 변수 사전) 튜플.
+        재시도 시에는 user 메시지 끝에 직전 시도 피드백(fix_section)이 append된다.
     """
     decomp = reason.query_decomposition
 
@@ -482,28 +419,120 @@ def _build_agentic_prompt(
     )
     clarification_text = build_clarification_context(state)
 
-    prompt = SQL_GENERATOR_SYSTEM
+    prompt = get_sql_generator_system(dialect)
+    nq = state.normalized_query
+    rewritten = (
+        getattr(nq, "rewritten_query", "")
+        if nq else ""
+    )
+
+    expected_cols = decomp.get("output_hint", {}).get("expected_columns", [])
+    expected_cols_text = ", ".join(expected_cols) if expected_cols else "(없음)"
+
     replacements = {
         "{current_date}": today_kst().isoformat(),
         "{original_query}": original_query or "",
-        **serialize_decomp_slots(decomp),
+        "{rewritten_query}": rewritten or original_query or "",
+        "{expected_columns}": expected_cols_text,
         "{confirmed_terms}": confirmed_text,
         "{tables}": tables_text,
         "{codes}": codes_text,
         "{reference_sqls}": ref_text,
         "{dead_ends}": dead_text,
-        "{fix_section}": fix_text,
         "{clarification_context}": clarification_text or "(없음)",
-        "{dialect}": dialect,
     }
     prompt, variables = render_prompt(prompt, replacements)
-    return prompt, variables
+
+    # 재시도 피드백은 user 메시지 끝에 append (system은 정적으로 유지 → 캐시 안정성)
+    user_message = original_query or ""
+    if fix_text:
+        user_message = f"{user_message}\n\n{fix_text}" if user_message else fix_text
+        variables["fix_section"] = fix_text
+
+    return prompt, user_message, variables
+
+
+_REASONING_TABLE_RE = re.compile(
+    r"\b(TB_[A-Z]{3}_[A-Z0-9]{7})\b", re.IGNORECASE,
+)
+
+
+def _log_success_with_reasoning_check(
+    result: dict,
+    dialect: str,
+    attempt: int,
+    table_names: list[str],
+) -> None:
+    """SQL 생성 성공 시 reasoning_summary 교차 검증 + 로깅을 수행한다."""
+    reasoning_summary = result.get("reasoning_summary", "")
+    mismatches = _cross_check_reasoning_summary(
+        reasoning_summary, result["sql"], dialect,
+    )
+    if mismatches:
+        logger.warning(
+            "reasoning_summary mismatch 감지",
+            dialect=dialect,
+            attempt=attempt,
+            mismatches=mismatches,
+            reasoning_summary=reasoning_summary,
+        )
+    logger.info(
+        "SQL 생성 완료",
+        dialect=dialect,
+        attempt=attempt,
+        tables=table_names,
+        reasoning_summary=reasoning_summary,
+        sql="\n" + format_sql_tabular(result["sql"]),
+    )
+
+
+def _cross_check_reasoning_summary(
+    reasoning_summary: str,
+    sql: str,
+    dialect: str,
+) -> list[str]:
+    """reasoning_summary에 언급된 테이블이 실제 SQL에 등장하는지 교차 검증한다.
+
+    thinking ON 노드의 think-answer mismatch 방어. reasoning_summary가
+    사용했다고 선언한 테이블이 sql에 실제로 등장하지 않으면 mismatch 목록을
+    반환한다. 코드값/컬럼 레벨 검증은 노이즈가 커서 테이블 레벨만 수행한다.
+
+    Args:
+        reasoning_summary: LLM이 출력한 판단 근거 요약.
+        sql: 생성된 SELECT SQL.
+        dialect: SQL dialect (tsql/hive/postgresql).
+
+    Returns:
+        mismatch 메시지 리스트. 비어있으면 정합.
+    """
+    if not reasoning_summary or not sql:
+        return []
+
+    sql_tables = {t.upper() for t in get_real_tables(sql, dialect)}
+    if not sql_tables:
+        return []
+
+    # reasoning_summary에서 TB_XXX_XXXXXXX 패턴 추출
+    mentioned = {
+        m.group(1).upper()
+        for m in _REASONING_TABLE_RE.finditer(reasoning_summary)
+    }
+    if not mentioned:
+        return []
+
+    missing = mentioned - sql_tables
+    if not missing:
+        return []
+    return [
+        f"reasoning_summary에 언급된 테이블이 SQL에 없음: {sorted(missing)}",
+    ]
 
 
 def _parse_sql_response(raw: str) -> dict:
     """LLM 응답에서 SQL 생성 결과를 추출한다.
 
-    반환 형식: {"status", "sql", "failure_reasons", "assumptions", "explanation"}
+    반환 형식: {"status", "sql", "reasoning_summary", "failure_reasons",
+               "assumptions", "explanation"}
     JSON 형식 → 마크다운 코드 블록 fallback 순으로 시도.
     """
     data = extract_json(raw)
@@ -514,6 +543,7 @@ def _parse_sql_response(raw: str) -> dict:
         return {
             "status": status,
             "sql": data.get("sql", "").strip(),
+            "reasoning_summary": data.get("reasoning_summary", ""),
             "failure_reasons": data.get(
                 "failure_reasons", data.get("reasons", []),
             ),
@@ -527,6 +557,7 @@ def _parse_sql_response(raw: str) -> dict:
         return {
             "status": "success",
             "sql": cleaned,
+            "reasoning_summary": "",
             "failure_reasons": [],
             "assumptions": [],
             "explanation": "",

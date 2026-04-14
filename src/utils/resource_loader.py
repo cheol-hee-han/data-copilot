@@ -118,25 +118,6 @@ def load_sql_template(name: str) -> str:
     return "\n".join(lines).strip()
 
 
-# ── ES 쿼리 ──
-
-def load_es_query(name: str, query: str) -> dict[str, Any]:
-    """ES 쿼리 JSON 템플릿을 로드하고 {query} 플레이스홀더를 치환한다.
-
-    _comment 키는 제거한다.
-
-    Args:
-        name: resources/ 하위 상대 경로
-            (예: "connectors/elasticsearch/table_meta_query.json")
-        query: 검색어 (템플릿의 {query}를 치환)
-    """
-    raw = load_text_required(name)
-    replaced = raw.replace("{query}", query)
-    data = json.loads(replaced)
-    data.pop("_comment", None)
-    return data
-
-
 # ── MongoDB 파이프라인 ──
 
 def load_mongo_pipeline(name: str) -> dict[str, Any]:
@@ -150,7 +131,7 @@ def load_mongo_pipeline(name: str) -> dict[str, Any]:
             (예: "connectors/mongo/pipeline_table_meta.json")
     """
     raw = load_text_required(name)
-    data = json.loads(raw)
+    data: dict[str, Any] = json.loads(raw)
     data.pop("_comment", None)
     data.pop("_note", None)
     return data

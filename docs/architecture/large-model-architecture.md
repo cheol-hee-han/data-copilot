@@ -1,6 +1,6 @@
 # Large-Model Pipeline Architecture — 재설계 제안서
 
-> **Version 1.2** (2026-04-02)
+> **Version 1.3** (2026-04-13)
 > 추론 가능한 중대형 오픈소스 모델(Solar Pro 2 70B, Qwen3.5 397B, GPT OSS 120B)을
 > 전제로, 현재 파이프라인의 구조적 문제를 해소하는 재설계안.
 >
@@ -12,6 +12,9 @@
 > | 1.0 | 2026-03-28 | 초안 작성 |
 > | 1.1 | 2026-04-01 | 노드 리네임 반영: `context_explorer` → `context_retriever` + `context_interpreter`, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent`, `table_verifier` 삭제, `clarify` → `clarification_handler`. LLM 호출 맵 갱신. |
 > | 1.2 | 2026-04-02 | `planner` → `reasoning_preparer` 리네임 반영 (규칙 기반, LLM 호출 없음). Reason 계층 LLM 호출 수 조정 (5~9회 → 4~8회). |
+> | 1.3 | 2026-04-13 | 구현 상태 표기 추가 — TO-BE 설계(research 노드 통합, present 통합, state 간소화)는 미구현. 현재 코드는 AS-IS 구조(8노드 Reason, 개별 Present) 유지. |
+>
+> **구현 상태:** 이 문서는 **미래 재설계 제안서**이다. TO-BE 설계(Reason 통합 research 노드, Present 통합 노드, State 간소화)는 **아직 구현되지 않았으며**, 현재 코드베이스는 AS-IS 구조(8노드 Reason 계층, 개별 Present 노드)를 유지한다. Interpret 계층 통합(intent_classifier 단일화)만 반영 완료.
 
 ---
 
@@ -104,7 +107,7 @@ query_normalizer의 Phase 2(교차 검증)도 Phase 1이 충분히 정확하면 
 
 ### P4. 외부 상호작용은 분리, 순수 추론은 통합 (Separate I/O, Merge Thinking)
 
-도구 호출(ES 검색, DB 샘플링), SQL 실행 등 외부 I/O가 필요한 단계는 분리한다.
+도구 호출(MongoDB/Qdrant 검색, DB 샘플링), SQL 실행 등 외부 I/O가 필요한 단계는 분리한다.
 순수 LLM 추론만 하는 단계는 가능한 한 통합한다.
 
 ### P5. 점진적 전환 가능 (Incremental Migration)

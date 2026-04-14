@@ -1,8 +1,9 @@
 # 판단/평가 노드 데이터 흐름 및 State 설계 검토
 
-> 작성일: 2026-04-02
+> 작성일: 2026-04-02 | 최종 수정: 2026-04-13
 > 범위: Reason 계층 6개 판단 노드 + Interpret/Present 계층 2개 노드
 > 근거: 소스코드 전수 검토 (state.py, 각 노드 .py, 프롬프트 .txt)
+> v1.1 (2026-04-13): 현행 코드 기준 재검증 — join_keys 미구현 반영, code_map/preprocessed_input/CANDIDATE 포함/loop_guard 반영 완료 상태 표기
 
 ---
 
@@ -65,7 +66,7 @@
 |------|-----------|------|--------|
 | `{original_query}` | 직접 | 문자열 | 없음 |
 | `{time_slot}` | `_extract_time_slot()` | 문자열 | NormalizedQuery 없으면 "(명시되지 않음)" |
-| `{unresolved_items}` | `_serialize_unresolved_items()` | 줄바꿈 목록 | **CANDIDATE 항목이 포함되지 않음** — CANDIDATE도 미해소 상태인데 누락 |
+| `{unresolved_items}` | `_serialize_unresolved_items()` | 줄바꿈 목록 | ~~CANDIDATE 누락~~ **해소됨** — UNRESOLVED/CANDIDATE/CONFLICTED 3가지 상태 모두 포함 |
 | `{tool_results}` | `_serialize_tool_results()` | 구조화 텍스트 | **explored_use_cases를 JSON.dumps로 통째 주입** — 건수가 많으면 토큰 폭발 |
 | `{table_observations}` | `_serialize_table_observations()` | 테이블별 블록 | 잘 구조화됨 |
 
@@ -86,18 +87,15 @@
 |-------------|------|-----------|------|
 | `reason.knowledge_items` | context_interpreter | **정상** | is_critical 기반 term_resolution |
 | `reason.candidate_tables` | context_interpreter | **정상** | description 기반 table_coverage |
-| `reason.candidate_tables[*].join_keys` | context_interpreter | **부분 공급** | 아래 분석 참조 |
+| ~~`reason.candidate_tables[*].join_keys`~~ | — | **해당 없음** | join_keys 필드는 현재 구현에 존재하지 않음 (아래 참조) |
 | `reason.execution_plan` | context_retriever | **정상** | PENDING 여부 확인 |
 | `reason.loop_guard` | 각 노드 누적 | **정상** | 종료 조건 |
 | `reason.exploration_phase` | 자체/recovery_agent | **정상** | initial/recovery 분기 |
 
-**join_keys 공급 문제 (심각)**:
-- `calculate_readiness()` ([confidence_scorer.py:141-154](src/services/confidence_scorer.py#L141-L154))에서 `ct.join_keys`를 사용하여 join_path 점수(20%)를 계산.
-- 그런데 `join_keys`는 **두 가지 경로로만 채워짐**:
-  1. `CandidateTable.from_meta()` — MongoDB 메타에 `join_keys` 필드가 있을 때 (현재 from_meta에서 join_keys를 파싱하지 않음!)
-  2. `context_interpreter`의 `new_tables[*].join_keys` — LLM이 추론한 조인키
-- **from_meta()에서 join_keys를 파싱하지 않고 빈 리스트로 남기므로**, LLM이 new_tables에서 join_keys를 명시적으로 출력하지 않으면 **항상 빈 리스트**.
-- 결과: 다중 테이블 시나리오에서 `has_common_key`가 항상 False → `join_score = 0.3` → 준비도 점수가 **일관적으로 낮게** 산출.
+**~~join_keys 공급 문제~~ [해소됨 — 해당 필드 미구현]**:
+> 본 분석은 `CandidateTable.join_keys` 필드와 `calculate_readiness()`의 join_path 점수(20%)를 전제로 작성되었으나,
+> 현재 구현에는 `join_keys` 필드 자체가 `TableMeta`/`CandidateTable`에 존재하지 않으며,
+> `confidence_scorer.py`의 점수 계산에도 join_path 항목이 없다. 향후 다중 테이블 조인 지원 시 참고 자료로 보존.
 
 **table_coverage 계산 왜곡 (이전 리뷰에서 지적)**:
 - REJECTED 테이블이 분모에 포함. 5개 중 3개 REJECTED하면 coverage = 2/5 = 40%.
@@ -130,9 +128,7 @@
 | `{fix_section}` | SQL_GENERATOR_FIX_SECTION | 조건부 삽입 | **양호** |
 
 **누락 데이터**:
-- `reason.code_map`이 sql_generator 프롬프트에 **전달되지 않음**.
-  - 코드 컬럼의 값 매핑(예: `LOAN_STS_CD → {01: 정상, 02: 연체}`)을 LLM이 참조할 수 없어, **WHERE 절에 잘못된 코드값을 사용**할 가능성이 높음.
-  - context_interpreter가 code_map 정보를 knowledge_items에 반영하긴 하지만, 전체 코드값 목록이 아닌 요약만 들어감.
+- ~~`reason.code_map`이 sql_generator 프롬프트에 전달되지 않음.~~ **해소됨** — `reason.explored_codes`가 `_format_codes_for_tables()`를 통해 선택된 테이블의 코드값만 필터링하여 `{codes}` 변수로 프롬프트에 주입됨 (sql_generator.py:372-374, 439).
 
 - `reason.inference_notes`가 sql_generator에 전달되지 않음. force_generate 시 "추론 포함" 맥락을 LLM이 인지하지 못함.
 
@@ -396,13 +392,15 @@ sql_validator(SEMANTIC_LOCAL) → sql_generator(재시도) → sql_validator
 > 아래 항목은 서브에이전트 코드 리뷰를 통해 추가 발견된 문제임.
 > 검증 리포트: `docs/reviews/code/20260402-node-data-flow-review-verification-report.md`
 
-### 5.1 recovery_agent 프롬프트에 사용자 원본 질의(preprocessed_input) 미전달 [심각도: 높음]
+### 5.1 ~~recovery_agent 프롬프트에 사용자 원본 질의(preprocessed_input) 미전달~~ [해소됨]
 
-`_build_prompt()` ([recovery_agent.py:309-406](src/agents/nodes/reason/recovery_agent.py#L309-L406))의 8개 placeholder 중 사용자 질의에 해당하는 것이 없음. LLM이 "무엇을 위해 재계획하는지"의 근본 맥락 없이 실패 분석을 수행해야 함. query_decomposition 미전달보다 더 근본적인 문제.
+~~`_build_prompt()`의 placeholder 중 사용자 질의에 해당하는 것이 없음.~~
+**해소됨** — `state.preprocessed_input`을 `original_query` 변수로 읽어 `{original_query}` placeholder에 주입함 (recovery_agent.py:431, 903).
 
-### 5.2 Phase 2 DB 쿼리(날짜분포, 샘플)가 loop_guard에 미반영 [심각도: 높음]
+### 5.2 ~~Phase 2 DB 쿼리(날짜분포, 샘플)가 loop_guard에 미반영~~ [해소됨]
 
-`_observe_all_date_distributions()`과 `_sample_unsampled_tables()` ([context_retriever.py:319-322](src/agents/nodes/reason/context_retriever.py#L319-L322))가 후보 테이블 N개에 대해 최대 2N회 DB 호출을 수행하지만, `total_tool_calls`에 반영되지 않음. `_fetch_use_case_related_metas()`도 동일 문제.
+~~`_observe_all_date_distributions()`과 `_sample_unsampled_tables()`가 `total_tool_calls`에 반영되지 않음.~~
+**해소됨** — `_run_step` 함수가 (step_results, insights, call_count) 튜플을 반환하며, context_retriever.py:512에서 `total_tool_calls += sum(calls for _, _, calls in results)`로 모든 도구 호출을 집계한 뒤 loop_guard에 반영함.
 
 ### 5.3 candidate_tables 중복 테이블 방지 미비 [심각도: 중간]
 

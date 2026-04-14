@@ -14,71 +14,56 @@ dependencies = [
     "langgraph>=0.2.0",
     "langgraph-checkpoint-postgres>=2.0.0",
     "langchain-core>=0.3.0",
-    
     # Web Framework
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "websockets>=13.0",
-    
     # Database
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.30.0",
     "psycopg2-binary>=2.9.0",
     "psycopg[binary]>=3.1.0",
     "psycopg-pool>=3.2.0",
-    
     # Search & Vector
-    "elasticsearch>=8.0.0,<9.0.0",
     "qdrant-client>=1.12.0,<1.14.0",
-    
     # MongoDB (테이블 메타 + 코드 메타 + 비즈 메타)
     "motor>=3.6.0",
-
     # Neo4j (온톨로지 그래프: 테이블 관계, JOIN 경로, 계수산출식)
     "neo4j>=5.20.0",
-    
     # ── Embedding (BGE-M3) & Reranker (BGE-Reranker-v2-m3) ──
     "FlagEmbedding>=1.3.0",
     "transformers>=4.45.0,<5.0.0",  # 5.x: FlagEmbedding 비호환
     "torch>=2.4.0",  # CPU 빌드: uv.toml 또는 pip.conf에서 index 지정
     "numpy>=1.26.0",
-    
     # ── ONNX Runtime (Reranker CPU 최적화 + INT8 양자화) ──
     "onnxruntime>=1.18.0",
     "onnxscript>=0.6.0",  # torch.onnx.export 내부 의존
-    
     # ── 시스템 유틸리티 ──
     "psutil>=5.9.0",  # CPU 물리 코어 감지 (Reranker 스레드 자동 설정)
-    
     # Cache
     "redis>=5.0.0",
-    
     # SQL Parsing
     "sqlglot>=25.0.0",
-    
+    "sqlparse>=0.5.0",
     # Validation & Config
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
-    
     # Utilities
     "httpx>=0.27.0",
     "structlog>=24.0.0",
     "PyYAML>=5.0",
-    
-    # Tracing (외부망 개발 환경 전용, 폐쇄망에서는 비활성화)
-    "langsmith>=0.1.0",
-    
     # Cloudera CDP 7.1.9 — Impala 4.0 / Hive 3.1.3 (HiveServer2 Thrift)
     "impyla>=0.20.0",            # 0.18~0.19는 Python 3.12 버그 포함
     "thrift==0.16.0",            # impyla 핀 고정 — 상위 버전 충돌 주의
     "thrift-sasl==0.4.3",        # impyla 핀 고정
     "pure-sasl>=0.6.2",          # LDAP/PLAIN SASL 메커니즘
     # "kerberos>=1.3.0",           # Kerberos(GSSAPI) 인증 — OS krb5-devel 필요
-    
     # Sybase IQ 16.1 — ODBC 방식 또는 네이티브(sqlanydb) 방식 선택 가능
     "pyodbc>=5.0.0",               # ODBC 방식 (unixODBC + SAP ODBC 드라이버 필요)
     "sqlanydb>=1.0.13",            # 네이티브 방식 (libdbcapi_r.so만 필요, ODBC 불필요)
+    # Oracle 19c/21c — python-oracledb (cx_Oracle의 공식 후속 드라이버)
+    "oracledb>=2.2.0",             # thin 모드 기본, thick 모드는 Instant Client 필요
 ]
 
 [project.optional-dependencies]
@@ -101,7 +86,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "live_llm: LLM API 키가 필요한 테스트",
-    "live_infra: 실제 인프라(ES/PostgreSQL/Qdrant)가 필요한 테스트",
+    "live_infra: 실제 인프라(PostgreSQL/MongoDB/Qdrant)가 필요한 테스트",
     "real_e2e: Docker 데이터소스 + LLM API가 필요한 E2E 테스트",
 ]
 # 기본 실행: auto/ 만 수행 (CI). manual/ 은 -m 또는 경로 지정으로 실행
@@ -109,8 +94,29 @@ addopts = "--ignore=tests/manual"
 
 [tool.mypy]
 python_version = "3.12"
-strict = true
+# strict = true 는 미설치 stub(impyla/sqlanydb 등)과 타입 인자 누락(dict/list 등)에서
+# 폐쇄망 환경에 불필요한 노이즈를 많이 만든다. 안전성에 직결되는 핵심 옵션만 선택 활성화.
+strict = false
+disallow_untyped_defs = true        # 함수 시그니처 타입 강제 (실수 방지)
+check_untyped_defs = true           # 타입 없는 함수도 본문 검사
+warn_return_any = true              # Any 반환 경고
+warn_unused_ignores = true
+no_implicit_optional = true
 plugins = ["pydantic.mypy"]
+
+# 폐쇄망 드라이버 / 타입 스텁 미제공 서드파티는 import 검사 무력화
+[[tool.mypy.overrides]]
+module = [
+    "impala.*",
+    "thrift_sasl",
+    "sqlanydb",
+    "pyodbc",
+    "FlagEmbedding.*",
+    "onnxruntime.*",
+    "psutil",
+    "yaml",
+]
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py312"

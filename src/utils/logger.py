@@ -307,7 +307,7 @@ def _make_rotating_handler(
         return []
 
     handler.namer = _namer
-    handler.getFilesToDelete = _get_files_to_delete  # type: ignore[assignment]
+    handler.getFilesToDelete = _get_files_to_delete  # type: ignore[method-assign]
     return handler
 
 
@@ -343,6 +343,9 @@ class _DualWriter:
         self, handler: TimedRotatingFileHandler, msg: str,
     ) -> None:
         """핸들러에 메시지를 기록한다 (롤링 체크 포함, 스레드 안전)."""
+        # logging 표준 라이브러리는 핸들러 생성 시 lock 을 항상 설정하지만
+        # 타입 시그니처가 LockType | None 이라 명시 가드가 필요하다.
+        assert handler.lock is not None
         with handler.lock:
             record = logging.LogRecord("", 0, "", 0, msg, (), None)
             if handler.shouldRollover(record):
@@ -360,8 +363,14 @@ class _DualWriter:
             self._write_to_handler(self._error_handler, msg)
 
     def flush(self) -> None:
+        """stderr 및 파일 핸들러의 버퍼를 즉시 디스크에 기록한다.
+
+        각 핸들러의 lock을 획득하여 스트림이 열려 있을 때만 flush한다.
+        프로세스 종료 직전이나 크래시 대비 로그 보존에 사용된다.
+        """
         sys.stderr.flush()
         for handler in (self._handler, self._error_handler):
+            assert handler.lock is not None
             with handler.lock:
                 if handler.stream and not handler.stream.closed:
                     handler.stream.flush()
@@ -461,6 +470,7 @@ def setup_logging() -> None:
     # 콘솔 렌더러: log_format 설정에 따라 선택
     #   "console" → 컬러 텍스트 (개발용, 기본값)
     #   "json"    → JSON 한 줄 출력 (운영/폐쇄망, 로그 수집기 연동)
+    console_renderer: Any
     if settings.log_format.lower() == "json":
         console_renderer = structlog.processors.JSONRenderer(
             ensure_ascii=False,
@@ -475,16 +485,16 @@ def setup_logging() -> None:
         backup_count=settings.log_backup_count,
     )
 
+    # structlog의 Processor 타입은 매우 엄격하지만(MutableMapping+bytes 등),
+    # 실제 런타임은 dict만 통과시키면 동작한다. 커스텀 프로세서/Writer는
+    # 덕 타이핑으로 문제없으므로 type: ignore로 명시 억제.
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
-            _kst_timestamper,
-            # Secrets + PII 마스킹 (파일/콘솔 기록 전에 적용)
-            _mask_sensitive_processor,
-            # 파일에 가독성 포맷으로 별도 기록
-            _file_logging_processor,
-            # 콘솔 출력 (console: 컬러, json: JSON)
+            _kst_timestamper,  # type: ignore[list-item]
+            _mask_sensitive_processor,  # type: ignore[list-item]
+            _file_logging_processor,  # type: ignore[list-item]
             console_renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(
@@ -492,7 +502,7 @@ def setup_logging() -> None:
         ),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(
-            file=_file_writer,
+            file=_file_writer,  # type: ignore[arg-type]
         ),
         cache_logger_on_first_use=False,
     )
@@ -513,7 +523,8 @@ def shutdown_logging() -> None:
 
 def get_logger(name: str) -> structlog.typing.FilteringBoundLogger:
     """모듈별 로거 생성."""
-    return structlog.get_logger(name)
+    logger: structlog.typing.FilteringBoundLogger = structlog.get_logger(name)
+    return logger
 
 
 def bind_query_context(query_id: str) -> None:

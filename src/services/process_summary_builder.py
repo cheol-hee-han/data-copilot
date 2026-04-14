@@ -17,7 +17,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from src.models.enums import SelectionStatus
+from src.models.enums import SelectionStatus, TargetDbStatus
+from src.utils.sql_formatter import format_sql_tabular
 from src.utils.sqlglot_analyzer import get_real_tables
 
 if TYPE_CHECKING:
@@ -67,6 +68,8 @@ def _build_interpretation_dict(state: PipelineState) -> dict[str, Any]:
         return {}
 
     result: dict[str, Any] = {}
+    if nq.rewritten_query and nq.rewritten_query != nq.original_query:
+        result["rewritten_query"] = nq.rewritten_query
     if nq.measures:
         terms = [m.term for m in nq.measures if m.term]
         if terms:
@@ -130,14 +133,20 @@ def _build_context_dict(state: PipelineState) -> dict[str, Any]:
 
     relevant_ucs = [uc for uc in reason.explored_use_cases if uc.relevant]
     if relevant_ucs:
-        result["use_case_count"] = len(relevant_ucs)
+        result["use_cases"] = [
+            uc.description for uc in relevant_ucs if uc.description
+        ]
 
     selected_manuals = [
         m for m in reason.explored_biz_manuals
         if m.selection_status == SelectionStatus.SELECTED
     ]
     if selected_manuals:
-        result["manual_count"] = len(selected_manuals)
+        _MAX_MANUAL_LEN = 60
+        result["manuals"] = [
+            m.content[:_MAX_MANUAL_LEN] + ("…" if len(m.content) > _MAX_MANUAL_LEN else "")
+            for m in selected_manuals if m.content
+        ]
 
     selected_terms = [
         bt for bt in reason.explored_biz_terms
@@ -153,11 +162,25 @@ def _build_ai_decision_dict(state: PipelineState) -> dict[str, Any] | None:
     """4단계: AI 판단 — INFER 시그널 + pending_assumptions.
 
     내용이 없으면 None을 반환하여 섹션 자체를 생략한다.
-    resolved_signals는 operator.add 리듀서로 누적되므로
+    같은 질의-값 쌍이 여러 노드에서 생성될 수 있어
     question+value 기준으로 중복을 제거한다.
     """
     inferences: list[dict[str, str]] = []
     seen_keys: set[str] = set()
+
+    # 타겟 DB 자동 선택 사유 (AMBIGUOUS 에서만 사용자에게 표면화)
+    decision = state.reason.target_db_decision
+    if (decision is not None
+            and decision.status == TargetDbStatus.AMBIGUOUS
+            and decision.decision_rationale):
+        inferences.append({
+            "question": "사용할 DB 결정",
+            "value": decision.decision_rationale,
+            "source_node": "readiness_gate",
+        })
+        seen_keys.add(
+            f"사용할 DB 결정|{decision.decision_rationale}",
+        )
 
     tid = state.turn_id
     if tid:
@@ -173,7 +196,7 @@ def _build_ai_decision_dict(state: PipelineState) -> dict[str, Any] | None:
                 seen_keys.add(key)
                 inferences.append({
                     "question": s.question,
-                    "value": s.inferred_value,
+                    "value": s.inferred_value or "",
                     "source_node": s.source_node,
                 })
 
@@ -200,9 +223,14 @@ def _build_ai_decision_dict(state: PipelineState) -> dict[str, Any] | None:
 
 
 def _build_validation_dict(state: PipelineState) -> dict[str, Any]:
-    """5단계: 검증 결과 — validation summary + 조회 건수."""
+    """5단계: 결과 — 실행 SQL + 검증 결과 + 조회 건수."""
     reason = state.reason
     result: dict[str, Any] = {}
+
+    if reason.validated_sql or reason.generated_sql:
+        result["sql"] = format_sql_tabular(
+            reason.validated_sql or reason.generated_sql or "",
+        )
 
     if reason.validation_summary:
         result["summary"] = reason.validation_summary

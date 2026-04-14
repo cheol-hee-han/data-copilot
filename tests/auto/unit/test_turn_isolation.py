@@ -7,7 +7,6 @@ turn_id 필드를 통해 이전 대화 턴의 resolved_signals가 현재 턴의 
     ┌──────────────────────────────────────────────────────────────────┐
     │  테스트 대상                         검증 내용             LLM    │
     │  ─────────────────────────────── ──────────────────────── ───  │
-    │  build_auto_resolved_notice        현재 턴 INFER만 반환      X    │
     │  build_clarification_context       현재 턴 ASK/INFER만 포함  X    │
     │  _route_after_clarify              현재 턴 시그널로 라우팅   X    │
     │  intent_classifier ask_count      전체 세션 ASK 카운트      X    │
@@ -94,105 +93,7 @@ def _make_state(
 
 
 # ──────────────────────────────────────────────────────────────
-# 1. build_auto_resolved_notice — 현재 턴 INFER만 포함
-# ──────────────────────────────────────────────────────────────
-
-class TestBuildAutoResolvedNotice:
-    """build_auto_resolved_notice의 턴 격리 동작 검증."""
-
-    def test_filters_by_current_turn_id(self):
-        """현재 턴 INFER 시그널만 반환하고 이전 턴 시그널은 제외한다."""
-        from src.agents.utils.clarification_context import (
-            build_auto_resolved_notice,
-        )
-        current_turn_signal = _make_signal(
-            turn_id=TURN_A,
-            question="기간 기준은?",
-            inferred_value="이번 달",
-        )
-        prev_turn_signal = _make_signal(
-            turn_id=TURN_B,
-            question="조회 대상은?",
-            inferred_value="전체 고객",
-        )
-        state = _make_state(
-            turn_id=TURN_A,
-            resolved_signals=[prev_turn_signal, current_turn_signal],
-        )
-
-        result = build_auto_resolved_notice(state)
-
-        includes_current = "이번 달" in result
-        excludes_prev = "전체 고객" not in result
-        passed = includes_current and excludes_prev
-
-        log_test_case(
-            logger,
-            "test_filters_by_current_turn_id",
-            f"resolved=[turn_B_signal, turn_A_signal], turn_id={TURN_A[:8]}",
-            "이번 달 포함, 전체 고객 제외",
-            result,
-            passed,
-        )
-        assert includes_current, "현재 턴 INFER 항목이 결과에 없음"
-        assert excludes_prev, "이전 턴 INFER 항목이 결과에 포함됨 — 턴 격리 실패"
-
-    def test_excludes_signal_with_none_turn_id(self):
-        """turn_id=None인 시그널(레거시)은 결과에서 제외된다."""
-        from src.agents.utils.clarification_context import (
-            build_auto_resolved_notice,
-        )
-        none_turn_signal = _make_signal(
-            turn_id=None,
-            question="레거시 기간?",
-            inferred_value="레거시값",
-        )
-        state = _make_state(
-            turn_id=TURN_A,
-            resolved_signals=[none_turn_signal],
-        )
-
-        result = build_auto_resolved_notice(state)
-
-        passed = "레거시값" not in result
-        log_test_case(
-            logger,
-            "test_excludes_none_turn_id",
-            "turn_id=None 시그널",
-            "결과에 포함 안 됨",
-            result,
-            passed,
-        )
-        assert passed, "turn_id=None 시그널이 결과에 포함됨 — 격리 실패"
-
-    def test_returns_empty_when_no_matching_signals(self):
-        """현재 턴에 해당하는 INFER 시그널이 없으면 빈 문자열을 반환한다."""
-        from src.agents.utils.clarification_context import (
-            build_auto_resolved_notice,
-        )
-        state = _make_state(
-            turn_id=TURN_A,
-            resolved_signals=[
-                _make_signal(turn_id=TURN_B),
-            ],
-        )
-
-        result = build_auto_resolved_notice(state)
-
-        passed = result == ""
-        log_test_case(
-            logger,
-            "test_empty_when_no_match",
-            "다른 턴 시그널만 존재",
-            '""',
-            repr(result),
-            passed,
-        )
-        assert passed, f"빈 문자열 기대, 실제: {repr(result)}"
-
-
-# ──────────────────────────────────────────────────────────────
-# 2. build_clarification_context — 현재 턴 ASK/INFER만 포함
+# 1. build_clarification_context — 현재 턴 ASK/INFER만 포함
 # ──────────────────────────────────────────────────────────────
 
 class TestBuildClarificationContext:
@@ -544,31 +445,6 @@ class TestAskCountSessionWide:
 
 class TestEmptyTurnIdDefense:
     """state.turn_id가 빈 문자열일 때 조기 반환 동작 검증."""
-
-    def test_auto_resolved_notice_returns_empty_for_empty_turn_id(self):
-        """turn_id가 빈 문자열이면 build_auto_resolved_notice는 빈 문자열을 반환한다."""
-        from src.agents.utils.clarification_context import (
-            build_auto_resolved_notice,
-        )
-        # turn_id가 없어도 내용이 있는 시그널
-        signal = _make_signal(turn_id=TURN_A, inferred_value="뭔가")
-        state = _make_state(
-            turn_id="",  # UUID 생성 누락 상황
-            resolved_signals=[signal],
-        )
-
-        result = build_auto_resolved_notice(state)
-
-        passed = result == ""
-        log_test_case(
-            logger,
-            "test_notice_empty_turn_id",
-            "turn_id=''",
-            '""',
-            repr(result),
-            passed,
-        )
-        assert passed, f"빈 turn_id 시 빈 문자열 기대, 실제: {repr(result)}"
 
     def test_clarification_context_returns_empty_for_empty_turn_id(self):
         """turn_id가 빈 문자열이면 build_clarification_context는 빈 문자열을 반환한다."""

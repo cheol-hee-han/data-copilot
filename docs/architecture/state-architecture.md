@@ -1,6 +1,6 @@
 # State Architecture 비판적 분석 — 데이터 활용 파이프라인 관점
 
-> **Version 2.2** (2026-04-02)
+> **Version 2.3** (2026-04-13)
 > 현재 `PipelineState` + `ReasoningState` 구조가 "데이터 분석가의 사고 흐름"을 적절히 모델링하고 있는지
 > 다각도로 분석한다.
 >
@@ -8,6 +8,7 @@
 > v2.0 (2026-03-29): table_verifier/TableResolution 삭제 반영, 중복 분석 갱신, 권고안 재정리, KI 승격 갭 반영
 > v2.1 (2026-04-01): 노드 리네임 반영 (context_explorer→context_retriever+context_interpreter, confidence_evaluator→readiness_gate, recovery_planner→recovery_agent, clarify→clarification_handler, preprocessor 삭제), 신규 state 필드 기재, W/R 약어 갱신
 > v2.2 (2026-04-02): planner→reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용), W/R 약어 갱신 (PRP)
+> v2.3 (2026-04-13): state.py W/R 약어 전수 현행화 (EXP→FET/INT, EVL→RDG), explored_biz_manuals/explored_biz_terms W 노드 정정 (RET→INT)
 
 ---
 

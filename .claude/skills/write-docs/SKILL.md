@@ -30,7 +30,7 @@ user_invocable: true
 
 # 문서 구조
 
-**반드시 `docs/project-structure.md`의 "문서 (docs/)" 섹션을 정본(source of truth)으로 참조한다.**
+**반드시 `docs/architecture/project-structure.md`의 "문서 (docs/)" 섹션을 정본(source of truth)으로 참조한다.**
 
 | 디렉토리 | 용도 | 네이밍 규칙 |
 | ---------- | ------ | ------------ |
@@ -45,7 +45,7 @@ user_invocable: true
 
 - 문서를 신규 생성하거나 이동할 때 위 디렉토리 분류에 맞는 위치에 배치한다
 - 전체 프로젝트를 봤을 때, 프로젝트 산출물이 문서구조와 일치하지 않는 곳에 문서가 있으면 구조에 맞게 `docs/` 하위로 이동시키고 링크 업데이트
-- **문서 생성·이동·삭제 후 반드시 `docs/project-structure.md`를 최신 상태로 갱신한다**
+- **문서 생성·이동·삭제 후 반드시 `docs/architecture/project-structure.md`를 최신 상태로 갱신한다**
 
 
 # 작업 절차
@@ -58,7 +58,7 @@ user_invocable: true
 
 문서를 생성·이동·삭제·이름 변경한 경우 반드시 아래 절차를 수행한다:
 
-1. **`docs/project-structure.md` 갱신** — 트리 구조와 디렉토리 설명 테이블을 최신 상태로 업데이트 (소스코드와 문서 모두 반영, 디렉토리뿐 아니라 실제 파일까지 구조에 포함하고 주석까지 최신화)
+1. **`docs/architecture/project-structure.md` 갱신** — 트리 구조와 디렉토리 설명 테이블을 최신 상태로 업데이트 (소스코드와 문서 모두 반영, 디렉토리뿐 아니라 실제 파일까지 구조에 포함하고 주석까지 최신화)
 2. **프로젝트 내 깨진 참조 탐색 및 수정** — 변경된 경로를 Grep으로 검색하여 참조하는 모든 파일을 갱신
    ```
    # 이동/삭제된 파일의 기존 경로로 검색

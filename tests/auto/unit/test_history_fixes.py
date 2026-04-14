@@ -5,7 +5,7 @@
        - ConnectorManager.checkpointer_pool이 None 반환
        - REST 라우터가 503 반환
        - runner.py가 턴 저장을 건너뛰고 파이프라인 결과 반환
-    2. WARNING — TurnSummary에 feedback 필드 추가
+    2. WARNING — MessageSummary에 feedback 필드 추가
        - session_service가 feedback을 매핑
     3. INFO — 에러 턴 저장 시 client_ip/user_agent 전달
 
@@ -26,7 +26,7 @@ from src.models.api.session_models import (
     LikeRequest,
     LikeResponse,
     SessionDetailResponse,
-    TurnSummary,
+    MessageSummary,
 )
 
 
@@ -83,22 +83,22 @@ class TestCheckpointerPoolNoneGuard:
 
 
 # =====================================================================
-# 2. WARNING — TurnSummary feedback 필드
+# 2. WARNING — MessageSummary feedback 필드
 # =====================================================================
 
 
-class TestTurnSummaryFeedbackField:
-    """TurnSummary 모델에 feedback 필드 존재 검증."""
+class TestMessageSummaryFeedbackField:
+    """MessageSummary 모델에 feedback 필드 존재 검증."""
 
     def test_turn_summary_has_feedback_field(self):
-        """TurnSummary에 feedback 필드가 존재한다."""
-        assert "feedback" in TurnSummary.model_fields
+        """MessageSummary에 feedback 필드가 존재한다."""
+        assert "feedback" in MessageSummary.model_fields
 
     def test_turn_summary_feedback_default_none(self):
         """feedback 기본값은 None이다."""
-        turn = TurnSummary(
-            turn_id="t1",
-            turn_seq=1,
+        turn = MessageSummary(
+            message_uuid="t1",
+            seq=1,
             role="assistant",
             content="hello",
             created_at=datetime.now(),
@@ -107,9 +107,9 @@ class TestTurnSummaryFeedbackField:
 
     def test_turn_summary_feedback_accepts_string(self):
         """feedback에 문자열을 설정할 수 있다."""
-        turn = TurnSummary(
-            turn_id="t1",
-            turn_seq=1,
+        turn = MessageSummary(
+            message_uuid="t1",
+            seq=1,
             role="assistant",
             content="hello",
             feedback="정확한 데이터",
@@ -119,9 +119,9 @@ class TestTurnSummaryFeedbackField:
 
     def test_turn_summary_serialization_includes_feedback(self):
         """model_dump()에 feedback이 포함된다."""
-        turn = TurnSummary(
-            turn_id="t1",
-            turn_seq=1,
+        turn = MessageSummary(
+            message_uuid="t1",
+            seq=1,
             role="assistant",
             content="hello",
             feedback="유용한 분석",
@@ -138,20 +138,20 @@ class TestTurnSummaryFeedbackField:
 
         with (
             patch(
-                "src.services.session_service.turn_text_store.get_session_title",
+                "src.services.session_service.message_store.get_session_title",
                 new_callable=AsyncMock,
                 return_value="테스트 세션",
             ),
             patch(
-                "src.services.session_service.turn_text_store.get_session_turns_for_ui",
+                "src.services.session_service.message_store.get_session_messages_for_ui",
                 new_callable=AsyncMock,
                 return_value=[
                     {
-                        "turn_id": "uuid-1",
-                        "turn_seq": 1,
+                        "message_uuid": "uuid-1",
+                        "seq": 1,
                         "role": "user",
                         "content": "안녕",
-                        "turn_type": "normal",
+                        "message_type": "normal",
                         "status": "success",
                         "is_liked": True,
                         "feedback": "정확한 데이터",
@@ -168,7 +168,7 @@ class TestTurnSummaryFeedbackField:
 
             assert result is not None
             assert isinstance(result, SessionDetailResponse)
-            assert result.turns[0].feedback == "정확한 데이터"
+            assert result.messages[0].feedback == "정확한 데이터"
 
 
 # =====================================================================
@@ -182,10 +182,10 @@ class TestErrorTurnAuditFields:
     @pytest.mark.asyncio
     async def test_error_turn_passes_client_ip_and_user_agent(self):
         """에러 발생 시 assistant 턴에 client_ip, user_agent가 전달된다."""
-        save_turn_calls: list[dict] = []
+        save_message_calls: list[dict] = []
 
-        async def mock_save_turn(pool, **kwargs):
-            save_turn_calls.append(kwargs)
+        async def mock_save_message(pool, **kwargs):
+            save_message_calls.append(kwargs)
             return "mock-turn-id"
 
         # run_pipeline이 에러를 발생시키는 시나리오를 시뮬레이션
@@ -197,8 +197,8 @@ class TestErrorTurnAuditFields:
                 "src.connectors.manager.get_connector_manager",
             ) as mock_get_cm,
             patch(
-                "src.services.turn_text_store.save_turn",
-                side_effect=mock_save_turn,
+                "src.services.message_store.save_message",
+                side_effect=mock_save_message,
             ),
         ):
             mock_cm = MagicMock()
@@ -206,7 +206,7 @@ class TestErrorTurnAuditFields:
             mock_get_cm.return_value = mock_cm
 
             # 에러 경로 로직 직접 실행 (runner.py:324~346 시뮬레이션)
-            from src.services.turn_text_store import save_turn
+            from src.services.message_store import save_message
 
             _pool = mock_cm.checkpointer_pool
             client_ip = "192.168.1.100"
@@ -216,33 +216,33 @@ class TestErrorTurnAuditFields:
             error = ValueError("test error")
 
             # user 턴 저장
-            await save_turn(
+            await save_message(
                 _pool,
                 thread_id=session_id,
                 role="user",
                 content=user_input,
                 client_ip=client_ip,
                 user_agent=user_agent,
-                turn_type="error",
+                message_type="error",
                 request_id=session_id,
             )
             # assistant 에러 턴 저장 (수정 대상)
-            await save_turn(
+            await save_message(
                 _pool,
                 thread_id=session_id,
                 role="assistant",
                 content="처리 중 오류가 발생했습니다.",
                 client_ip=client_ip,
                 user_agent=user_agent,
-                turn_type="error",
+                message_type="error",
                 status="failure",
                 error_type=type(error).__name__,
                 error_message=str(error)[:500],
             )
 
             # 검증: 두 번째 호출(assistant 턴)에 client_ip, user_agent 존재
-            assert len(save_turn_calls) == 2
-            assistant_call = save_turn_calls[1]
+            assert len(save_message_calls) == 2
+            assistant_call = save_message_calls[1]
             assert assistant_call["client_ip"] == "192.168.1.100"
             assert assistant_call["user_agent"] == "Mozilla/5.0"
             assert assistant_call["role"] == "assistant"
@@ -281,10 +281,10 @@ class TestLikeRequestFeedback:
         mock_pool = MagicMock()
 
         with patch(
-            "src.services.session_service.turn_text_store.toggle_like",
+            "src.services.session_service.message_store.toggle_like",
             new_callable=AsyncMock,
             return_value={
-                "turn_id": "uuid-1",
+                "message_uuid": "uuid-1",
                 "is_liked": True,
                 "feedback": "유용한 분석",
                 "liked_at": datetime.now(),

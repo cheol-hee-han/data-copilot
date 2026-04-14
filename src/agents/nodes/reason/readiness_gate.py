@@ -39,6 +39,7 @@ from src.agents.state.state import (
     ReasoningState,
     SelectionStatus,
     StepStatus,
+    TargetDbStatus,
 )
 from src.services.confidence_scorer import (
     ReadinessVerdict,
@@ -47,6 +48,7 @@ from src.services.confidence_scorer import (
     calculate_readiness,
     evaluate_readiness,
 )
+from src.services.target_db_resolver import resolve_target_db
 from src.config import settings
 from src.utils.logger import get_logger
 from src.utils.tracker.dispatch import (
@@ -72,6 +74,17 @@ async def readiness_gate_node(state: PipelineState) -> dict:
     reason = state.reason.model_copy(deep=True)
     score = calculate_readiness(reason)
     verdict = _apply_force_generate(evaluate_readiness(reason), reason, score)
+
+    # 가설에 준비도 판정 기록 (deep copy로 분리된 hypotheses 리스트도 동기화)
+    if reason.current_hypothesis:
+        hid = reason.current_hypothesis.hypothesis_id
+        reason.current_hypothesis.readiness_score = score
+        reason.current_hypothesis.readiness_verdict = verdict.value
+        for i, h in enumerate(reason.hypotheses):
+            if h.hypothesis_id == hid:
+                reason.hypotheses[i].readiness_score = score
+                reason.hypotheses[i].readiness_verdict = verdict.value
+                break
 
     # Phase 확정 + 분기별 state 설정
     reason.phase = VERDICT_TO_PHASE[verdict]
@@ -121,7 +134,7 @@ async def readiness_gate_node(state: PipelineState) -> dict:
     if _ft:
         _output["failure_type"] = str(_ft)
     if _fr:
-        _output["failure_reason"] = _fr[:200]
+        _output["failure_reason"] = _fr
 
     await dispatch_tracking_event(REASONING_STEP, {
         "node": "readiness_gate",
@@ -185,6 +198,7 @@ def _finalize_phase(reason: ReasoningState, score: float) -> None:
     """phase별 후속 state 설정을 처리한다.
 
     - EXPLORING: PENDING 스텝이 없으면 REPLANNING으로 전환
+    - GENERATING: target_db 결정 (단일 진실원). NO_SELECTION 이면 REPLANNING 전환.
     - REPLANNING: recovery 진입 state + failure 맥락 설정
     """
     # EXPLORE 분기: PENDING 스텝이 없으면 REPLANNING 전환
@@ -195,6 +209,36 @@ def _finalize_phase(reason: ReasoningState, score: float) -> None:
         )
         if not has_pending or reason.exploration_phase != "initial":
             reason.phase = Phase.REPLANNING
+
+    # GENERATING 진입 시점에 target_db 단일 진실원 확정
+    if reason.phase == Phase.GENERATING:
+        decision = resolve_target_db(reason, settings)
+        reason.target_db_decision = decision
+        if decision.status in (
+            TargetDbStatus.NO_SELECTION,
+            TargetDbStatus.AMBIGUOUS,
+        ):
+            # SELECTED 테이블 부재 또는 복수 시스템 혼재 → SQL 생성 불가, REPLAN
+            # AMBIGUOUS 는 "단일 시스템으로 선정 실패" 를 NO_TABLE 로 취급하여
+            # recovery_agent 가 failure_reason 으로 원인을 surface 한다.
+            reason.target_db = ""
+            reason.phase = Phase.REPLANNING
+            reason.failure_type = FailureType.NO_TABLE
+            reason.failure_reason = decision.decision_rationale
+            logger.info(
+                "target_db 결정 실패 — REPLAN 전환",
+                status=decision.status.value,
+                rationale=decision.decision_rationale,
+            )
+        else:
+            reason.target_db = decision.target
+            logger.info(
+                "target_db 결정 완료",
+                status=decision.status.value,
+                target=decision.target,
+                chosen=decision.chosen_tables,
+                dropped=[t for t, _ in decision.dropped_tables],
+            )
 
     # REPLANNING: recovery 진입 state 설정
     if reason.phase == Phase.REPLANNING:

@@ -36,6 +36,7 @@ from src.services.process_summary_builder import (
 )
 from src.services.response_formatter import (
     apply_code_mappings,
+    build_analysis_report,
     build_summary_line,
     detect_column_formats,
 )
@@ -101,16 +102,29 @@ async def format_response_node(
         )
 
         # ── 3. 핵심 수치 요약 (텍스트만) ──
-        if state.analysis_result and state.analysis_result.summary:
-            summary_line = state.analysis_result.summary
+        analysis = state.analysis_result
+        has_analysis = bool(
+            analysis and (
+                analysis.initial_reading
+                or analysis.insights
+                or analysis.action_items
+            )
+        )
+        if has_analysis:
+            formatted = build_analysis_report(analysis)
+        elif analysis and analysis.summary:
+            formatted = analysis.summary
         else:
-            summary_line = build_summary_line(
+            formatted = build_summary_line(
                 state.sql_result.columns,
                 rows,
                 column_formats,
             )
 
-        formatted = summary_line or "(조회 결과 없음)"
+        formatted = formatted or (
+            "SQL 작성을 완료하였으나, 실제 조회 시 결과가 0건입니다.\n"
+            "실행된 SQL의 필터 조건 또는 사용 테이블의 데이터 존재여부 확인이 필요합니다."
+        )
 
         # ── 4. result_data 조립 (구조화 테이블 데이터) ──
         result_data = _build_result_data(

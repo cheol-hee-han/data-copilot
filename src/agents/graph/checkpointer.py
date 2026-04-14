@@ -39,18 +39,22 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def create_checkpointer(
-    history_db: DbConnectionInfo,
+    postgres_db: DbConnectionInfo,
 ) -> AsyncIterator[tuple[BaseCheckpointSaver, Any]]:
     """설정에 따라 checkpointer를 생성하고 관리한다.
 
     AsyncContextManager — lifespan에서 async with로 사용.
     리소스 정리가 자동으로 보장된다.
 
+    Args:
+        postgres_db: PostgreSQL 공통 DB 연결 정보. checkpointer_backend 가
+            "postgres" 일 때 AsyncPostgresSaver 가 이 DB 에 접속한다.
+
     Yields:
         (checkpointer, pool) 튜플.
         postgres 백엔드: (AsyncPostgresSaver, AsyncConnectionPool)
         memory 백엔드: (MemorySaver, None)
-        pool은 turn_text_store 등 커스텀 테이블 접근 시 재사용한다.
+        pool은 message_store 등 커스텀 테이블 접근 시 재사용한다.
     """
     if settings.checkpointer_backend == "postgres":
         from psycopg_pool import AsyncConnectionPool
@@ -63,12 +67,12 @@ async def create_checkpointer(
             "autocommit": True,       # 필수: psycopg3 기본값 False
             "prepare_threshold": 0,   # PgBouncer/pooler 호환
             "row_factory": dict_row,
-            "password": history_db.password,   # DSN에서 분리하여 로그 노출 방지
+            "password": postgres_db.password,   # DSN에서 분리하여 로그 노출 방지
             "options": "-c search_path=bdptbl,public",  # checkpoint_dc_* 테이블 스키마 해석
         }
 
         pool = AsyncConnectionPool(
-            conninfo=history_db.dsn,
+            conninfo=postgres_db.dsn,
             min_size=settings.checkpointer_pool_min,
             max_size=settings.checkpointer_pool_max,
             kwargs=connection_kwargs,
@@ -88,12 +92,12 @@ async def create_checkpointer(
             allowed_msgpack_modules=_collect_src_types(),
         )
 
-        checkpointer = AsyncPostgresSaver(pool, serde=serde)
+        checkpointer = AsyncPostgresSaver(pool, serde=serde)  # type: ignore[arg-type]
         await checkpointer.setup()
 
         logger.info(
             "Checkpointer 초기화: AsyncPostgresSaver",
-            host=history_db.host,
+            host=postgres_db.host,
         )
         try:
             yield checkpointer, pool

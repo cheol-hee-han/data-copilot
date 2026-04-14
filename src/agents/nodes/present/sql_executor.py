@@ -1,8 +1,9 @@
-"""SQL 실행 노드 — 검증 완료된 SQL을 정보계 DB에서 실행하는 LangGraph 노드.
+"""SQL 실행 노드 — 검증 완료된 SQL을 업무 DB 에서 실행하는 LangGraph 노드.
 
-작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+작성자: 한철희 / 최종수정: 2026-04-10
 
-이 노드는 직접 DB 드라이버를 다루지 않고 ConnectorManager.info_db에
+이 노드는 직접 DB 드라이버를 다루지 않고 ConnectorManager.get_query_db() 가
+반환하는 업무 DB 커넥터(ADW/BDP/CRP/TEST 중 system_db_overrides 적용 결과)에
 위임하는 얇은(thin) 노드로, 실행 전후 로직에 집중한다.
 
 이중 방어(Double Defense) 전략:
@@ -33,7 +34,7 @@ from src.config import settings
 from src.connectors.manager import get_connector_manager
 from src.utils.logger import get_logger
 from src.utils.security import check_sql_safety_quick
-from src.utils.truncate import format_sql
+from src.utils.sql_formatter import format_sql_tabular
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
     CONTEXT_SQL_EXECUTED,
@@ -47,17 +48,16 @@ async def execute_sql_node(
 ) -> dict:
     """검증된 SQL을 실행한다."""
     manager = get_connector_manager()
-    db = manager.get_query_db()
-    dialect = db.dialect
-
+    # readiness_gate 가 결정한 reason.target_db 를 그대로 신뢰한다.
+    db = manager.get_query_db(state.reason)
     logger.info(
         "SQL 실행 시작",
-        sql="\n" + format_sql(state.reason.validated_sql or "", dialect),
+        sql="\n" + format_sql_tabular(state.reason.validated_sql or ""),
     )
 
     # 이중 방어
     is_safe, safety_errors = check_sql_safety_quick(
-        state.reason.validated_sql,
+        state.reason.validated_sql or "",
     )
     if not is_safe:
         logger.warning(
@@ -72,7 +72,7 @@ async def execute_sql_node(
 
     try:
         rows = await db.execute_query(
-            state.reason.validated_sql,
+            state.reason.validated_sql or "",
         )
         elapsed = (time.time() - start_time) * 1000
 
@@ -91,8 +91,8 @@ async def execute_sql_node(
         )
 
         await dispatch_tracking_event(CONTEXT_SQL_EXECUTED, {
-            "source": "info_db_execute",
-            "query": state.reason.validated_sql,
+            "source": "query_db_execute",
+            "query": format_sql_tabular(state.reason.validated_sql or ""),
             "results_count": result.row_count,
             "results_summary": [
                 f"컬럼: {', '.join(columns)}",

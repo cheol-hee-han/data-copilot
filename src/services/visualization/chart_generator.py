@@ -388,7 +388,7 @@ def generate_chart_from_result(
         if value_col is None and isinstance(sample, (int, float)):
             value_col = col
 
-    if value_col is None:
+    if value_col is None or label_col is None:
         return ""
 
     labels = [str(row.get(label_col, f"항목{i+1}")) for i, row in enumerate(result.rows)]

@@ -19,32 +19,33 @@ re-export 대상:
 
 from __future__ import annotations
 
-import operator
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 # ── 공유 모델 re-export (기존 import 경로 호환) ──
-from src.models.enums import (  # noqa: F401
-    ConfidenceStatus,
-    FailureType,
-    FinalStatus,
-    HypothesisStatus,
-    IntentType,
-    Phase,
-    QueryStatus,
-    SelectionStatus,
-    StepStatus,
-    VisualizationType,
+# PEP 484 explicit re-export 패턴(`X as X`): mypy strict가 아닌 경우에도 의도를 명시.
+from src.models.enums import (
+    ConfidenceStatus as ConfidenceStatus,
+    FailureType as FailureType,
+    FinalStatus as FinalStatus,
+    HypothesisStatus as HypothesisStatus,
+    IntentType as IntentType,
+    Phase as Phase,
+    QueryStatus as QueryStatus,
+    SelectionStatus as SelectionStatus,
+    StepStatus as StepStatus,
+    TargetDbStatus as TargetDbStatus,
+    VisualizationType as VisualizationType,
 )
-from src.models.result import (  # noqa: F401
-    AnalysisResult,
-    SQLResult,
-    VisualizationData,
+from src.models.result import (
+    AnalysisResult as AnalysisResult,
+    SQLResult as SQLResult,
+    VisualizationData as VisualizationData,
 )
-from src.models.trace import (  # noqa: F401
-    TraceEntry,
-    add_trace,
+from src.models.trace import (
+    TraceEntry as TraceEntry,
+    add_trace as add_trace,
 )
 from src.agents.models.clarification import AmbiguitySignal
 from src.agents.models.normalization import NormalizedQuery
@@ -101,6 +102,8 @@ class Hypothesis(BaseModel):
     priority: float = 0.5
     strategy: str = ""
     status: HypothesisStatus = HypothesisStatus.PENDING
+    readiness_score: float | None = None
+    readiness_verdict: str = ""
 
 
 class ExecutionStep(BaseModel):
@@ -114,6 +117,8 @@ class ExecutionStep(BaseModel):
     insight: str | None = None
     raw_result: dict[str, Any] | list | None = None
     # depends_on: int | None = None  # (TODO) 선행 스텝 번호 (None이면 독립 실행)
+    # 소속 가설 (저니 뷰 도구호출↔가설 연결용)
+    hypothesis_id: str = ""
 
 
 class KeyDateColumn(BaseModel):
@@ -177,6 +182,8 @@ class BizManualEntry(BaseModel):
     source: str = ""             # 검색 쿼리
     point_id: str = ""               # Qdrant point id (페이징 시 exclude 대상)
     source_step: int = 0             # 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용)
+    # 소속 가설 (저니 뷰 연결용)
+    hypothesis_id: str = ""
     selection_status: SelectionStatus = SelectionStatus.PENDING
     selection_reason: str = ""
 
@@ -195,6 +202,8 @@ class BizTermEntry(BaseModel):
     related_tables: list[str] = Field(default_factory=list)
     source: str = ""             # 검색 쿼리
     source_step: int = 0         # 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용)
+    # 소속 가설 (저니 뷰 연결용)
+    hypothesis_id: str = ""
     selection_status: SelectionStatus = SelectionStatus.PENDING
     selection_reason: str = ""
 
@@ -217,6 +226,8 @@ class UseCaseEntry(BaseModel):
     point_id: str = ""
     # ── 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용) ──
     source_step: int = 0
+    # 소속 가설 (저니 뷰 연결용)
+    hypothesis_id: str = ""
 
     # ── LLM 판정 (context_interpreter) ──
     relevant: bool = False
@@ -237,9 +248,13 @@ class TableMeta(BaseModel):
     alt_name: str = ""
     description: str = ""
     schema_name: str = ""
+    # 시스템 코드 (ADW/BDP/CRP 등 target_db_schema_map 키와 일치).
+    # ConnectorManager.parse_db_source 가 테이블명 접두사에서 태깅한다.
     db_source: str = ""
     subject_area: str = ""
     source_step: int = 0         # 발견 스텝 번호 (tool_execution_history 크로스 레퍼런스용)
+    # 소속 가설 (저니 뷰 연결용)
+    hypothesis_id: str = ""
     columns: list[ColumnInfo] = Field(default_factory=list)
 
     # ── 관찰 사실 (rule-based, DB 쿼리) ──
@@ -328,6 +343,31 @@ class DeadEnd(BaseModel):
     lessons_learned: str = ""
 
 
+class TargetDbDecision(BaseModel):
+    """target_db 결정 결과 (단일 진실원).
+
+    readiness_gate가 GENERATING 전이 시 target_db_resolver를 호출하여
+    이 객체를 채운다. sql_generator/sql_executor/format_sql 등 모든
+    하위 노드는 reason.target_db만 읽고, 결정 근거가 필요하면
+    reason.target_db_decision을 참조한다.
+
+    분류:
+        - FORCED: settings.target_db_code(시스템코드, 예: ADW/BDP/CRP)로 강제 지정
+        - SINGLE: SELECTED 테이블이 단일 시스템 소속
+        - AMBIGUOUS: 복수 시스템 혼재 → 사용자 명확화 요청 (자동 선정하지 않음)
+        - NO_SELECTION: SELECTED 테이블 없음 → 호출부에서 fail 처리
+
+    decision_rationale은 사용자에게 노출되어 "왜 이 DB를 선택했는지"를
+    설명한다 (insight_builder/process_summary_builder가 소비).
+    """
+
+    status: TargetDbStatus
+    target: str = ""
+    chosen_tables: list[str] = Field(default_factory=list)
+    dropped_tables: list[tuple[str, str]] = Field(default_factory=list)
+    decision_rationale: str = ""
+
+
 class LoopGuard(BaseModel):
     """다층 루프 제어 카운터.
 
@@ -342,15 +382,19 @@ class LoopGuard(BaseModel):
     local_fix_count: int = 0
 
     def increment_tool_calls(self) -> None:
+        """도구 호출 횟수를 1 증가시킨다."""
         self.total_tool_calls += 1
 
     def increment_replan(self) -> None:
+        """재계획 횟수를 1 증가시킨다."""
         self.replan_count += 1
 
     def increment_generate(self) -> None:
+        """SQL 생성 시도 횟수를 1 증가시킨다."""
         self.generate_attempts += 1
 
     def increment_local_fix(self) -> None:
+        """로컬 수정 횟수를 1 증가시킨다."""
         self.local_fix_count += 1
 
     def should_escalate_to_structural(self) -> bool:
@@ -464,7 +508,7 @@ class ReasoningState(BaseModel):
     """
 
     # ── 진행 상태 ──
-    # W: PRP/EXP/EVL/GEN/VAL/RCV/FIN  R: pipeline 라우팅
+    # W: PRP/FET/INT/RDG/GEN/VAL/RCV/FIN  R: pipeline 라우팅
     phase: Phase = Phase.PLANNING
 
     # ── 플래너 산출물 ──
@@ -476,41 +520,41 @@ class ReasoningState(BaseModel):
     )
     # W: PRP/RCV  R: RCV (FAILED 전환 시)
     current_hypothesis: Hypothesis | None = None
-    # W: PRP/RCV  R: EXP (스텝 순차 실행)
+    # W: PRP/RCV  R: FET (스텝 순차 실행)
     execution_plan: list[ExecutionStep] = Field(
         default_factory=list,
     )
 
     # ── 누적 지식 ──
-    # W: PRP/EXP  R: EVL/GEN/VAL/RCV/FIN
+    # W: PRP/INT/RCV  R: RDG/GEN/VAL/FIN
     knowledge_items: list[KnowledgeItem] = Field(
         default_factory=list,
     )
-    # W: PRP/EXP (search_use_cases 결과)  R: PRP/GEN/FIN
+    # W: PRP/INT (search_use_cases 결과)  R: PRP/GEN/FIN
     explored_use_cases: list[UseCaseEntry] = Field(
         default_factory=list,
     )
-    # W: PRP/EXP  R: GEN/VAL/RCV/FIN
+    # W: PRP/INT  R: GEN/VAL/RCV/FIN
     explored_tables: list[TableMeta] = Field(
         default_factory=list,
     )
-    # W: RET (search_manual)  R: INT/RCV (업무 규정·계수산출식 참조)
+    # W: INT (search_manual 결과 hydrate)  R: GEN/RCV (업무 규정·계수산출식 참조)
     explored_biz_manuals: list[BizManualEntry] = Field(
         default_factory=list,
     )
-    # W: RET (search_biz_terms)  R: INT/RCV (용어 해소·매핑)
+    # W: INT (search_biz_terms 결과 hydrate)  R: GEN/RCV (용어 해소·매핑)
     explored_biz_terms: list[BizTermEntry] = Field(
         default_factory=list,
     )
-    # W: EXP (lookup_code_meta)  R: GEN/RCV (코드값 기반 SQL 추론)
+    # W: INT (lookup_code_meta 결과 hydrate)  R: GEN/RCV (코드값 기반 SQL 추론)
     explored_codes: dict[str, CodeMeta] = Field(
         default_factory=dict,
     )
-    # W: EXP  R: PRP/EXP (도구 실행 중복 방지, "tool:input" 형식)
+    # W: FET  R: PRP/FET (도구 실행 중복 방지, "tool:input" 형식)
     executed_tool_keys: set[str] = Field(
         default_factory=set,
     )
-    # W: EXP  R: RCV (도구 실행 결과 해석 누적)
+    # W: FET  R: RCV (도구 실행 결과 해석 누적)
     discovered_facts: list[str] = Field(
         default_factory=list,
     )
@@ -521,11 +565,23 @@ class ReasoningState(BaseModel):
         default_factory=list,
     )
 
+    # ── 타깃 DB 라우팅 (단일 진실원) ──
+    # W: readiness_gate(GENERATING 전이 시 target_db_resolver 호출)
+    # R: sql_generator/sql_executor/format_sql 등 모든 DB 접근 지점
+    # 빈 문자열이면 아직 결정되지 않음(EXPLORING 단계).
+    target_db: str = ""
+    # W: readiness_gate(target_db_resolver 결과 기록)
+    # R: insight_builder/process_summary_builder (사용자에게 결정 근거 노출)
+    target_db_decision: TargetDbDecision | None = None
+
     # ── SQL ──
     # W: GEN  R: VAL/FIN
     generated_sql: str | None = None
     # W: VAL  R: FIN/pipeline 라우팅
     validated_sql: str | None = None
+    # W: GEN  R: FIN/message_store (DB 별도 컬럼 저장)
+    # SQL generator가 LLM 응답에서 추출한 SQL 1줄 요약 설명
+    sql_explanation: str = ""
 
     # ── SQL 생성 가정 (재시도 시 덮어쓰기, 최종 성공 시 resolved_signals로 전환) ──
     # W: GEN  R: FIN
@@ -543,18 +599,21 @@ class ReasoningState(BaseModel):
     # ── SQL 검증 총평 (Layer2b PASS/FAIL 시 LLM 종합 판단) ──
     # W: VAL  R: formatter (조회 과정 요약), insight_builder
     validation_summary: str = ""
+    # ── SQL 검증 신뢰도 (Layer2b LLM이 검증 총평 기반으로 산출) ──
+    # W: VAL(PASS)  R: insight_builder
+    confidence_score: float = 0.0
 
-    # ── 실패 맥락 (VAL/EVL → pipeline 라우팅/GEN/RCV) ──
-    # W: VAL/EVL  R: pipeline 라우팅, GEN(fix 피드백), RCV(DeadEnd)
+    # ── 실패 맥락 (VAL/RDG → pipeline 라우팅/GEN/RCV) ──
+    # W: VAL/RDG  R: pipeline 라우팅, GEN(fix 피드백), RCV(DeadEnd)
     failure_type: FailureType | None = None
-    # W: VAL/EVL  R: GEN(fix 피드백), RCV(DeadEnd reason)
+    # W: VAL/RDG  R: GEN(fix 피드백), RCV(DeadEnd reason)
     failure_reason: str | None = None
     # W: VAL(local_fix)  R: GEN(재시도 시 이전 시도 전체 표시)
     # generator↔validator 루프에서 이전 fix 시도를 누적 기록
     fix_history: list[str] = Field(default_factory=list)
 
     # ── 루프 제어 ──
-    # W: EXP/RCV/GEN/VAL  R: EVL (종료 조건), pipeline 라우팅
+    # W: FET/INT/RCV/GEN/VAL  R: RDG (종료 조건), pipeline 라우팅
     loop_guard: LoopGuard = Field(
         default_factory=LoopGuard,
     )
@@ -577,20 +636,30 @@ class ReasoningState(BaseModel):
     # ── 헬퍼 메서드 ──
 
     def get_confirmed_knowledge(self) -> list[KnowledgeItem]:
-        """CONFIRMED 상태인 지식 항목만 반환."""
+        """SQL 생성에 사용 가능한 지식 항목을 반환한다.
+
+        CONFIRMED(도구 증거 확정) + PROBABLE(약한 증거 또는 관행적 추론)을
+        모두 포함한다. readiness_gate, recovery_agent와 동일한 기준.
+        """
         return [
             ki for ki in self.knowledge_items
-            if ki.status == ConfidenceStatus.CONFIRMED
+            if ki.status in (
+                ConfidenceStatus.CONFIRMED, ConfidenceStatus.PROBABLE,
+            )
         ]
 
     def format_confirmed_text(self) -> str:
-        """CONFIRMED 지식 항목을 프롬프트용 텍스트로 직렬화."""
-        confirmed = self.get_confirmed_knowledge()
-        if not confirmed:
-            return "(확인된 항목 없음)"
+        """사용 가능한 지식 항목(CONFIRMED/PROBABLE)을 프롬프트용으로 직렬화.
+
+        각 항목 끝에 "— 확정" 또는 "— 추정" 태그를 붙여 근거 강도를 표시한다.
+        """
+        items = self.get_confirmed_knowledge()
+        if not items:
+            return "(사용 가능한 지식 항목 없음)"
         return "\n".join(
-            f"- {ki.key}: {ki.value} ({ki.source})"
-            for ki in confirmed
+            f"- {ki.key}: {ki.value} ({ki.source}) — "
+            f"{'확정' if ki.status == ConfidenceStatus.CONFIRMED else '추정'}"
+            for ki in items
         )
 
     def format_dead_ends_text(self) -> str:
@@ -599,7 +668,10 @@ class ReasoningState(BaseModel):
             return "(없음)"
         lines: list[str] = []
         for de in self.dead_ends:
-            line = f"- [{de.failure_type}] {de.reason}"
+            # Python 3.12에서 str Enum f-string이 "FailureType.X"를 출력하므로
+            # 명시적으로 .value를 사용한다. 대괄호는 프롬프트의 [ROLE]/[TASK] 등
+            # 섹션 헤더와 혼동될 수 있어 백틱으로 감싼다.
+            line = f"- `{de.failure_type.value}` {de.reason}"
             if de.lessons_learned:
                 line += f"\n  교훈: {de.lessons_learned}"
             lines.append(line)
@@ -632,7 +704,7 @@ def should_terminate(reason: ReasoningState) -> bool:
     return (
         g.total_tool_calls >= MAX_TOOL_CALLS      # 도구 호출 총량 한도
         or g.replan_count >= MAX_REPLANS            # 재계획 횟수 한도
-        or g.generate_attempts >= MAX_GENERATES     # SQL 생성 시도 한도
+        or (MAX_GENERATES > 0 and g.generate_attempts >= MAX_GENERATES)  # SQL 생성 시도 한도 (0=무제한)
         or reason.final_status == FinalStatus.FAILURE  # 명시적 실패 선언
         or (                                        # 가설 소진: 시도할 경로 없음
             len(pending) == 0
@@ -699,10 +771,8 @@ class PipelineState(BaseModel):
         default_factory=list,
     )
     # 처리 완료된 시그널 누적 — ASK(answer 채워짐) + INFER 모두 append
-    # operator.add: LangGraph 표준 누적 패턴
-    resolved_signals: Annotated[
-        list[AmbiguitySignal], operator.add,
-    ] = Field(default_factory=list)
+    # 호출 측 누적 패턴: [*state.resolved_signals, new]. turn_reset이 턴 경계에서 []로 초기화.
+    resolved_signals: list[AmbiguitySignal] = Field(default_factory=list)
 
     # ── Reason 계층 (에이전틱 추론) ──
     # W/R: reason 계층 전체 (상세는 ReasoningState 참조)
@@ -741,3 +811,48 @@ class PipelineState(BaseModel):
     trace_log: list[TraceEntry] = Field(
         default_factory=list,
     )
+
+    # ── 턴 경계 리셋 헬퍼 ──
+
+    @classmethod
+    def turn_reset_updates(cls) -> dict[str, Any]:
+        """턴 경계에서 이전 턴 산출물을 초기화하기 위한 updates dict.
+
+        LangGraph checkpointer가 같은 thread_id에서 상태를 유지하므로,
+        새 턴 시작 시 턴 스코프 필드를 명시적으로 초기값으로 덮어써야
+        이전 턴 데이터 누출을 막을 수 있다. 이 메서드는 그 단일 진실
+        공급원이다. 본 리스트에 없는 필드가 새로 추가되면 리셋 여부를
+        반드시 판단해야 한다.
+
+        포함 — 턴 스코프 19개 필드 (resolved_signals 포함).
+
+        제외 — 세션 지속 6개 필드
+        (session_id/conversation_history/user_input/original_query/
+        preprocessed_input/turn_id)는 runner의 initial_state가 담당하며,
+        여기서 건드리지 않는다.
+        """
+        return {
+            # interpret 계층 산출물
+            "analysis_query": "",
+            "intent": IntentType.UNKNOWN,
+            "intent_confidence": 0.0,
+            "query_category": "",
+            "is_continuation": False,
+            "continue_context": "",
+            "normalized_query": None,
+            "pending_signals": [],
+            "resolved_signals": [],
+            # reason 계층 통째 교체 (내부 서브필드 모두 기본값)
+            "reason": ReasoningState(),
+            # present 계층 산출물
+            "sql_result": SQLResult(),
+            "analysis_result": AnalysisResult(),
+            "visualization": VisualizationData(),
+            "formatted_response": "",
+            "result_data": None,
+            "process_summary": None,
+            # 상태/로그
+            "status": QueryStatus.PENDING,
+            "error_message": "",
+            "trace_log": [],
+        }

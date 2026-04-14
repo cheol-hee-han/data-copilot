@@ -1,0 +1,37 @@
+[Unit]
+Description=Data Copilot - NL to SQL AI Agent
+Documentation=file:/opt/data-copilot/deploy/systemd/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=datacopilot
+Group=datacopilot
+WorkingDirectory=/opt/data-copilot
+EnvironmentFile=/opt/data-copilot/.env
+
+# gunicorn 실행 (설정은 /opt/data-copilot/gunicorn.conf.py 참조)
+ExecStart=/opt/data-copilot/.venv/bin/gunicorn -c gunicorn.conf.py src.main:app
+
+# 재시작 정책
+Restart=on-failure
+RestartSec=5
+
+# 정상 종료 신호
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 보안/격리 (필요 시 조정)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+# 로그는 journald 로 수집
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=data-copilot
+
+[Install]
+WantedBy=multi-user.target

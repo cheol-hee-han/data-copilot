@@ -4,7 +4,7 @@
 
 Redis 사용 환경에서는 RedisCancelStore,
 개발/테스트 환경에서는 MemoryCancelStore를 사용한다.
-SessionStore와 동일한 백엔드 선택 패턴을 따른다.
+settings.redis_backend 값에 따라 lifespan에서 선택된다.
 
 주의: MemoryCancelStore는 단일 워커(개발/테스트) 전용.
 운영 환경(multi-worker)에서는 반드시 Redis를 사용해야 한다.
@@ -18,10 +18,25 @@ from typing import Any, Protocol
 class CancelStore(Protocol):
     """취소 플래그 스토어 프로토콜."""
 
-    async def set_cancel(self, session_id: str, turn_id: str) -> None: ...
-    async def is_cancelled(self, session_id: str, turn_id: str) -> bool: ...
-    async def clear_cancel(self, session_id: str) -> None: ...
-    async def pop_cancel(self, session_id: str) -> str | None: ...
+    async def set_cancel(
+        self, session_id: str, turn_id: str,
+    ) -> None:
+        """취소 플래그를 설정한다."""
+        ...
+
+    async def is_cancelled(
+        self, session_id: str, turn_id: str,
+    ) -> bool:
+        """해당 턴이 취소되었는지 확인한다."""
+        ...
+
+    async def clear_cancel(self, session_id: str) -> None:
+        """취소 플래그를 삭제한다."""
+        ...
+
+    async def pop_cancel(self, session_id: str) -> str | None:
+        """취소 플래그를 반환하고 삭제한다."""
+        ...
 
 
 class MemoryCancelStore:
@@ -34,13 +49,16 @@ class MemoryCancelStore:
         self._flags: dict[str, str] = {}    # session_id → turn_id
 
     async def set_cancel(self, session_id: str, turn_id: str) -> None:
+        """취소 플래그를 설정한다."""
         self._flags[session_id] = turn_id
 
     async def is_cancelled(self, session_id: str, turn_id: str) -> bool:
+        """해당 턴이 취소되었는지 확인한다."""
         stored = self._flags.get(session_id)
         return stored is not None and stored == turn_id
 
     async def clear_cancel(self, session_id: str) -> None:
+        """취소 플래그를 삭제한다."""
         self._flags.pop(session_id, None)
 
     async def pop_cancel(self, session_id: str) -> str | None:
@@ -64,19 +82,22 @@ class RedisCancelStore:
         return f"cancel:{session_id}"
 
     async def set_cancel(self, session_id: str, turn_id: str) -> None:
+        """취소 플래그를 설정한다 (TTL 안전망 포함)."""
         await self._client.set(
             self._key(session_id), turn_id, ex=self._CANCEL_TTL,
         )
 
     async def is_cancelled(self, session_id: str, turn_id: str) -> bool:
+        """해당 턴이 취소되었는지 확인한다."""
         stored = await self._client.get(self._key(session_id))
         if stored is None:
             return False
         if isinstance(stored, bytes):
             stored = stored.decode()
-        return stored == turn_id
+        return bool(stored == turn_id)
 
     async def clear_cancel(self, session_id: str) -> None:
+        """취소 플래그를 삭제한다."""
         await self._client.delete(self._key(session_id))
 
     _POP_SCRIPT = "local v=redis.call('GET',KEYS[1]); if v then redis.call('DEL',KEYS[1]) end; return v"

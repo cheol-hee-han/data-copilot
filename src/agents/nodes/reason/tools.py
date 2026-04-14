@@ -49,7 +49,7 @@ from calendar import monthrange as _monthrange
 from collections.abc import Awaitable
 from typing import Any
 
-from src.connectors.manager import get_connector_manager
+from src.connectors.manager import ConnectorManager, get_connector_manager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -155,7 +155,7 @@ async def search_table_meta(
 async def search_use_cases(
     query: str,
     *,
-    exclude_ids: list[str] | None = None,
+    exclude_ids: list[str | int] | None = None,
 ) -> list[dict]:
     """유사 SQL 활용사례 벡터 검색 + Reranker 재순위."""
     mgr = get_connector_manager()
@@ -181,7 +181,7 @@ async def lookup_code_meta(
 async def search_manual(
     query: str,
     *,
-    exclude_ids: list[str] | None = None,
+    exclude_ids: list[str | int] | None = None,
 ) -> list[dict]:
     """업무 매뉴얼 검색 (Qdrant biz_manual 컬렉션)."""
     mgr = get_connector_manager()
@@ -216,8 +216,9 @@ async def get_sample_rows(
 ) -> list[dict]:
     """테이블의 샘플 데이터를 조회한다 (dialect 인식).
 
-    Sybase IQ(tsql): SELECT TOP N * FROM schema.table
-    Impala/PostgreSQL: SELECT * FROM schema.table LIMIT N
+    ADW(tsql): SELECT TOP N * FROM schema.table
+    BDP(hive) / CRP(oracle) / TEST(postgres):
+        SELECT * FROM schema.table LIMIT N
 
     SQL 인젝션 방지: 식별자 화이트리스트 검증 후 실행.
     TOOL_MAP에 어댑터(_tool_get_sample_rows)로 등록됨.
@@ -243,11 +244,7 @@ async def get_sample_rows(
 
     try:
         result = await db.execute_query(sql)
-        if hasattr(result, "rows") and isinstance(
-            result.rows, list,
-        ):
-            return result.rows
-        return []
+        return result if isinstance(result, list) else []
     except Exception as e:
         logger.warning(
             "get_sample_rows 실패",
@@ -303,7 +300,7 @@ async def get_column_values(
             f"ORDER BY {column_name}"
         )
     elif db.dialect == "hive":
-        # Impala/Hive: TEXT 타입 없음, STRING 사용
+        # BDP(hive): TEXT 타입 없음, STRING 사용
         sql = (
             f"SELECT DISTINCT {column_name} "
             f"FROM {qualified} "
@@ -324,12 +321,10 @@ async def get_column_values(
         )
     try:
         result = await db.execute_query(sql)
-        if hasattr(result, "rows") and isinstance(
-            result.rows, list,
-        ):
+        if isinstance(result, list):
             return [
                 str(row.get(column_name, ""))
-                for row in result.rows
+                for row in result
             ]
         return []
     except Exception as e:
@@ -379,8 +374,8 @@ async def get_column_profile(
     )
     try:
         result = await db.execute_query(sql)
-        if hasattr(result, "rows") and result.rows:
-            row = result.rows[0]
+        if isinstance(result, list) and result:
+            row = result[0]
             total = int(row.get("total_rows", 0))
             non_null = int(row.get("non_null_count", 0))
             return {
@@ -446,12 +441,10 @@ async def get_date_distribution(
         )
     try:
         result = await db.execute_query(sql)
-        if hasattr(result, "rows") and isinstance(
-            result.rows, list,
-        ):
+        if isinstance(result, list):
             return [
                 str(row.get(date_column, ""))
-                for row in result.rows
+                for row in result
             ]
         return []
     except Exception as e:
@@ -545,7 +538,7 @@ async def _tool_search_table_meta(
 async def _tool_search_use_cases(
     tool_input: str,
     *,
-    exclude_ids: list[str] | None = None,
+    exclude_ids: list[str | int] | None = None,
 ) -> list[dict]:
     """search_use_cases TOOL_MAP 어댑터."""
     parts, _page = _extract_page(
@@ -571,7 +564,7 @@ async def _tool_lookup_code_meta(
 async def _tool_search_manual(
     tool_input: str,
     *,
-    exclude_ids: list[str] | None = None,
+    exclude_ids: list[str | int] | None = None,
 ) -> list[dict]:
     """search_manual TOOL_MAP 어댑터."""
     parts, _page = _extract_page(
@@ -601,8 +594,9 @@ async def _tool_get_sample_rows(tool_input: str) -> Any:
     parts = [p.strip() for p in tool_input.split(",")]
     raw_table = parts[0] if parts else ""
     schema_name, table_name = _split_qualified_name(raw_table)
+    db_source = ConnectorManager.parse_db_source(table_name)
     return await get_sample_rows(
-        table_name, schema_name=schema_name,
+        table_name, schema_name=schema_name, db_source=db_source,
     )
 
 
@@ -619,9 +613,10 @@ async def _tool_get_column_values(
     if not raw_table or not column_name or not keyword:
         return []
     schema_name, table_name = _split_qualified_name(raw_table)
+    db_source = ConnectorManager.parse_db_source(table_name)
     return await get_column_values(
         table_name, column_name, keyword,
-        schema_name=schema_name, page=page,
+        schema_name=schema_name, db_source=db_source, page=page,
     )
 
 
@@ -638,8 +633,10 @@ async def _tool_get_column_profile(
     if not raw_table or not column_name:
         return {}
     schema_name, table_name = _split_qualified_name(raw_table)
+    db_source = ConnectorManager.parse_db_source(table_name)
     return await get_column_profile(
-        table_name, column_name, schema_name=schema_name,
+        table_name, column_name,
+        schema_name=schema_name, db_source=db_source,
     )
 
 
@@ -653,8 +650,10 @@ async def _tool_get_date_distribution(
     if not raw_table or not date_column:
         return []
     schema_name, table_name = _split_qualified_name(raw_table)
+    db_source = ConnectorManager.parse_db_source(table_name)
     return await get_date_distribution(
-        table_name, date_column, schema_name=schema_name,
+        table_name, date_column,
+        schema_name=schema_name, db_source=db_source,
     )
 
 

@@ -311,7 +311,7 @@ def get_llm_client() -> UnifiedLLMClient:
     elif provider == "openai_compatible":
         from openai import AsyncOpenAI
 
-        raw_client = AsyncOpenAI(
+        raw_client_openai = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url or None,
             max_retries=settings.llm_transport_max_retry,
@@ -320,7 +320,7 @@ def get_llm_client() -> UnifiedLLMClient:
                 "X-OpenRouter-Title": settings.openai_title,
             },
         )
-        _client = UnifiedLLMClient(messages=OpenAICompatibleMessages(raw_client))
+        _client = UnifiedLLMClient(messages=OpenAICompatibleMessages(raw_client_openai))
 
     else:
         msg = (

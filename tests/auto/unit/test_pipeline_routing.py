@@ -349,7 +349,7 @@ class TestRouteAfterSqlValidator:
         assert result == "conclude_success"
 
     def test_sql_syntax_with_retries_remaining_routes_to_fix_syntax(self):
-        """SQL_SYNTAX이고 generate_attempts < MAX_GENERATES이면 fix_syntax로 라우팅된다."""
+        """SQL_SYNTAX이고 local_fix 한도 미달이면 fix_syntax로 라우팅된다."""
         from src.agents.graph.pipeline import _route_after_sql_validator
         from src.agents.state.state import FailureType
         from src.agents.state.state import LoopGuard
@@ -364,12 +364,51 @@ class TestRouteAfterSqlValidator:
                       "SQL_SYNTAX + attempts=0", "fix_syntax", result, passed)
         assert result == "fix_syntax"
 
-    def test_sql_syntax_exhausted_routes_to_conclude_failure(self):
-        """SQL_SYNTAX이고 generate_attempts >= MAX_GENERATES이면 conclude_failure로 라우팅된다."""
+    def test_sql_syntax_escalates_to_replan_on_local_fix_limit(self):
+        """SQL_SYNTAX이고 local_fix 한도 초과 시 replan으로 에스컬레이션된다."""
+        from src.agents.graph.pipeline import _route_after_sql_validator
+        from src.agents.state.state import FailureType, LoopGuard, MAX_LOCAL_FIXES
+
+        lg = LoopGuard(local_fix_count=MAX_LOCAL_FIXES)
+        reason = _make_reason(failure_type=FailureType.SQL_SYNTAX, loop_guard=lg)
+        state = _make_state(reason=reason)
+        result = _route_after_sql_validator(state)
+
+        passed = result == "replan"
+        log_test_case(
+            logger, "test_val_syntax_escalate",
+            f"SQL_SYNTAX + local_fix={MAX_LOCAL_FIXES}",
+            "replan", result, passed,
+        )
+        assert result == "replan"
+
+    def test_sql_syntax_with_max_generates_zero_skips_limit(self):
+        """MAX_GENERATES == 0 이면 generate_attempts 조건이 비활성화되어 fix_syntax로 라우팅된다."""
         from src.agents.graph.pipeline import _route_after_sql_validator
         from src.agents.state.state import FailureType, LoopGuard, MAX_GENERATES
 
-        lg = LoopGuard(generate_attempts=MAX_GENERATES)
+        assert MAX_GENERATES == 0, "이 테스트는 max_generates=0 환경을 전제"
+        lg = LoopGuard(generate_attempts=100)  # 아무리 높아도 무시됨
+        reason = _make_reason(failure_type=FailureType.SQL_SYNTAX, loop_guard=lg)
+        state = _make_state(reason=reason)
+        result = _route_after_sql_validator(state)
+
+        passed = result == "fix_syntax"
+        log_test_case(
+            logger, "test_val_syntax_max0_skip",
+            "SQL_SYNTAX + MAX_GENERATES=0 + attempts=100",
+            "fix_syntax", result, passed,
+        )
+        assert result == "fix_syntax"
+
+    def test_sql_syntax_exhausted_routes_to_conclude_failure_if_positive(self, monkeypatch):
+        """MAX_GENERATES > 0 이면 generate_attempts 한도에서 conclude_failure로 라우팅된다."""
+        import src.agents.graph.pipeline as pipeline_mod
+        from src.agents.graph.pipeline import _route_after_sql_validator
+        from src.agents.state.state import FailureType, LoopGuard
+
+        monkeypatch.setattr(pipeline_mod, "MAX_GENERATES", 5)
+        lg = LoopGuard(generate_attempts=5)
         reason = _make_reason(failure_type=FailureType.SQL_SYNTAX, loop_guard=lg)
         state = _make_state(reason=reason)
         result = _route_after_sql_validator(state)
@@ -377,7 +416,7 @@ class TestRouteAfterSqlValidator:
         passed = result == "conclude_failure"
         log_test_case(
             logger, "test_val_syntax_exhausted",
-            f"SQL_SYNTAX + attempts={MAX_GENERATES}",
+            "SQL_SYNTAX + MAX_GENERATES=5 + attempts=5",
             "conclude_failure", result, passed,
         )
         assert result == "conclude_failure"
@@ -903,14 +942,16 @@ class TestHandleError:
         assert "중단" in result["formatted_response"]
         assert result["status"] == QueryStatus.CANCELLED
 
-    def test_retry_exhausted_returns_exhausted_message(self):
-        """generate_attempts >= SQL_MAX_RETRY이면 재시도 소진 메시지를 반환한다."""
-        from src.agents.graph.pipeline import _handle_error, SQL_MAX_RETRY
+    def test_retry_exhausted_returns_exhausted_message(self, monkeypatch):
+        """MAX_GENERATES > 0 이고 generate_attempts >= 한도이면 재시도 소진 메시지를 반환한다."""
+        import src.agents.graph.pipeline as pipeline_mod
+        from src.agents.graph.pipeline import _handle_error
         from src.agents.state.state import QueryStatus
         from src.agents.models.user_messages import ERR_SQL_RETRY_EXHAUSTED
 
+        monkeypatch.setattr(pipeline_mod, "MAX_GENERATES", 5)
         lg_state = _make_reason()
-        lg_state.loop_guard.generate_attempts = SQL_MAX_RETRY
+        lg_state.loop_guard.generate_attempts = 5
         state = _make_state(reason=lg_state)
 
         result = _handle_error(state)
@@ -921,7 +962,7 @@ class TestHandleError:
         )
         log_test_case(
             logger, "test_handle_retry_exhausted",
-            f"generate_attempts={SQL_MAX_RETRY}",
+            "MAX_GENERATES=5 + generate_attempts=5",
             "ERR_SQL_RETRY_EXHAUSTED", result["formatted_response"][:30], passed,
         )
         assert result["formatted_response"] == ERR_SQL_RETRY_EXHAUSTED

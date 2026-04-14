@@ -1,4 +1,4 @@
-[INPUT]
+[CONTEXT]
 
 ## 사용자 요청:
 {user_input}
@@ -10,3 +10,4 @@
 [TASK]
 
 사용자 요청과 조회 데이터를 기반으로 분석을 수행합니다.
+initial_reading(1차 판독)과 insights(2차 해석)를 구분해 깊이 있게 분석합니다.

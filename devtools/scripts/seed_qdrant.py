@@ -61,6 +61,7 @@ def _encode_hybrid(model, texts: list[str]):
 
 
 def seed_qdrant():
+    """Qdrant 컬렉션(업무매뉴얼·SQL이력)을 생성하고 벡터 데이터를 적재한다."""
     from qdrant_client import QdrantClient
     from qdrant_client.models import (
         Distance,

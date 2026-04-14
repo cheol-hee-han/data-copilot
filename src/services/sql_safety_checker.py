@@ -194,11 +194,11 @@ def validate_sql_safety(
         sql_upper.startswith("SELECT")
         or sql_upper.startswith("WITH")
     ):
-        errors = ["SELECT 문만 허용됩니다"]
+        errors_init: list[str] = ["SELECT 문만 허용됩니다"]
         return SafetyCheckResult(
             is_safe=False,
-            errors=errors,
-            feedback=build_validation_feedback(errors, sql),
+            errors=errors_init,
+            feedback=build_validation_feedback(errors_init, sql),
         )
 
     errors: list[str] = []

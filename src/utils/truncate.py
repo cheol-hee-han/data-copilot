@@ -42,15 +42,12 @@ def format_sql(sql: str, dialect: str | None = None) -> str:
     """SQL을 들여쓰기 포맷으로 변환한다 (로그/트레이스용).
 
     sqlglot pretty=True를 사용하며, 파싱 실패 시 원본을 그대로 반환한다.
-    dialect 미지정 시 커넥터 매니저의 dialect을 사용한다.
+    dialect 미지정 시 외부망 폴백("postgres")을 사용한다 — 호출부에서
+    target_db 결정 직후 dialect 를 명시 전달하는 것을 권장한다.
     """
     import sqlglot
     if dialect is None:
-        try:
-            from src.connectors.manager import get_connector_manager
-            dialect = get_connector_manager().get_query_db().dialect
-        except Exception:
-            dialect = "postgres"
+        dialect = "postgres"
     _dialect = dialect
     try:
         results = sqlglot.transpile(

@@ -10,7 +10,7 @@ state에 설정하여 sql_generator 재시도 또는 recovery_agent 진입을 �
     Layer 1 (Rule-based): 안전성 + sqlglot 파싱(dialect별) + 테이블/컬럼 존재
     Layer 2a (Rule-based): 구조적 sanity check (C-22, dialect 무관)
     Layer 3 (Execution): db_source에 맞는 커넥터로 실행 검증
-    Layer 2b (LLM): 의미 검증 + DB 에러 분류 — query_decomposition 체크리스트 대조
+    Layer 2b (LLM): 의미 검증 + DB 에러 분류 — NormalizedQuery 직접 참조 8개 체크
 
 핵심 함수:
     - sql_validator_node: 메인 노드 (3레이어 순차 검증)
@@ -37,12 +37,17 @@ from src.agents.state.state import (
     ReasoningState,
     SelectionStatus,
 )
+from src.agents.models.normalization import (
+    NormalizedQuery,
+    ModifierType,
+)
 from src.connectors.manager import get_connector_manager
 from src.agents.nodes.system_prompts import (
     SQL_VALIDATOR_SYSTEM,
 )
 from src.agents.nodes.reason.sql_generator import (
     _format_table_for_sql_prompt,
+    _format_codes_for_tables,
 )
 from src.services.sql_safety_checker import validate_sql_safety
 from src.utils.sqlglot_analyzer import (
@@ -57,6 +62,7 @@ from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
     REASONING_STEP,
 )
+from src.utils.sql_formatter import format_sql_tabular
 from src.utils.truncate import truncate_log
 
 logger = get_logger(__name__)
@@ -134,6 +140,7 @@ async def sql_validator_node(state: PipelineState) -> dict:
             reason,
             state.preprocessed_input,
             layer3_result,
+            state=state,
         )
         if layer2b_result["status"] == "FAIL":
             logger.warning(
@@ -159,6 +166,13 @@ async def sql_validator_node(state: PipelineState) -> dict:
         reason.validation_summary = layer2b_result.get(
             "validation_summary", "",
         )
+        try:
+            reason.confidence_score = min(
+                max(float(layer2b_result.get("confidence_score", 0.0)), 0.0),
+                1.0,
+            )
+        except (TypeError, ValueError):
+            reason.confidence_score = 0.0
 
         # 안전장치: Layer2b가 PASS인데 Layer3가 FAIL이면
         # DB_ERROR는 LLM이 간과한 것이므로 Layer3 실패를 반영한다.
@@ -199,7 +213,7 @@ async def sql_validator_node(state: PipelineState) -> dict:
     else:
         # Layer2b 비활성 시: Layer3 결과만으로 판정
         if layer3_result["status"] == "FAIL":
-            layer3_failure: FailureType = layer3_result.get(
+            layer3_failure = layer3_result.get(
                 "failure_type", FailureType.EMPTY_RESULT,
             )
             reason.failure_type = layer3_failure
@@ -252,24 +266,28 @@ def _infer_trace_routing(
 ) -> tuple[str, str]:
     """failure_type 기반으로 트레이스용 (next_node, routing_reason)을 도출한다.
 
-    pipeline.py의 _route_after_sql_validator와 동일한 로직으로
-    실제 라우팅 결과를 트레이스에 정확히 반영한다.
+    pipeline.py의 _route_after_sql_validator와 동일한 판단 로직으로,
+    라우팅 키 대신 실제 노드명을 반환하여 트레이스에 기록한다.
+    라우팅 조건 변경 시 pipeline.py와 동기화 필요.
     """
     ft = reason.failure_type
     match ft:
         case None:
             return "result_finalizer", "전 Layer 통과 → 실행"
         case FailureType.SQL_SYNTAX:
-            if reason.loop_guard.generate_attempts < MAX_GENERATES:
-                return "sql_generator", "구문 실패 → SQL 재생성"
-            return "result_finalizer", "구문 실패 + 재시도 소진 → 종료"
+            lg = reason.loop_guard
+            if lg.should_escalate_to_structural():
+                return "recovery_agent", "구문 실패 + 로컬 수정 한도 초과 → recovery"
+            if MAX_GENERATES > 0 and lg.generate_attempts >= MAX_GENERATES:
+                return "result_finalizer", "구문 실패 + 재시도 소진 → 종료"
+            return "sql_generator", "구문 실패 → SQL 재생성"
         case FailureType.SQL_SEMANTIC_LOCAL:
             lg = reason.loop_guard
             if lg.should_escalate_to_structural():
                 return "recovery_agent", "로컬 수정 한도 초과 → recovery"
-            if lg.generate_attempts < MAX_GENERATES:
-                return "sql_generator", "의미 검증 실패 → SQL 재생성"
-            return "result_finalizer", "의미 검증 실패 + 재시도 소진 → 종료"
+            if MAX_GENERATES > 0 and lg.generate_attempts >= MAX_GENERATES:
+                return "result_finalizer", "의미 검증 실패 + 재시도 소진 → 종료"
+            return "sql_generator", "의미 검증 실패 → SQL 재생성"
         case _:
             return "recovery_agent", f"{ft} → recovery"
 
@@ -322,7 +340,7 @@ async def _dispatch_validator_step(
             if reason.current_hypothesis else ""
         ),
         "inputs": {
-            "sql": sql[:200],
+            "sql": format_sql_tabular(sql),
             "query_decomposition": (
                 f"measures={len(reason.knowledge_items)}건"
             ),
@@ -381,6 +399,13 @@ def _build_layer2b_failure(
     reason.validation_summary = result.get(
         "validation_summary", "",
     )
+    try:
+        reason.confidence_score = min(
+            max(float(result.get("confidence_score", 0.0)), 0.0),
+            1.0,
+        )
+    except (TypeError, ValueError):
+        reason.confidence_score = 0.0
     if not reason.recovery_entry_source:
         reason.recovery_entry_source = "sql_validator"
     return {"reason": reason}
@@ -443,7 +468,7 @@ def _validate_layer1(
 
     # 4. 사용된 컬럼이 explored_tables의 컬럼 범위 안인지
     if active_tables and not errors:
-        allowed_columns = set()
+        allowed_columns: set[str] = set()
         for ct in active_tables:
             allowed_columns.update(c.name.upper() for c in ct.columns)
         if allowed_columns:
@@ -503,7 +528,11 @@ def _validate_layer2a(
     ]
     has_agg = any(kw in sql_upper for kw in agg_keywords)
     measures = decomp.get("measures", [])
-    has_agg_in_decomp = any(m.get("agg_function") for m in measures)
+    _CONCRETE_AGGS = {"SUM", "AVG", "COUNT", "COUNT_DISTINCT", "MAX", "MIN"}
+    has_agg_in_decomp = any(
+        (m.get("agg_function") or "").upper() in _CONCRETE_AGGS
+        for m in measures
+    )
     if has_agg_in_decomp and not has_agg:
         failed.append(
             "query_decomposition에 집계함수가 있는데 " "SQL에 집계함수가 없음",
@@ -524,6 +553,124 @@ def _validate_layer2a(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
+def _serialize_normalized_for_validation(
+    nq: NormalizedQuery | None,
+) -> str:
+    """NormalizedQuery를 validator 프롬프트용 가독성 텍스트로 직렬화한다.
+
+    중간 변환(decomposition)을 거치지 않고 NormalizedQuery에서 직접 추출하여
+    measure_type, note, position, direction, by 등 정보 손실을 방지한다.
+    """
+    if nq is None:
+        return "(정규화 정보 없음)"
+
+    sections: list[str] = []
+
+    # ── 의도 ──
+    sections.append(f"의도: {nq.intent.primary}")
+
+    # ── 대상 지표 (measures) ──
+    if nq.measures:
+        lines = []
+        for m in nq.measures:
+            parts = [f'"{m.term}"']
+            if m.measure_type and m.measure_type != "RAW":
+                parts.append(f"[{m.measure_type}]")
+            else:
+                parts.append("[RAW]")
+            if m.agg_function and m.agg_function not in ("NONE", "UNKNOWN"):
+                parts.append(f"(집계: {m.agg_function})")
+            elif m.agg_function == "NONE":
+                parts.append("(집계: 없음)")
+            if m.note:
+                parts.append(f"— 산출: {m.note}")
+            lines.append("  - " + " ".join(parts))
+        sections.append("대상 지표:\n" + "\n".join(lines))
+    else:
+        sections.append("대상 지표: (없음 — 단순 추출 질의)")
+
+    # ── 필터 조건 (filters) ──
+    if nq.filters:
+        lines = []
+        for f in nq.filters:
+            val_str = ", ".join(f.values) if f.values else ""
+            parts = [f'"{f.target}"']
+            if f.filter_type and val_str:
+                parts.append(f"{f.filter_type} [{val_str}]")
+            elif val_str:
+                parts.append(f"= {val_str}")
+            pos_tag = f"[{f.position}]" if f.position else ""
+            if pos_tag:
+                parts.append(pos_tag)
+            if f.note:
+                parts.append(f"— {f.note}")
+            lines.append("  - " + " ".join(parts))
+        sections.append("필터 조건:\n" + "\n".join(lines))
+
+    # ── 그룹핑 (dimensions) ──
+    groups = [d for d in nq.dimensions if d.role == "GROUP"]
+    partitions = [d for d in nq.dimensions if d.role == "PARTITION"]
+    if groups or partitions:
+        lines = []
+        for d in groups:
+            lines.append(f'  - "{d.term}" [GROUP]')
+        for d in partitions:
+            lines.append(f'  - "{d.term}" [PARTITION]')
+        sections.append("그룹핑:\n" + "\n".join(lines))
+
+    # ── 결과 가공 (modifiers) — SORT/RANK/LIMIT만 ──
+    order_mods = [
+        m for m in nq.modifiers
+        if m.type in (
+            ModifierType.SORT, ModifierType.RANK, ModifierType.LIMIT,
+        )
+    ]
+    if order_mods:
+        parts = []
+        for om in order_mods:
+            desc = om.type
+            if om.direction:
+                desc += f" {om.direction}"
+            if om.limit is not None:
+                desc += f" limit={om.limit}"
+            if om.by:
+                desc += f" by={om.by}"
+            parts.append(desc)
+        sections.append("정렬/순위: " + ", ".join(parts))
+
+    # ── 결과 가공 (modifiers) — DELTA/DELTA_RATE/CUMULATIVE 등 ──
+    calc_mods = [
+        m for m in nq.modifiers
+        if m.type not in (
+            ModifierType.SORT, ModifierType.RANK, ModifierType.LIMIT,
+        )
+    ]
+    if calc_mods:
+        parts = []
+        for cm in calc_mods:
+            desc = cm.type
+            if cm.by:
+                desc += f" by={cm.by}"
+            if cm.note:
+                desc += f" — {cm.note}"
+            parts.append(desc)
+        sections.append("계산 가공: " + ", ".join(parts))
+
+    # ── 출력 힌트 ──
+    hint = nq.output_hint
+    if hint and hint.format and hint.format != "NONE":
+        hint_parts = [hint.format]
+        if hint.doc_type:
+            hint_parts.append(f'문서유형="{hint.doc_type}"')
+        if hint.expected_columns:
+            hint_parts.append(
+                f'기대컬럼=[{", ".join(hint.expected_columns)}]',
+            )
+        sections.append("출력 힌트: " + ", ".join(hint_parts))
+
+    return "\n".join(sections)
+
+
 def _format_table_schema(reason: ReasoningState) -> str:
     """validator 프롬프트용 테이블 스키마 텍스트를 생성한다.
 
@@ -542,12 +689,51 @@ def _format_table_schema(reason: ReasoningState) -> str:
     )
 
 
+def _format_reasoning_decisions(
+    state: PipelineState,
+    reason: ReasoningState,
+) -> str:
+    """validator 프롬프트용 AI 추론 결정사항 텍스트를 생성한다.
+
+    resolved_signals(사용자 확인 / AI 추론)와 pending_assumptions를
+    통합 직렬화하여 validator가 SQL과 교차검증할 수 있게 한다.
+    """
+    lines: list[str] = []
+
+    # ── ASK 시그널: 사용자 확인 답변 ──
+    asks = [s for s in state.resolved_signals if s.decision == "ASK"]
+    if asks:
+        lines.append("[사용자 확인]")
+        for s in asks:
+            lines.append(f"- {s.question} → 사용자 답변: {s.answer}")
+
+    # ── INFER 시그널: AI 자동 추론 ──
+    infers = [s for s in state.resolved_signals if s.decision == "INFER"]
+    if infers:
+        lines.append("[AI 추론]")
+        for s in infers:
+            lines.append(
+                f"- {s.question} → {s.inferred_value} "
+                f"(근거: {s.reasoning})",
+            )
+
+    # ── pending_assumptions: SQL 생성 시 가정 ──
+    if reason.pending_assumptions:
+        lines.append("[가정]")
+        for assumption in reason.pending_assumptions:
+            lines.append(f"- {assumption}")
+
+    return "\n".join(lines) if lines else "(없음)"
+
+
 def _format_db_execution_result(layer3_result: dict[str, Any]) -> str:
     """Layer 3 실행 결과를 프롬프트용 문자열로 변환한다."""
     if layer3_result["status"] == "PASS":
         row_count = layer3_result.get("row_count", 0)
         return f"PASS ({row_count}건 반환)"
-    return f"FAIL: {layer3_result.get('feedback', '알 수 없는 오류')}"
+    if layer3_result.get("failure_type") == FailureType.EMPTY_RESULT:
+        return "EXECUTED (오류 없이 실행은 완료되었으나, 결과 0건)"
+    return f"ERROR: {layer3_result.get('feedback', '알 수 없는 오류')}"
 
 
 async def _validate_layer2b(
@@ -555,23 +741,26 @@ async def _validate_layer2b(
     reason: ReasoningState,
     original_query: str,
     layer3_result: dict[str, Any],
+    state: PipelineState | None = None,
 ) -> dict[str, Any]:
     """LLM 기반 의미 검증 + DB 에러 분류 — 8개 체크리스트 대조.
 
     Layer 3(DB 실행) 결과를 포함하여 LLM이 의미 검증과
     DB 에러 분류를 통합적으로 수행한다.
 
+    NormalizedQuery에서 직접 직렬화하여 decomposition 중간 변환의
+    정보 손실(measure_type, position, direction 등)을 방지한다.
+
     retry 후에도 실패하면 FAIL + structural로 처리하여
     검증되지 않은 SQL이 실행되지 않도록 한다.
     """
     from src.utils.llm import llm_call_with_parse_retry, ParseError
     from src.utils.llm.response import extract_json
-    from src.utils.llm.prompt import (
-        render_prompt,
-        serialize_decomp_slots,
-    )
+    from src.utils.llm.prompt import render_prompt
 
-    decomp = reason.query_decomposition
+    # NormalizedQuery에서 직접 직렬화 (정보 손실 방지)
+    nq = state.normalized_query if state is not None else None
+    normalized_summary = _serialize_normalized_for_validation(nq)
 
     # 확인된 지식 항목 / Dead-ends / 테이블 스키마 / DB 실행 결과
     confirmed_text = reason.format_confirmed_text()
@@ -579,13 +768,32 @@ async def _validate_layer2b(
     table_schema_text = _format_table_schema(reason)
     db_result_text = _format_db_execution_result(layer3_result)
 
+    # 코드값 매핑 (SELECTED 테이블 컬럼에 해당하는 explored_codes)
+    active_tables = [
+        ct for ct in reason.explored_tables
+        if ct.selection_status != SelectionStatus.REJECTED
+    ]
+    code_mappings_text = _format_codes_for_tables(
+        active_tables, reason.explored_codes,
+    )
+
+    # AI 추론 결정사항 (resolved_signals + pending_assumptions)
+    if state is not None:
+        reasoning_decisions_text = _format_reasoning_decisions(
+            state, reason,
+        )
+    else:
+        reasoning_decisions_text = "(없음)"
+
     template = SQL_VALIDATOR_SYSTEM
     replacements = {
         "{original_query}": original_query or "",
-        **serialize_decomp_slots(decomp),
+        "{normalized_summary}": normalized_summary,
         "{generated_sql}": sql,
         "{table_schema}": table_schema_text,
         "{confirmed_terms}": confirmed_text,
+        "{code_mappings}": code_mappings_text,
+        "{reasoning_decisions}": reasoning_decisions_text,
         "{dead_ends}": dead_text,
         "{db_execution_result}": db_result_text,
     }
@@ -627,6 +835,8 @@ async def _validate_layer2b(
             "failure_classification", "structural",
         )
 
+        score = data.get("confidence_score", 0.0)
+
         if verdict == "FAIL" and failed:
             return {
                 "status": "FAIL",
@@ -637,6 +847,7 @@ async def _validate_layer2b(
                 "validation_summary": data.get(
                     "validation_summary", "",
                 ),
+                "confidence_score": score,
             }
 
         return {
@@ -647,6 +858,7 @@ async def _validate_layer2b(
             "validation_summary": data.get(
                 "validation_summary", "",
             ),
+            "confidence_score": score,
         }
 
     except (ParseError, Exception) as e:
@@ -660,6 +872,7 @@ async def _validate_layer2b(
             "failed": ["LLM 의미 검증 불가"],
             "feedback": "LLM 의미 검증에 실패하여 SQL을 확정할 수 없습니다",
             "failure_classification": "structural",
+            "confidence_score": 0.0,
         }
 
 
@@ -702,7 +915,7 @@ async def _validate_layer3(
                     "데이터가 0건입니다.\n"
                     "조건이 과도하게 제한적이거나, "
                     "해당 기간에 데이터가 없을 수 있습니다.\n"
-                    f"현재 SQL:\n{sql[:500]}"
+                    f"현재 SQL:\n{sql}"
                 ),
             }
         return {"status": "PASS", "row_count": row_count}

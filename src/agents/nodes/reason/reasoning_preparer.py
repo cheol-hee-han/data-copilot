@@ -94,6 +94,9 @@ async def reasoning_preparer_node(state: PipelineState) -> dict:
         knowledge_items, reason.executed_tool_keys, nq,
         original_query=use_case_query,
     )
+    # 저니 뷰: 스텝에 소속 가설 태깅
+    for step in reason.execution_plan:
+        step.hypothesis_id = hypothesis.hypothesis_id
 
     reason.phase = Phase.EXPLORING
 
@@ -131,7 +134,7 @@ async def reasoning_preparer_node(state: PipelineState) -> dict:
             ],
             "hypothesis": f"{hypothesis.hypothesis_id}: {hypothesis.description}",
             "execution_plan": [
-                f"Step {s.step}: {s.tool}(\"{s.input[:80]}\")"
+                f"Step {s.step}: {s.tool}(\"{s.input}\")"
                 for s in reason.execution_plan
             ],
         },
@@ -152,7 +155,7 @@ def _build_decomposition_from_normalized(
     nq: NormalizedQuery | None,
 ) -> dict:
     """8-Slot NormalizedQuery에서 query_decomposition을 구성한다."""
-    empty = {"measures": [], "filters": [], "group_by": [], "order_limit": []}
+    empty: dict[str, list[Any]] = {"measures": [], "filters": [], "group_by": [], "order_limit": []}
     if nq is None:
         return empty
 

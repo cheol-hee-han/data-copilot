@@ -128,7 +128,8 @@ def _resolve_collection_ref(
     import json
     raw = json.dumps(stage)
     replaced = raw.replace(placeholder, actual)
-    return json.loads(replaced)
+    result: dict[str, Any] = json.loads(replaced)
+    return result
 
 
 class MongoConnector(SearchConnector):
@@ -267,7 +268,7 @@ class MongoConnector(SearchConnector):
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )
-        return results
+        return list(results)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 코드 메타 검색 (standard_code + standard_code_value $lookup)
@@ -332,7 +333,7 @@ class MongoConnector(SearchConnector):
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )
-        return results
+        return list(results)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 비즈니스 용어 검색 (biz_term + dpasset_table $lookup)
@@ -388,4 +389,4 @@ class MongoConnector(SearchConnector):
             count=len(results),
             latency_ms=round(_elapsed, 1),
         )
-        return results
+        return list(results)

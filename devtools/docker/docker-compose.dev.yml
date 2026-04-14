@@ -24,29 +24,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── ElasticSearch (테이블 메타 + 보고서 SQL + 코드 메타) ──
-  elasticsearch:
-    build:
-      context: ./elasticsearch
-      dockerfile: Dockerfile
-    image: dc-elasticsearch:8.15.0-nori
-    container_name: dc-elasticsearch
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=elastic_pass
-      - xpack.security.http.ssl.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-    ports:
-      - "9200:9200"
-    volumes:
-      - es_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf -u elastic:elastic_pass http://localhost:9200/_cluster/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   # ── Qdrant (업무 매뉴얼 벡터 스토어) ──
   qdrant:
     image: qdrant/qdrant:v1.12.6
@@ -117,7 +94,6 @@ services:
 
 volumes:
   pg_data:
-  es_data:
   qdrant_data:
   mongo_data:
   neo4j_data:

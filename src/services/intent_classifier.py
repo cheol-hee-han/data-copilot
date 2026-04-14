@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from src.models.enums import HistoryDecision, IntentType
 from src.config import settings
 from src.utils.llm import ParseError, get_llm_client, llm_call_with_parse_retry
+from src.utils.llm.response import extract_json
 from src.utils.logger import get_logger
 from src.utils.tracker import (
     get_current_node,
@@ -72,21 +73,26 @@ def _map_category_to_intent(
 
 def _format_history(
     conversation_history: list[dict[str, str]],
-    max_turns: int = 4,
+    max_turns: int = 0,
 ) -> str:
     """대화 이력을 프롬프트 주입용 텍스트로 포맷팅한다.
 
     type="clarification" 항목은 제외하여 LLM이
     일반 질의/응답 맥락만 참조하도록 한다.
     명확화 Q&A가 연속 여부 판정을 오염시키는 것을 방지한다.
+
+    Args:
+        max_turns: 포함할 최근 턴 수. 단방향 메시지 기준
+            (사용자 1건 + AI 1건 = 2턴). 0이면 전체 이력.
     """
     filtered = [
         t for t in conversation_history
         if t.get("type", "query") != "clarification"
     ]
-    recent = filtered[-max_turns:]
+    if max_turns > 0:
+        filtered = filtered[-max_turns:]
     lines: list[str] = []
-    for turn in recent:
+    for turn in filtered:
         role = "사용자" if turn["role"] == "user" else "시스템"
         content = turn["content"]
         lines.append(f"  {role}: {content}")
@@ -138,7 +144,10 @@ async def intent_classifier(
     """
     # 유저 프롬프트 조립 — 이력 있으면 포함, 없으면 생략
     history_text = (
-        _format_history(conversation_history)
+        _format_history(
+            conversation_history,
+            max_turns=settings.prompt_history_window,
+        )
         if conversation_history
         else ""
     )
@@ -219,9 +228,8 @@ def _parse_response(raw: str) -> dict:
 
     평탄화된 dict로 반환한다.
     """
-    cleaned = re.sub(r"```(?:json)?\s*", "", raw)
-    cleaned = cleaned.replace("```", "").strip()
-    data = json.loads(cleaned)
+    data = extract_json(raw, strict=True)
+    assert data is not None  # strict=True 보장
 
     # ── 중첩 구조에서 추출 ──
     continuity = data.get("continuity", {})

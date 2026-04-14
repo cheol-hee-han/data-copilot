@@ -1,35 +1,59 @@
 ---
-name: 소형 LLM 프롬프트 최적화 원칙
-description: GPT-3.5 Turbo급 로컬 LLM에서 안정적으로 동작하도록 적용한 프롬프트 설계 원칙
+name: 중대형 LLM(Qwen3.5 MoE) 프롬프트 최적화 원칙
+description: Qwen3.5-397B-A17B(MoE, 활성 17B) 대상 프롬프트 설계 핵심 원칙 (GPT-3.5급 구 원칙 대체)
 type: project
 ---
 
-이 프로젝트는 폐쇄망 환경의 GPT-3.5 Turbo급 로컬 LLM을 대상으로 한다.
-아래 원칙이 모든 프롬프트 설계에 적용되어 있다.
+# 중대형 LLM(Qwen3.5 MoE) 프롬프트 최적화 원칙
 
-**Why:** 소형 LLM은 지시가 모호하면 형식을 어기거나 여분의 텍스트를 추가하는 경향이 있음.
+타겟 모델: Qwen3.5-397B-A17B (MoE, 활성 파라미터 17B), 폐쇄망 배포
 
-**How to apply:** 새 프롬프트를 작성하거나 기존 프롬프트를 수정할 때 아래 원칙을 준수한다.
+**Why:** MoE expert routing 특성상 긴 규칙 리스트 중간이 무시됨. thinking 모드가 Text2SQL에서 오히려 불리하다는 커뮤니티 평가 있음.
 
-## 적용 원칙
+**How to apply:** 신규 프롬프트 작성 및 기존 프롬프트 수정 시 아래 원칙 준수.
 
-1. **출력 형식 엄격 제한**
-   - "반드시 아래 두 줄만 출력", "JSON 외 다른 텍스트 금지" 등 명시적 금지 문구 포함
-   - max_tokens 를 용도에 맞게 축소 (의도 분류: 50, 명확화: 300, SQL: 2000)
+## 규칙 총량 제한
 
-2. **Few-shot 예제 필수**
-   - 각 프롬프트에 2~3개의 입력→출력 예제 포함
-   - 예제는 실제 금융 도메인 케이스 사용 (연체율, 여신, 수신 등)
+- system 지시사항(번호 있는 규칙 목록) 7개 이내
+- 규칙이 많으면 MoE 중간 구간 규칙이 dead zone이 됨
+- 초과 규칙은 few-shot 예시로 흡수
 
-3. **Chain-of-Thought (SQL, 분석 프롬프트)**
-   - STEP 1~5 로 사고 순서를 명시
-   - SQL: 데이터 파악 → 테이블 선택 → 조건 결정 → 집계 → 규칙 점검
-   - 분석: 규모 파악 → 최대/최소 → 증감률 → 이상치 → 시사점
+## thinking 모드 전략
 
-4. **system/user 메시지 역할 분리**
-   - system: 역할 정의 + 규칙 + Few-shot (고정)
-   - user: 실제 데이터와 요청 (동적) — formatter, analyzer 에 적용
+- 계획수립형(sql_generator, recovery_agent): OFF — `/no_think` user 말미 삽입
+  - temp=0.7, top_p=0.8, presence_penalty=1.5
+  - 이유: Text2SQL은 구조화된 검색 문제, thinking이 불리. context 소비 비효율.
+- 분석판정형(context_interpreter, query_normalizer, sql_validator): ON
+  - temp=0.6, top_p=0.95
+  - 이유: 경계 케이스 판단에는 추론이 유리
+- 단순형(intent_classifier, viz_judgment): OFF
+  - temp=0.7, top_p=0.8
 
-5. **절대 규칙 레이블링**
-   - "[절대 규칙 — 어기면 무효]" 처럼 강한 레이블로 보안 규칙 강조
-   - INSERT/UPDATE/DELETE/DROP 금지를 규칙 첫머리에 배치
+## JSON 안정성
+
+- 출력 명령은 단 하나의 문장: "JSON 객체 하나만 출력한다. 마크다운 코드블록(```), 설명, 주석 금지."
+- 필드 description은 스키마 외부에 주석으로 달지 않음 (값으로 오인 패턴)
+- vLLM v0.9.1 미만: enable_thinking=False + guided_json 조합 금지 (버그 #18819)
+- 코드 레이어: Pydantic v2로 status 필드 enum 검증 필수
+
+## 금지 규칙 긍정 형태 전환
+
+- "INSERT/UPDATE/DELETE 절대 금지" → "SELECT 문만 작성한다"
+
+## user 말미 재강조 (3가지만)
+
+1. JSON 출력 명령 1줄
+2. dialect 규칙 (동적 값)
+3. fail 판단 핵심 원칙: "정확성을 보장할 수 없으면 fail"
+
+고정 규칙(PII, 보안, 환각방지)은 system에서만 1회 — 재강조 시 혼란 유발
+
+## Few-shot 전략
+
+- 최적: 4개 (success 2개, fail 2개)
+- fail 케이스 마지막 배치 (recency bias 활용)
+- "코드값 없음 → fail" 패턴을 마지막 예시로 고정
+
+## 기각된 패턴
+
+- thinking 상시 ON + 전체 스키마 주입 + system 규칙 집중: MoE dead zone + context 낭비로 역효과

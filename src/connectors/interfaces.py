@@ -8,7 +8,7 @@ impl/ 패키지의 모든 커넥터 구현체가 준수해야 하는 공통 인�
 계층 구조:
     - BaseConnector: 최상위 ABC. connect/disconnect/health_check 라이프사이클을 강제한다.
     - SearchConnector(BaseConnector): 검색 기능(search)을 추가로 요구하는 인터페이스.
-      ElasticSearch, Qdrant 등 검색 엔진 커넥터가 이를 구현한다.
+      Qdrant, MongoDB 등 검색 엔진 커넥터가 이를 구현한다.
     - DatabaseConnector(BaseConnector): 읽기 전용 쿼리 실행(execute_query)을 요구하는
       인터페이스. 정보계 DB, 이력 DB 등 SQL 실행 커넥터가 이를 구현한다.
 
@@ -64,9 +64,14 @@ class DatabaseConnector(BaseConnector):
 
     @abstractmethod
     async def execute_query(
-        self, query: str, params: dict[str, Any] | None = None
+        self, query: str, params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """읽기 전용 쿼리를 실행한다."""
+        """읽기 전용 쿼리를 실행하고 list[dict]를 반환한다.
+
+        반환값은 항상 list[dict[str, Any]] 이다.
+        래퍼 객체(.rows 등)로 감싸지 않는다.
+        호출자는 isinstance(result, list) 로 검증해야 한다.
+        """
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

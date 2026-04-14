@@ -167,7 +167,7 @@ class SQLRecord:
     description: str = ""
     enriched: str = ""
     tables_used: list[str] = field(default_factory=list)
-    source: str = "history_db"
+    source: str = "postgres"
     seed_version: str = _SEED_VERSION
     seed_dt: str = ""
 
@@ -329,17 +329,17 @@ class SQLHistorySeeder:
     # ── DB 쿼리 실행 헬퍼 ──
 
     async def _execute_query(self, query: str) -> list[dict]:
-        """HistoryDB 커넥터로 SELECT 쿼리를 실행한다."""
-        return await self._mgr.history_db.execute_query(query)
+        """Postgres 커넥터로 SELECT 쿼리를 실행한다."""
+        return await self._mgr.postgres.execute_query(query)
 
     async def _execute_update(
         self, query: str, params: dict[str, Any],
     ) -> None:
-        """HistoryDB 커넥터로 UPDATE 쿼리를 실행한다."""
+        """Postgres 커넥터로 UPDATE 쿼리를 실행한다."""
         from sqlalchemy import text as sa_text
         from sqlalchemy.ext.asyncio import AsyncSession
 
-        engine = self._mgr.history_db._engine
+        engine = self._mgr.postgres._engine
         async with AsyncSession(engine) as session:
             await session.execute(sa_text(query), params)
             await session.commit()
@@ -719,8 +719,8 @@ class SQLHistorySeeder:
                 hit_count=len(results.points),
             )
             for k, pt in enumerate(results.points, 1):
-                desc = pt.payload.get("description", "")[:80]
-                sql_preview = pt.payload.get("sql", "")[:80]
+                desc = (pt.payload or {}).get("description", "")[:80]
+                sql_preview = (pt.payload or {}).get("sql", "")[:80]
                 logger.info(
                     f"  Top-{k}",
                     score=round(pt.score, 4),

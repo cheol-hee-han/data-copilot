@@ -116,11 +116,17 @@ async def context_interpreter_node(state: PipelineState) -> dict:
 
     # ── Phase 3: 배치 LLM 해석 ──
     time_slot = _extract_time_slot(state.normalized_query)
+    nq = state.normalized_query
+    rewritten = (
+        getattr(nq, "rewritten_query", "")
+        if nq else ""
+    )
     batch_result = await _interpret_batch(
         execution_plan,
         state.preprocessed_input,
         time_slot,
         knowledge_items,
+        rewritten_query=rewritten,
         session_id=state.session_id,
         turn_id=state.turn_id,
     )
@@ -300,7 +306,7 @@ def _extract_time_slot(normalized_query: Any) -> str:
         return _TIME_SLOT_UNSPECIFIED
     raw_text = getattr(tr, "raw_text", None)
     if raw_text:
-        return raw_text
+        return str(raw_text)
     bp = getattr(tr, "base_period", None)
     if bp:
         start = getattr(bp, "absolute_start", "")
@@ -384,6 +390,7 @@ async def _interpret_batch(
     original_query: str,
     time_slot: str,
     knowledge_items: list[KnowledgeItem] | None = None,
+    rewritten_query: str = "",
     session_id: str = "",
     turn_id: str = "",
 ) -> BatchInterpretResult:
@@ -411,6 +418,7 @@ async def _interpret_batch(
             original_query,
             time_slot,
             knowledge_items,
+            rewritten_query=rewritten_query,
             session_id=session_id,
             turn_id=turn_id,
         )
@@ -421,6 +429,7 @@ async def _interpret_batch(
         original_query,
         time_slot,
         knowledge_items,
+        rewritten_query=rewritten_query,
     )
 
 
@@ -430,12 +439,14 @@ async def _interpret_level0(
     original_query: str,
     time_slot: str,
     knowledge_items: list[KnowledgeItem] | None = None,
+    rewritten_query: str = "",
 ) -> BatchInterpretResult:
     """Level 0: 전체 배치 1회 호출."""
     unresolved_str = _serialize_unresolved_items(knowledge_items)
 
     batch_vars = {
         "original_query": original_query or "",
+        "rewritten_query": rewritten_query or original_query or "",
         "time_slot": time_slot or _TIME_SLOT_UNSPECIFIED,
         "unresolved_items": unresolved_str,
         "tool_results": tool_results_str,
@@ -492,6 +503,7 @@ async def _interpret_level1(
     original_query: str,
     time_slot: str,
     knowledge_items: list[KnowledgeItem] | None = None,
+    rewritten_query: str = "",
     session_id: str = "",
     turn_id: str = "",
 ) -> BatchInterpretResult:
@@ -532,6 +544,7 @@ async def _interpret_level1(
 
         step_vars = {
             "original_query": original_query or "",
+            "rewritten_query": rewritten_query or original_query or "",
             "time_slot": time_slot or _TIME_SLOT_UNSPECIFIED,
             "unresolved_items": unresolved_str,
             "tool_results": tool_results_for_step,
@@ -1047,6 +1060,7 @@ def _hydrate_from_raw_results(
                 explored_tables,
                 existing_tables,
                 source_step=step.step,
+                hypothesis_id=step.hypothesis_id,
             )
         elif step.tool == "search_use_cases":
             _hydrate_use_cases_from_raw(
@@ -1054,6 +1068,7 @@ def _hydrate_from_raw_results(
                 explored_use_cases,
                 existing_uc_ids,
                 source_step=step.step,
+                hypothesis_id=step.hypothesis_id,
             )
         elif step.tool == "search_biz_terms":
             bt_counter = _hydrate_biz_terms_from_raw(
@@ -1063,6 +1078,7 @@ def _hydrate_from_raw_results(
                 bt_counter,
                 step.input,
                 source_step=step.step,
+                hypothesis_id=step.hypothesis_id,
             )
         elif step.tool == "search_manual":
             bm_counter = _hydrate_biz_manuals_from_raw(
@@ -1072,6 +1088,7 @@ def _hydrate_from_raw_results(
                 bm_counter,
                 step.input,
                 source_step=step.step,
+                hypothesis_id=step.hypothesis_id,
             )
         elif step.tool == "lookup_code_meta":
             _hydrate_codes_from_raw(step.raw_result, code_map)
@@ -1082,6 +1099,7 @@ def _hydrate_tables_from_raw(
     explored_tables: list[TableMeta],
     existing_names: set[str],
     source_step: int = 0,
+    hypothesis_id: str = "",
 ) -> None:
     """search/lookup_table_meta raw_result → TableMeta PENDING 적재."""
     if not isinstance(raw, dict):
@@ -1090,9 +1108,13 @@ def _hydrate_tables_from_raw(
         tname = t_data.get("table_name", "")
         if not tname or tname in existing_names:
             continue
-        valid_fields = {k: v for k, v in t_data.items() if k in TableMeta.model_fields}
+        valid_fields = {
+            k: v for k, v in t_data.items()
+            if k in TableMeta.model_fields
+        }
         valid_fields["selection_status"] = SelectionStatus.PENDING
         valid_fields["source_step"] = source_step
+        valid_fields["hypothesis_id"] = hypothesis_id
         explored_tables.append(TableMeta(**valid_fields))
         existing_names.add(tname)
 
@@ -1102,12 +1124,13 @@ def _hydrate_use_cases_from_raw(
     explored_use_cases: list[UseCaseEntry],
     existing_ids: set[str],
     source_step: int = 0,
+    hypothesis_id: str = "",
 ) -> None:
     """search_use_cases의 raw_result에서 UseCaseEntry를 적재한다."""
     if not isinstance(raw, dict):
         return
     for uc_data in raw.get("use_cases", []):
-        uc_id = uc_data.get("id", "")
+        uc_id = str(uc_data.get("_point_id", ""))
         if not uc_id or uc_id in existing_ids:
             continue
         explored_use_cases.append(
@@ -1117,8 +1140,9 @@ def _hydrate_use_cases_from_raw(
                 sql=uc_data.get("sql", ""),
                 domain=uc_data.get("domain", ""),
                 score=uc_data.get("score", 0.0),
-                point_id=str(uc_data.get("_point_id", "")),
+                point_id=uc_id,
                 source_step=source_step,
+                hypothesis_id=hypothesis_id,
             )
         )
         existing_ids.add(uc_id)
@@ -1131,6 +1155,7 @@ def _hydrate_biz_terms_from_raw(
     counter: int,
     source: str,
     source_step: int = 0,
+    hypothesis_id: str = "",
 ) -> int:
     """search_biz_terms의 raw_result에서 BizTermEntry를 적재한다.
 
@@ -1150,11 +1175,18 @@ def _hydrate_biz_terms_from_raw(
             BizTermEntry(
                 biz_term_id=bt_id,
                 term=term_name,
-                definition=item.get("biz_term_definition", ""),
+                definition=item.get(
+                    "biz_term_definition", "",
+                ),
                 synonyms=item.get("synonyms", []),
-                related_tables=[t for t in [item.get("table_name", "")] if t],
+                related_tables=[
+                    t for t in [
+                        item.get("table_name", ""),
+                    ] if t
+                ],
                 source=source,
                 source_step=source_step,
+                hypothesis_id=hypothesis_id,
             )
         )
         existing_ids.add(bt_id)
@@ -1168,6 +1200,7 @@ def _hydrate_biz_manuals_from_raw(
     counter: int,
     source: str,
     source_step: int = 0,
+    hypothesis_id: str = "",
 ) -> int:
     """search_manual의 raw_result에서 BizManualEntry를 적재한다.
 
@@ -1189,8 +1222,11 @@ def _hydrate_biz_manuals_from_raw(
                 content=content,
                 score=item.get("score", 0.0),
                 source=source,
-                point_id=str(item.get("_point_id", "")),
+                point_id=str(
+                    item.get("_point_id", ""),
+                ),
                 source_step=source_step,
+                hypothesis_id=hypothesis_id,
             )
         )
         existing_ids.add(bm_id)
@@ -1282,8 +1318,8 @@ def _hydrate_enrichment(
         if not isinstance(raw, dict):
             continue
         for uc_data in raw.get("use_cases", []):
-            uc_id = uc_data.get("id", "")
-            if uc_id not in selected_uc_ids:
+            uc_id = str(uc_data.get("_point_id", ""))
+            if not uc_id or uc_id not in selected_uc_ids:
                 continue
             _hydrate_tables_from_enrichment(
                 uc_data.get("enrichment_tables", []),

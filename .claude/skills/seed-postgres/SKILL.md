@@ -31,14 +31,14 @@ PostgreSQL 테스트 데이터 시딩 전문가. 정보계 업무 테이블과 �
 - 에이전트가 MongoDB 메타를 참조하여 SQL을 생성하면, 해당 SQL이 PG에서 실행 가능해야 함
 - 데이터가 없는 테이블은 빈 결과(`0 rows`)를 반환 — 테이블이 없어서 에러가 발생하면 안 됨
 
-## 정보계 DB (`PG_INFO_DSN`) — `biz_schema`
+## 테스트 DB (`TEST_DB_*`) — `biz_schema`
 
 - **DDL 생성 대상**: 요구사항 문서 섹션 5.0~5.14의 **모든** 테이블
 - **데이터 적재 대상 (★)**: 섹션 5에서 ★ 표시된 핵심 테이블만
 - **나머지**: DDL만 존재, 데이터 없음 (빈 테이블)
 - 정확한 테이블 목록·개수·데이터 규모는 요구사항 문서 섹션 5, 6 참조
 
-## 이력 DB (`PG_HISTORY_DSN`) — `sys_schema`
+## 공통 PostgreSQL DB (`POSTGRES_DB_*`) — `sys_schema`
 
 - `sql_exec_log` (★ 데이터 적재) — 요구사항 문서 섹션 5.15 참조
 
@@ -121,7 +121,7 @@ PostgreSQL 테스트 데이터 시딩 전문가. 정보계 업무 테이블과 �
 
 - **postgres 컨테이너(dc-postgres)에는 Python이 없음** — `docker exec dc-postgres pip install` 불가
 - **호스트에서 직접 실행**: `python devtools/scripts/seed_postgres.py`
-- 연결 정보: `INFO_DB_HOST=localhost`, `PG_SEED_USER=postgres`, `PG_SEED_PASSWORD=postgres`
+- 연결 정보: `TEST_DB_HOST=localhost`, `PG_SEED_USER=postgres`, `PG_SEED_PASSWORD=postgres`
 - 실행 명령:
   ```bash
   PYTHONIOENCODING=utf-8 PG_SEED_USER=postgres PG_SEED_PASSWORD=postgres python devtools/scripts/seed_postgres.py
@@ -137,12 +137,12 @@ PostgreSQL 테스트 데이터 시딩 전문가. 정보계 업무 테이블과 �
 
 - `biz_schema`를 DROP/CREATE 할 때 `readonly_user`에는 권한이 없음 → **postgres superuser로 실행**:
   ```bash
-  docker exec dc-postgres psql -U postgres -d info_db -c "DROP SCHEMA IF EXISTS biz_schema CASCADE; CREATE SCHEMA biz_schema AUTHORIZATION readonly_user;"
+  docker exec dc-postgres psql -U postgres -d test_db -c "DROP SCHEMA IF EXISTS biz_schema CASCADE; CREATE SCHEMA biz_schema AUTHORIZATION readonly_user;"
   ```
 - 시딩 스크립트는 `PG_SEED_USER=postgres`로 실행하여 DDL 생성 권한 확보
 - 시딩 후 **readonly_user에게 SELECT 권한 부여 필수**:
   ```bash
-  docker exec dc-postgres psql -U postgres -d info_db -c "GRANT USAGE ON SCHEMA biz_schema TO readonly_user; GRANT SELECT ON ALL TABLES IN SCHEMA biz_schema TO readonly_user;"
+  docker exec dc-postgres psql -U postgres -d test_db -c "GRANT USAGE ON SCHEMA biz_schema TO readonly_user; GRANT SELECT ON ALL TABLES IN SCHEMA biz_schema TO readonly_user;"
   ```
 
 ## 테이블명 대소문자

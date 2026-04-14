@@ -221,7 +221,7 @@ def _validate_dimensions(data: dict) -> None:
             VALID_DIM_ROLES,
             f"dim[{i}].role",
         ):
-            d["role"] = "GROUP"
+            d["role"] = "DISPLAY"
         if not _validate_enum(
             d.get("granularity"),
             all_gran,
@@ -245,6 +245,10 @@ def _validate_filters(data: dict) -> None:
             f"filter[{i}].pos",
         ):
             f["position"] = "PRE_AGG"
+        # LLM이 숫자로 반환한 values를 문자열로 변환
+        vals = f.get("values")
+        if isinstance(vals, list):
+            f["values"] = [str(v) for v in vals]
 
 
 def _validate_time(data: dict) -> None:
@@ -509,7 +513,9 @@ def _parse_normalization_json(raw: str) -> dict:
 
     strict=True이므로 파싱 실패 시 ValueError가 자동 raise된다.
     """
-    return extract_json(raw, strict=True)
+    result = extract_json(raw, strict=True)
+    assert result is not None  # strict=True 보장
+    return result
 
 
 async def _call_llm_and_parse(

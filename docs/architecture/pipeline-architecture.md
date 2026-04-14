@@ -1,6 +1,6 @@
 # Pipeline Architecture — Data Copilot
 
-> **Version 3.3** (2026-04-02)
+> **Version 3.4** (2026-04-13)
 > 이 문서는 실제 구현 코드(`src/agents/graph/pipeline.py`)를 기반으로 작성되었으며,
 > 사용자 질의 입력부터 최종 응답까지의 전체 처리 흐름을 기술한다.
 
@@ -17,7 +17,7 @@
 | **Reason** | 에이전틱 추론 루프 | reasoning_preparer, context_retriever, context_interpreter, readiness_gate, sql_generator, sql_validator, recovery_agent, result_finalizer |
 | **Present** | 결과 생성 및 표현 | execute_sql, analyze_data, format_response, simple_responder, error_end |
 
-> **Note:** 전처리(sanitize)는 그래프 노드가 아닌 `runner.py`에서 그래프 진입 전에 수행된다. 그래프의 진입점은 `intent_classifier`이다.
+> **Note:** 전처리(sanitize)는 그래프 노드가 아닌 `runner.py`에서 그래프 진입 전에 수행된다. 그래프의 진입점은 `turn_reset`이며, 이전 턴 산출물을 초기화한 뒤 `intent_classifier`로 연결된다.
 
 **핵심 소스 파일:**
 
@@ -27,7 +27,7 @@
 | `src/agents/graph/runner.py` | 파이프라인 실행 진입점 (sanitize 전처리 포함) |
 | `src/agents/state/state.py` | PipelineState, ReasoningState 정의 |
 | `src/services/confidence_scorer.py` | 행동 판정 SSOT (evaluate_readiness) |
-| `src/agents/nodes/reason/context_retriever.py` | 도구 기반 컨텍스트 검색 (ES, Qdrant, DB) |
+| `src/agents/nodes/reason/context_retriever.py` | 도구 기반 컨텍스트 검색 (MongoDB, Qdrant, DB) |
 | `src/agents/nodes/reason/context_interpreter.py` | 검색 결과 해석, knowledge_items 승격 |
 | `src/agents/nodes/reason/recovery_agent.py` | 실패 후 재계획 전용 (execution_plan 재수립) |
 | `src/agents/nodes/interpret/clarification_handler.py` | 통합 명확화 노드 (AmbiguitySignal 기반) |
@@ -55,8 +55,11 @@ flowchart TD
         A([사용자 질의]) --> SAN[sanitize]
     end
 
+    SAN -->|정상| TR["turn_reset
+    이전 턴 산출물 초기화"]
+
     subgraph interpret["Interpret 계층"]
-        SAN -->|정상| CC["intent_classifier
+        TR --> CC["intent_classifier
         이력해소 + 의도분류"]
         CC -->|DATA| NQ["normalize_query
         8-Slot 정규화"]
@@ -78,7 +81,7 @@ flowchart TD
         RP["reasoning_preparer
         가설·탐색계획"]
         RP --> KF["context_retriever
-        ES / Qdrant / DB 검색"]
+        MongoDB / Qdrant / DB 검색"]
         KF --> KI["context_interpreter
         결과해석·지식승격"]
         KI --> RG["readiness_gate
@@ -258,7 +261,7 @@ flowchart TD
     PLAN --> FETCH
 
     subgraph exploring["EXPLORING 단계 (2-노드 분리)"]
-        FETCH["context_retriever_node<br/><small>도구 기반 검색 실행<br/>(ES, Qdrant, DB)</small>"]
+        FETCH["context_retriever_node<br/><small>도구 기반 검색 실행<br/>(MongoDB, Qdrant, DB)</small>"]
         FETCH -->|"검색 결과 전달"| INTERP["context_interpreter_node<br/><small>결과 해석·knowledge_items 승격<br/>(batch interpret)</small>"]
     end
 
@@ -298,7 +301,7 @@ flowchart TD
         L2B --> L3["Layer 3: 실행 검증<br/><small>LIMIT 5 실제 실행<br/>(db_source 라우팅)</small>"]
     end
 
-    VAL --> VAL_RESULT{"검증 결과<br/><small>_route_after_sql_validator<br/>(5가지 분기)</small>"}
+    VAL --> VAL_RESULT{"검증 결과<br/><small>_route_after_sql_validator<br/>(8종 실패 → 5 목적지)</small>"}
     VAL_RESULT -->|"conclude_success"| FIN
     VAL_RESULT -->|"fix_syntax<br/>(생성 < 4회)"| GEN
     VAL_RESULT -->|"fix_local<br/>(로컬 수정 < 2회)"| GEN
@@ -616,8 +619,8 @@ PipelineState (최상위)
 | --- | ---- | ------ |
 | `DATA_EXTRACTION` | 데이터 추출 요청 | → normalize_query → reason |
 | `DATA_ANALYSIS` | 데이터 분석 요청 | → normalize_query → reason → analyze_data |
-| `CLARIFICATION_NEEDED` | 모호한 데이터 요청 | → clarification_handler → END |
-| `GENERAL_QUESTION` | 업무 일반 질문 | → clarification_handler → END |
+| `CLARIFICATION_NEEDED` | 모호한 데이터 요청 | → clarification_handler → END *(정의됨, 라우팅 미구현)* |
+| `GENERAL_QUESTION` | 업무 일반 질문 | → clarification_handler → END *(정의됨, 라우팅 미구현)* |
 | `CASUAL_TALK` | 인사, 잡담 | → clarification_handler → END |
 | `META_QUESTION` | 시스템/데이터 메타 질문 | → clarification_handler → END |
 | `UNKNOWN` | 미분류 (초기값) | — |
@@ -829,16 +832,15 @@ TraceEntry             — node, action, detail, timestamp
 
 ## 10. 커넥터 아키텍처
 
-`ConnectorManager` 싱글턴이 6종 외부 시스템 연결을 관리한다.
+`ConnectorManager` 싱글턴이 5종 외부 시스템 연결을 관리한다.
 
 | 커넥터 | 용도 | Dummy 모드 |
 |--------|------|-----------|
 | MongoDB | 테이블/컬럼 메타, 코드 메타, 비즈용어 사전 (메타 검색 주 소스) | 샘플 데이터 반환 |
-| ElasticSearch | 보고서 SQL 검색 전용 (table_meta/code_meta는 하위 호환용 보존) | 샘플 데이터 반환 |
 | Info DB (PostgreSQL) | 정보계 SQL 실행 (읽기 전용) | 샘플 결과 반환 |
 | History DB (PostgreSQL) | 과거 SQL 이력 검색 | 샘플 SQL 반환 |
 | Qdrant | 업무 매뉴얼 + SQL 이력 벡터 검색 | 샘플 문서 반환 |
-| Redis | 세션 캐시 | MemoryStore 폴백 |
+| Neo4j | 온톨로지 그래프, JOIN 경로 탐색 (향후) | 미지원 |
 
 **폐쇄망 전환:** `.env`의 `USE_DUMMY=false` + 각 커넥터 접속 정보 설정으로 전환.
 상세: `docs/guides/migration-guide.md` 참조.

@@ -15,7 +15,7 @@ Jinja2 등 외부 템플릿 엔진 대신 str.replace()를 사용하는 이유:
 
 핵심 함수:
     - render_prompt: 프롬프트 템플릿의 {key} 플레이스홀더를 치환
-    - serialize_decomp_slots: query_decomposition → 프롬프트 치환용 dict
+    - serialize_decomp_slots: (deprecated) query_decomposition → 프롬프트 치환용 dict
     - serialize_synonym_dict: 동의어 사전 dict → 프롬프트 주입 텍스트
 """
 
@@ -29,6 +29,10 @@ def serialize_decomp_slots(
     decomp: dict[str, Any],
 ) -> dict[str, str]:
     """query_decomposition 슬롯을 프롬프트 치환용 딕셔너리로 변환.
+
+    .. deprecated::
+        validator는 ``sql_validator._serialize_normalized_for_validation``
+        으로 대체되었다. 이 함수는 다른 소비자가 없으므로 향후 제거 예정.
 
     Args:
         decomp: query_decomposition dict.

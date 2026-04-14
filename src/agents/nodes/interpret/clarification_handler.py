@@ -159,8 +159,8 @@ async def clarification_handler_node(
 
     if not ask:
         return {
-            "resolved_signals": infer,    # operator.add가 append
-            "pending_signals": [],        # 덮어쓰기로 비움
+            "resolved_signals": [*state.resolved_signals, *infer],
+            "pending_signals": [],  # 덮어쓰기로 비움
         }
 
     # 3. ASK — 우선순위 1개 선택 → interrupt
@@ -191,7 +191,7 @@ async def clarification_handler_node(
     best.resolved_at = datetime.now()
 
     return {
-        "resolved_signals": infer + [best],
+        "resolved_signals": [*state.resolved_signals, *infer, best],
         "pending_signals": [],
     }
 

@@ -32,7 +32,8 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from langgraph.types import Command
 
@@ -43,13 +44,13 @@ from src.connectors.manager import get_connector_manager
 from src.models.result import SQLResult, VisualizationData
 from src.services.input_sanitizer import sanitize
 from src.services.insight_builder import build_insight
-from src.tools.langsmith import setup_langsmith
 from src.utils.logger import (
     bind_query_context,
     clear_query_context,
     get_logger,
     setup_logging,
 )
+from src.utils.sql_formatter import format_sql_tabular
 from src.utils.tracker.callback_handler import (
     DataCopilotCallbackHandler,
 )
@@ -91,73 +92,88 @@ async def run_pipeline(
     if not session_id:
         session_id = str(uuid.uuid4())
 
-    # ── 0. 입력 전처리 (sanitize + cancel 플래그) ──
-    prepared = await _prepare_input(user_input, session_id)
-    if prepared.early_result is not None:
-        return prepared.early_result
-
-    # ── 0-1. 유저 턴 조기 저장 (서버 크래시 시 메시지 유실 방지) ──
-    _user_turn_saved_early = False
+    # ── 활성 파이프라인 등록 ──
+    # 런마다 고유한 CAS 토큰을 생성해, 동시 재전송 시 A턴 finally 가
+    # B턴 등록을 덮어쓰지 않도록 한다 (turn_id 가 확정되기 전 시점이므로
+    # 별도 토큰 사용). 래퍼가 예외를 흡수하므로 Redis 장애가 파이프라인을
+    # 막지 않는다. 유저 턴 저장보다 앞에 두어 저장 단계 크래시도 커버한다.
+    from src.agents.graph.active_run import clear_active, mark_active
+    _run_key = str(uuid.uuid4())
     try:
-        _pool = get_connector_manager().checkpointer_pool
-        if _pool is not None:
-            from src.services.turn_text_store import save_turn
-            await save_turn(
-                _pool,
-                thread_id=session_id, role="user", content=user_input,
-                client_ip=client_ip, user_agent=user_agent,
-                turn_type="normal", request_id=session_id,
+        await mark_active(session_id, _run_key)
+
+        # ── 0. 입력 전처리 (sanitize + cancel 플래그) ──
+        prepared = await _prepare_input(user_input, session_id)
+        if prepared.early_result is not None:
+            return prepared.early_result
+
+        # ── 0-1. 유저 메시지 조기 저장 (서버 크래시 시 메시지 유실 방지) ──
+        _user_message_saved_early = False
+        try:
+            _pool = get_connector_manager().checkpointer_pool
+            if _pool is not None:
+                from src.services.message_store import save_message
+                await save_message(
+                    _pool,
+                    thread_id=session_id, role="user", content=user_input,
+                    client_ip=client_ip, user_agent=user_agent,
+                    message_type="normal", request_id=session_id,
+                )
+                _user_message_saved_early = True
+        except Exception:
+            logger.warning(
+                "유저 메시지 조기 저장 실패 — 파이프라인 완료 후 재시도",
+                exc_info=True,
             )
-            _user_turn_saved_early = True
-    except Exception:
-        logger.warning("유저 턴 조기 저장 실패 — 파이프라인 완료 후 재시도", exc_info=True)
 
-    handler = DataCopilotCallbackHandler(
-        run_id=session_id,
-        on_event=on_event,
-    )
+        handler = DataCopilotCallbackHandler(
+            run_id=session_id,
+            on_event=on_event,
+        )
 
-    logger.info(
-        "파이프라인 실행 시작",
-        user_input=user_input,
-        session_id=session_id,
-    )
+        logger.info(
+            "파이프라인 실행 시작",
+            user_input=user_input,
+            session_id=session_id,
+        )
 
-    handler.start_run(
-        user_input=user_input,
-        session_id=session_id,
-    )
+        handler.start_run(
+            user_input=user_input,
+            session_id=session_id,
+        )
 
-    manager = get_connector_manager()
-    await manager.connect_all()
+        manager = get_connector_manager()
+        await manager.connect_all()
 
-    app = get_compiled_app()
+        app = get_compiled_app()
 
-    run_config: dict[str, Any] = {
-        "callbacks": [handler],
-    }
-    if session_id:
-        run_config["configurable"] = {"thread_id": session_id}
+        run_config: dict[str, Any] = {
+            "callbacks": [handler],
+        }
+        if session_id:
+            run_config["configurable"] = {"thread_id": session_id}
 
-    # ── 1. interrupt 대기 중 감지 ──
-    is_interrupt_pending = await _check_interrupt(
-        app, run_config, session_id, prepared.previous_cancel_turn_id,
-    )
+        # ── 1. interrupt 대기 중 감지 ──
+        is_interrupt_pending = await _check_interrupt(
+            app, run_config, session_id, prepared.previous_cancel_turn_id,
+        )
 
-    # ── 2. 그래프 실행 + 결과 조립 ──
-    return await _execute_and_finalize(
-        app=app,
-        run_config=run_config,
-        handler=handler,
-        user_input=user_input,
-        sanitized_text=prepared.sanitized_text,
-        session_id=session_id,
-        conversation_history=conversation_history,
-        is_interrupt_pending=is_interrupt_pending,
-        client_ip=client_ip,
-        user_agent=user_agent,
-        user_turn_saved_early=_user_turn_saved_early,
-    )
+        # ── 2. 그래프 실행 ──
+        return await _execute_and_finalize(
+            app=app,
+            run_config=run_config,
+            handler=handler,
+            user_input=user_input,
+            sanitized_text=prepared.sanitized_text,
+            session_id=session_id,
+            conversation_history=conversation_history,
+            is_interrupt_pending=is_interrupt_pending,
+            client_ip=client_ip,
+            user_agent=user_agent,
+            user_message_saved_early=_user_message_saved_early,
+        )
+    finally:
+        await clear_active(session_id, _run_key)
 
 
 class _PreparedInput:
@@ -205,7 +221,7 @@ async def _prepare_input(
     try:
         _pool = get_connector_manager().checkpointer_pool
         if _pool is not None:
-            from src.services.turn_text_store import upsert_session_index
+            from src.services.message_store import upsert_session_index
             _title = user_input[:50] + ("..." if len(user_input) > 50 else "")
             await upsert_session_index(
                 _pool,
@@ -262,10 +278,10 @@ async def _execute_and_finalize(
     is_interrupt_pending: bool,
     client_ip: str | None,
     user_agent: str | None,
-    user_turn_saved_early: bool = False,
+    user_message_saved_early: bool = False,
 ) -> PipelineResult:
-    """그래프 실행, interrupt/정상 분기, 턴 저장, 에러 처리."""
-    user_turn_saved = user_turn_saved_early
+    """그래프 실행, interrupt/정상 분기, 메시지 저장, 에러 처리."""
+    user_message_saved = user_message_saved_early
 
     try:
         if is_interrupt_pending:
@@ -322,68 +338,68 @@ async def _execute_and_finalize(
                 else ""
             )
             try:
-                from src.services.turn_text_store import save_turn
+                from src.services.message_store import save_message
                 _pool = get_connector_manager().checkpointer_pool
                 if _pool is None:
                     raise RuntimeError("pool unavailable")
-                _user_turn_id = None
-                if not user_turn_saved:
-                    _user_turn_id = await save_turn(
+                _user_message_uuid = None
+                if not user_message_saved:
+                    _user_message_uuid = await save_message(
                         _pool,
                         thread_id=session_id, role="user", content=user_input,
                         client_ip=client_ip, user_agent=user_agent,
-                        turn_type="clarification", request_id=session_id,
+                        message_type="clarification", request_id=session_id,
                     )
-                    user_turn_saved = True
-                _assistant_turn_id = await save_turn(
+                    user_message_saved = True
+                _assistant_message_uuid = await save_message(
                     _pool,
                     thread_id=session_id, role="assistant", content=question,
                     client_ip=client_ip, user_agent=user_agent,
-                    turn_type="clarification", request_id=session_id,
+                    message_type="clarification", request_id=session_id,
                     status="success",
                 )
             except Exception:
-                logger.warning("명확화 턴 저장 실패", exc_info=True)
-                _user_turn_id = None
-                _assistant_turn_id = None
+                logger.warning("명확화 메시지 저장 실패", exc_info=True)
+                _user_message_uuid = None
+                _assistant_message_uuid = None
 
             clarification_result = PipelineResult(
                 response=question,
                 awaiting_clarification=True,
                 clarification_request=clarification_data,
             )
-            clarification_result.user_turn_id = _user_turn_id
-            clarification_result.turn_id = _assistant_turn_id
+            clarification_result.user_message_uuid = _user_message_uuid
+            clarification_result.message_uuid = _assistant_message_uuid
             return clarification_result
 
         # ── 정상 완료 결과 구성 ──
         pipeline_result = _build_result(handler, raw_state)
 
-        # ── 턴 저장 (실패해도 파이프라인 결과에 영향 없음) ──
+        # ── 메시지 저장 (실패해도 파이프라인 결과에 영향 없음) ──
         try:
-            from src.services.turn_text_store import save_turn
             from src.config import settings
+            from src.services.message_store import save_message
             _pool = get_connector_manager().checkpointer_pool
             if _pool is None:
                 raise RuntimeError("pool unavailable")
 
-            _user_turn_id = None
-            if not user_turn_saved:
-                _user_turn_id = await save_turn(
+            _user_message_uuid = None
+            if not user_message_saved:
+                _user_message_uuid = await save_message(
                     _pool,
                     thread_id=session_id, role="user", content=user_input,
                     client_ip=client_ip, user_agent=user_agent,
-                    turn_type="normal", request_id=session_id,
+                    message_type="normal", request_id=session_id,
                 )
-                user_turn_saved = True
+                user_message_saved = True
 
             _reason = raw_state.get("reason")
-            _assistant_turn_id = await save_turn(
+            _assistant_message_uuid = await save_message(
                 _pool,
                 thread_id=session_id, role="assistant",
                 content=pipeline_result.response,
                 client_ip=client_ip, user_agent=user_agent,
-                turn_type="normal",
+                message_type="normal",
                 intent=str(raw_state.get("intent", "")),
                 latency_ms=(
                     int(handler.trace.total_duration_ms)
@@ -402,6 +418,23 @@ async def _execute_and_finalize(
                 ),
                 model_id=settings.llm_model,
                 trace_id=handler.run_id,
+                executed_sql=(
+                    format_sql_tabular(_reason.validated_sql)
+                    if _reason and hasattr(_reason, "validated_sql")
+                    and _reason.validated_sql
+                    else None
+                ),
+                sql_explanation=(
+                    _reason.sql_explanation
+                    if _reason and hasattr(_reason, "sql_explanation")
+                    else None
+                ),
+                target_db=(
+                    _reason.target_db
+                    if _reason and hasattr(_reason, "target_db")
+                    and _reason.target_db
+                    else None
+                ),
                 metadata={
                     "trace_log": (
                         [e.model_dump() for e in pipeline_result.trace_log]
@@ -410,7 +443,7 @@ async def _execute_and_finalize(
                     ),
                     "insight": pipeline_result.insight,
                     "visualization": (
-                        pipeline_result.visualization.model_dump()
+                        pipeline_result.visualization.model_dump(mode="json")
                         if pipeline_result.visualization
                         else None
                     ),
@@ -426,11 +459,6 @@ async def _execute_and_finalize(
                             else 0
                         ),
                     },
-                    "executed_sql": (
-                        _reason.validated_sql
-                        if _reason and hasattr(_reason, "validated_sql")
-                        else None
-                    ),
                     "trace_files": pipeline_result.trace_files,
                     "result_data": (
                         pipeline_result.result_data
@@ -441,10 +469,10 @@ async def _execute_and_finalize(
                 },
             )
 
-            pipeline_result.turn_id = _assistant_turn_id
-            pipeline_result.user_turn_id = _user_turn_id
+            pipeline_result.message_uuid = _assistant_message_uuid
+            pipeline_result.user_message_uuid = _user_message_uuid
         except Exception:
-            logger.warning("턴 저장 실패 — 파이프라인 결과는 정상 반환", exc_info=True)
+            logger.warning("메시지 저장 실패 — 파이프라인 결과는 정상 반환", exc_info=True)
 
         return pipeline_result
 
@@ -453,36 +481,36 @@ async def _execute_and_finalize(
         try:
             handler.end_run(
                 final_status="error",
-                error_message=str(e)[:500],
+                error_message=str(e),
             )
             handler.save()
         except Exception:
             logger.debug("에러 trace 저장 실패", exc_info=True)
 
-        # ── 에러 턴 기록 (실패해도 예외 전파) ──
+        # ── 에러 메시지 기록 (실패해도 예외 전파) ──
         try:
-            from src.services.turn_text_store import save_turn
+            from src.services.message_store import save_message
             _pool = get_connector_manager().checkpointer_pool
             if _pool is None:
-                raise  # noqa: PLE0704 — pool 없으면 턴 저장 건너뛰기
-            if not user_turn_saved:
-                await save_turn(
+                raise  # noqa: PLE0704 — pool 없으면 메시지 저장 건너뛰기
+            if not user_message_saved:
+                await save_message(
                     _pool,
                     thread_id=session_id, role="user", content=user_input,
                     client_ip=client_ip, user_agent=user_agent,
-                    turn_type="error", request_id=session_id,
+                    message_type="error", request_id=session_id,
                 )
-            await save_turn(
+            await save_message(
                 _pool,
                 thread_id=session_id, role="assistant",
                 content="처리 중 오류가 발생했습니다.",
                 client_ip=client_ip, user_agent=user_agent,
-                turn_type="error", status="failure",
+                message_type="error", status="failure",
                 error_type=type(e).__name__,
-                error_message=str(e)[:500],
+                error_message=str(e),
             )
         except Exception:
-            logger.warning("에러 턴 저장 실패", exc_info=True)
+            logger.warning("에러 메시지 저장 실패", exc_info=True)
         raise
 
 
@@ -556,7 +584,8 @@ def _record_sql_metrics(
     sql_result = result.get("sql_result")
     handler.record_sql({
         "generated_sql": (
-            reason.generated_sql or "" if reason else ""
+            format_sql_tabular(reason.generated_sql)
+            if reason and reason.generated_sql else ""
         ),
         "validated": bool(reason and reason.validated_sql),
         "validation_errors": [],
@@ -588,7 +617,7 @@ def _record_run_end(
     intent = result.get("intent")
     handler.end_run(
         final_intent=(
-            intent.value
+            intent.value  # type: ignore[union-attr]
             if hasattr(intent, "value")
             else str(intent or "")
         ),
@@ -661,7 +690,6 @@ def _record_run_end_safe(
 def main() -> None:
     """CLI 엔트리포인트."""
     setup_logging()
-    setup_langsmith()
 
     if len(sys.argv) < 2:
         print("사용법: python -m src.agents.graph.runner '질의 내용'")

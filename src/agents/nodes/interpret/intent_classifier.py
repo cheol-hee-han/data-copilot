@@ -182,7 +182,7 @@ async def intent_classifier_node(
                 "intent_confidence": 0.4,
                 "query_category": "DATA_EXTRACTION",
                 "is_continuation": False,
-                "resolved_signals": [forced_signal],
+                "resolved_signals": [*state.resolved_signals, forced_signal],
                 "status": QueryStatus.INTENT_CLASSIFIED,
                 "trace_log": add_trace(
                     state, "맥락분류",
@@ -223,7 +223,7 @@ async def intent_classifier_node(
                 "question_type",
                 "confirm" if is_unsure else "single_select",
             ),
-            options=amb.get("options", []),
+            options=amb.get("options") or [],
             inferred_value=amb.get("inferred_value"),
             reasoning=amb.get(
                 "reasoning",
@@ -262,17 +262,20 @@ async def intent_classifier_node(
         if result.continue_context:
             updates["preprocessed_input"] = result.continue_context
         # 사용자에게 이전 대화 연속 해석 사실을 안내
-        updates["resolved_signals"] = [AmbiguitySignal(
-            source_node="intent_classifier",
-            decision="INFER",
-            ambiguity_type="CONTEXT",
-            confidence="MEDIUM",
-            question="이전 대화의 연속으로 해석하였습니다",
-            question_type="confirm",
-            inferred_value="기존 맥락 기반 재질의",
-            reasoning=result.continue_reason or "",
-            turn_id=state.turn_id,
-        )]
+        updates["resolved_signals"] = [
+            *state.resolved_signals,
+            AmbiguitySignal(
+                source_node="intent_classifier",
+                decision="INFER",
+                ambiguity_type="CONTEXT",
+                confidence="MEDIUM",
+                question="이전 대화의 연속으로 해석하였습니다",
+                question_type="confirm",
+                inferred_value="기존 맥락 기반 재질의",
+                reasoning=result.continue_reason or "",
+                turn_id=state.turn_id,
+            ),
+        ]
 
     # ── DATA_ANALYSIS: 시각화/분석 지시어 제거 ──
     if result.intent == IntentType.DATA_ANALYSIS:

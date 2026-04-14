@@ -32,6 +32,9 @@ from psycopg.sql import SQL
 from pydantic import BaseModel, Field
 
 from src.agents.state.state import (
+    MAX_GENERATES,
+    MAX_REPLANS,
+    MAX_TOOL_CALLS,
     ConfidenceStatus,
     DeadEnd,
     ExecutionStep,
@@ -39,11 +42,13 @@ from src.agents.state.state import (
     FinalStatus,
     Hypothesis,
     HypothesisStatus,
+    KnowledgeItem,
     Phase,
     PipelineState,
     ReasoningState,
     SelectionStatus,
     StepStatus,
+    TableMeta,
     should_terminate,
 )
 from src.agents.nodes.system_prompts import RECOVERY_AGENT_SYSTEM
@@ -81,6 +86,10 @@ async def recovery_agent_node(
     reason.phase = Phase.REPLANNING
     reason.exploration_phase = "recovery"
 
+    # 재계획 진입 시 target_db 결정 리셋 — 새 탐색 결과로 다시 결정한다.
+    reason.target_db = ""
+    reason.target_db_decision = None
+
     # Step 1: Hypothesis 전이 + DeadEnd 기록
     _handle_hypothesis_transition(reason)
 
@@ -96,62 +105,42 @@ async def recovery_agent_node(
     reason.failure_type = None
     reason.failure_reason = None
 
-    # ── 동일 실패 유형 연속 반복 가드 (rule-based) ──
-    # _handle_hypothesis_transition에서 현재 실패를 dead_ends에 append한 직후이므로,
-    # N번째 실패 진입 시 dead_ends에 N개가 쌓여 즉시 give_up된다.
-    # 예: max=3이면 3번째 실패 기록 즉시 종료 (3번째 재시도 기회 없음).
-    if entry_failure_type and _count_consecutive_same_failure(
-        reason.dead_ends, entry_failure_type,
-    ) >= settings.max_same_failure_repeats:
-        # LLM 미호출이므로 정적 교훈을 마지막 dead_end에 직접 기입
-        if reason.dead_ends:
-            last = reason.dead_ends[-1]
-            reason.dead_ends[-1] = last.model_copy(update={
-                "lessons_learned": (
-                    f"동일 실패 유형({entry_failure_type.value})이 "
-                    f"{settings.max_same_failure_repeats}회 연속 반복되어 "
-                    "추가 재시도가 무의미하다고 판단"
-                ),
-            })
-        _finalize_give_up(reason)
-        logger.info(
-            "recovery_agent: 동일 failure_type 연속 반복, 강제 종료",
-            failure_type=entry_failure_type.value,
-            repeat_count=settings.max_same_failure_repeats,
-        )
-        await _dispatch_reasoning_step(
-            reason,
-            entry_failure_type,
-            entry_failure_reason,
-            None,
-            {},
-            action="give_up",
-            next_node="result_finalizer",
-            routing_reason=(
-                f"동일 실패 유형({entry_failure_type.value}) "
-                f"{settings.max_same_failure_repeats}회 연속 → 강제 종료"
-            ),
-        )
-        return {"reason": reason}
-
     # Step 2: LLM 1회 호출 → 새 execution_plan 수립
     # 루프 가드 검사를 LLM 호출 이전이 아닌 이후에 수행하면
     # PENDING 가설이 소진된 상태에서도 LLM이 새 가설을 생성할 기회를 얻는다.
     plan_result, full_variables = await _build_recovery_plan(
         reason,
+        state=state,
         entry_failure_type=entry_failure_type,
         entry_failure_reason=entry_failure_reason,
     )
 
-    # 루프 가드 검사 (LLM 호출 후 — 새 가설 생성 기회 보장)
-    if should_terminate(reason) and (
-        plan_result is None or not plan_result.execution_plan
+    # LLM이 새 가설과 함께 replan을 제시했다면, should_terminate 평가 이전에
+    # current_hypothesis를 반영한다. 그렇지 않으면 _handle_hypothesis_transition에서
+    # pending이 비워진 직후 상태(current_hypothesis=None, pending=[])에서
+    # should_terminate의 "가설 소진" 조건이 false positive로 트리거되어
+    # LLM이 제시한 새 경로가 버려진다.
+    if (
+        plan_result is not None
+        and plan_result.action == "replan"
+        and plan_result.new_hypothesis is not None
     ):
+        plan_result.new_hypothesis.hypothesis_id = (
+            f"H{len(reason.hypotheses) + 1}"
+        )
+        reason.hypotheses.append(plan_result.new_hypothesis)
+        reason.current_hypothesis = plan_result.new_hypothesis
+
+    # 루프 가드 검사 (LLM 호출 + 새 가설 반영 후)
+    # MAX_TOOL_CALLS/REPLANS/GENERATES 한도는 새 가설 유무와 무관하게 그대로 강제된다.
+    if should_terminate(reason):
         _attach_lessons(reason, plan_result)
         _finalize_give_up(reason)
+        termination_label = _diagnose_termination(reason)
         logger.info(
             "recovery_agent: 루프 가드 한도 초과, 종료",
             phase=reason.phase.value,
+            termination=termination_label,
         )
         await _dispatch_reasoning_step(
             reason,
@@ -161,7 +150,7 @@ async def recovery_agent_node(
             full_variables,
             action="give_up",
             next_node="result_finalizer",
-            routing_reason="루프 가드 한도 초과 → 종료",
+            routing_reason=f"{termination_label} → 종료",
         )
         return {"reason": reason}
 
@@ -186,21 +175,30 @@ async def recovery_agent_node(
 
     _attach_lessons(reason, plan_result)
 
-    # Step 3: 새 execution_plan 적용
-    reason.execution_plan = plan_result.execution_plan
-    if plan_result.new_hypothesis:
-        plan_result.new_hypothesis.hypothesis_id = (
-            f"H{len(reason.hypotheses) + 1}"
-        )
-        reason.hypotheses.append(plan_result.new_hypothesis)
-        reason.current_hypothesis = plan_result.new_hypothesis
+    # Step 3: 새 execution_plan 누적 (이전 DONE 스텝 보존 → 저니 뷰)
+    # 스텝 번호를 기존 최대값 이후로 연속 채번하여 충돌 방지
+    max_step = max(
+        (s.step for s in reason.execution_plan), default=0,
+    )
+    hyp_id = (
+        reason.current_hypothesis.hypothesis_id
+        if reason.current_hypothesis else ""
+    )
+    for i, step in enumerate(plan_result.execution_plan):
+        step.step = max_step + i + 1
+        step.hypothesis_id = hyp_id
+    reason.execution_plan.extend(
+        plan_result.execution_plan,
+    )
 
     # Phase → EXPLORING (context_retriever로 라우팅)
     reason.phase = Phase.EXPLORING
 
+    new_steps = len(plan_result.execution_plan)
     logger.info(
         "recovery_agent: 재계획 완료",
-        execution_steps=len(reason.execution_plan),
+        new_steps=new_steps,
+        total_steps=len(reason.execution_plan),
         new_hypothesis=bool(plan_result.new_hypothesis),
         phase=reason.phase.value,
     )
@@ -302,6 +300,35 @@ async def _dispatch_reasoning_step(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 종료 사유 진단 (로그 라벨 정확도)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _diagnose_termination(reason: ReasoningState) -> str:
+    """should_terminate가 True로 평가된 구체 사유를 반환한다.
+
+    should_terminate는 5가지 조건을 OR로 평가하여 True/False만 반환하므로,
+    어느 조건 때문에 종료되었는지는 로그에서 확인할 수 없다. 본 헬퍼는
+    state를 다시 점검해 라벨을 만들어 디버깅 혼선을 줄인다.
+    """
+    g = reason.loop_guard
+    if g.total_tool_calls >= MAX_TOOL_CALLS:
+        return f"도구 호출 한도 초과({g.total_tool_calls}/{MAX_TOOL_CALLS})"
+    if g.replan_count >= MAX_REPLANS:
+        return f"재계획 한도 초과({g.replan_count}/{MAX_REPLANS})"
+    if MAX_GENERATES > 0 and g.generate_attempts >= MAX_GENERATES:
+        return f"SQL 생성 한도 초과({g.generate_attempts}/{MAX_GENERATES})"
+    if reason.final_status == FinalStatus.FAILURE:
+        return "최종 실패 상태"
+    if (
+        len(reason.get_pending_hypotheses()) == 0
+        and reason.current_hypothesis is None
+    ):
+        return "가설 소진"
+    return "알 수 없는 종료"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Hypothesis 관리
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -342,6 +369,11 @@ def _handle_hypothesis_transition(
     next_hyp = _consume_next_pending(reason.hypotheses)
     if next_hyp:
         reason.current_hypothesis = next_hyp
+        # 새 가설에 대한 local_fix 예산 초기화
+        # NOTE: generate_attempts는 글로벌 관찰 카운터이므로 가설 전환 시 리셋하지 않음
+        loop_guard = reason.loop_guard.model_copy()
+        loop_guard.local_fix_count = 0
+        reason.loop_guard = loop_guard
     else:
         reason.current_hypothesis = None
 
@@ -386,6 +418,7 @@ class RecoveryPlan(BaseModel):
 async def _build_recovery_plan(
     reason: ReasoningState,
     *,
+    state: PipelineState | None = None,
     entry_failure_type: FailureType | None = None,
     entry_failure_reason: str | None = None,
 ) -> tuple[RecoveryPlan | None, dict[str, str]]:
@@ -394,8 +427,19 @@ async def _build_recovery_plan(
     Returns:
         (RecoveryPlan 또는 None, full_variables) 튜플.
     """
+    original_query = ""
+    rewritten_query = ""
+    if state:
+        original_query = state.preprocessed_input or ""
+        nq = state.normalized_query
+        rewritten_query = (
+            getattr(nq, "rewritten_query", "")
+            if nq else ""
+        )
     prompt, variables, full_variables = _build_prompt(
         reason,
+        original_query=original_query,
+        rewritten_query=rewritten_query,
         entry_failure_type=entry_failure_type,
         entry_failure_reason=entry_failure_reason,
     )
@@ -794,6 +838,8 @@ def _serialize_dead_ends(
 def _build_prompt(
     reason: ReasoningState,
     *,
+    original_query: str = "",
+    rewritten_query: str = "",
     entry_failure_type: FailureType | None = None,
     entry_failure_reason: str | None = None,
 ) -> tuple[str, dict[str, str], dict[str, str]]:
@@ -856,6 +902,8 @@ def _build_prompt(
     # 치환 (프롬프트 파일의 placeholder와 1:1 매핑)
     prompt = RECOVERY_AGENT_SYSTEM
     replacements = {
+        "{original_query}": original_query or "",
+        "{rewritten_query}": rewritten_query or original_query or "",
         "{entry_source_description}": entry_desc,
         "{confirmed_knowledge}": ("\n".join(confirmed_items) or "(없음 — 확인된 정보가 없습니다.)"),
         "{unresolved_items}": ("\n".join(unresolved_items) or "(없음 — 해소되지 않은 정보가 없습니다.)"),
@@ -900,19 +948,6 @@ def _build_sample_summary(reason: ReasoningState) -> str:
 # 유틸리티
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-
-def _count_consecutive_same_failure(
-    dead_ends: list[DeadEnd],
-    target: FailureType,
-) -> int:
-    """dead_ends 끝에서부터 target과 동일한 failure_type 연속 횟수."""
-    count = 0
-    for de in reversed(dead_ends):
-        if de.failure_type == target:
-            count += 1
-        else:
-            break
-    return count
 
 
 def _attach_lessons(
@@ -960,11 +995,16 @@ def _build_failure_summary(
 
     if reason.dead_ends:
         parts.append("실패 경로:")
-        for de in reason.dead_ends:
-            line = f"  - [{de.failure_type}] {de.reason}"
+        for i, de in enumerate(reason.dead_ends, 1):
+            parts.append(f"{i}. {de.failure_type.value}")
+            for sub in de.reason.split("\n"):
+                sub = sub.strip()
+                if sub:
+                    parts.append(f"  - {sub}")
             if de.lessons_learned:
-                line += f" (교훈: {de.lessons_learned})"
-            parts.append(line)
+                parts.append(
+                    f"  - (교훈) {de.lessons_learned}",
+                )
 
     unresolved = reason.get_unresolved_knowledge()
     if unresolved:

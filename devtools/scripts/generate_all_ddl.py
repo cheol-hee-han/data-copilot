@@ -17,9 +17,9 @@ import re
 import psycopg2  # type: ignore[import-untyped]
 
 CONNINFO = (
-    f"host={os.getenv('INFO_DB_HOST', 'localhost')} "
-    f"port={os.getenv('INFO_DB_PORT', '5432')} "
-    f"dbname={os.getenv('INFO_DB_NAME', 'info_db')} "
+    f"host={os.getenv('TEST_DB_HOST', 'localhost')} "
+    f"port={os.getenv('TEST_DB_PORT', '5432')} "
+    f"dbname={os.getenv('TEST_DB_NAME', 'test_db')} "
     f"user={os.getenv('PG_SEED_USER', 'postgres')} "
     f"password={os.getenv('PG_SEED_PASSWORD', 'postgres')}"
 )
@@ -234,6 +234,7 @@ def generate_ddl(table_name: str, pk_cols: list[str]) -> str:
 
 
 def main():
+    """요건 문서를 파싱하여 전체 테이블의 DDL SQL 파일을 생성한다."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     req_path = os.path.join(
         script_dir, "..", "docs", "agent-guides", "test-data-requirements.md"

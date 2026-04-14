@@ -3,28 +3,28 @@
 -- docker-entrypoint-initdb.d 에 마운트되어 컨테이너 최초 기동 시 실행
 --
 -- 스키마 구조:
---   bankdb(info_db) > biz_schema  — 업무 테이블
---   history_db      > sys_schema  — SQL 실행 이력
+--   test_db     > biz_schema  — 업무 테이블 (개발/테스트용, 폐쇄망 전환 시 제거)
+--   postgres_db > sys_schema  — SQL 실행 이력 (폐쇄망에서도 유지)
 -- ============================================================
 
--- 정보계 DB
-CREATE DATABASE info_db;
+-- 개발/테스트용 정보계 DB
+CREATE DATABASE test_db;
 
--- SQL 이력 DB
-CREATE DATABASE history_db;
+-- 공통 PostgreSQL DB (SQL 이력·체크포인터)
+CREATE DATABASE postgres_db;
 
 -- 읽기 전용 사용자 (정보계)
 CREATE USER readonly_user WITH PASSWORD 'readonly_pass';
-GRANT CONNECT ON DATABASE info_db TO readonly_user;
+GRANT CONNECT ON DATABASE test_db TO readonly_user;
 
--- 이력 DB 사용자
-CREATE USER history_user WITH PASSWORD 'history_pass';
-GRANT CONNECT ON DATABASE history_db TO history_user;
+-- 공통 PostgreSQL 사용자
+CREATE USER postgres_user WITH PASSWORD 'postgres_pass';
+GRANT CONNECT ON DATABASE postgres_db TO postgres_user;
 
 -- ============================================================
--- 정보계 DB (biz_schema)
+-- 테스트 DB (biz_schema)
 -- ============================================================
-\connect info_db;
+\connect test_db;
 
 CREATE SCHEMA IF NOT EXISTS biz_schema;
 
@@ -213,17 +213,17 @@ GRANT SELECT ON ALL TABLES IN SCHEMA biz_schema TO readonly_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA biz_schema GRANT SELECT ON TABLES TO readonly_user;
 
 -- ============================================================
--- SQL 이력 DB (sys_schema + bdptbl)
+-- 공통 PostgreSQL DB (sys_schema + bdptbl)
 -- ============================================================
-\connect history_db;
+\connect postgres_db;
 
 CREATE SCHEMA IF NOT EXISTS sys_schema;
 
 -- 체크포인터 + Data Copilot 커스텀 테이블 스키마
 CREATE SCHEMA IF NOT EXISTS bdptbl;
-GRANT USAGE, CREATE ON SCHEMA bdptbl TO history_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA bdptbl GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO history_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA bdptbl GRANT USAGE, SELECT ON SEQUENCES TO history_user;
+GRANT USAGE, CREATE ON SCHEMA bdptbl TO postgres_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA bdptbl GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO postgres_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA bdptbl GRANT USAGE, SELECT ON SEQUENCES TO postgres_user;
 
 CREATE TABLE sys_schema.sql_exec_log (
     LOG_ID       SERIAL       PRIMARY KEY,
@@ -237,7 +237,7 @@ CREATE TABLE sys_schema.sql_exec_log (
     ERROR_MSG    TEXT
 );
 
-GRANT USAGE ON SCHEMA sys_schema TO history_user;
-GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA sys_schema TO history_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA sys_schema TO history_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA sys_schema GRANT SELECT, INSERT ON TABLES TO history_user;
+GRANT USAGE ON SCHEMA sys_schema TO postgres_user;
+GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA sys_schema TO postgres_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA sys_schema TO postgres_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA sys_schema GRANT SELECT, INSERT ON TABLES TO postgres_user;

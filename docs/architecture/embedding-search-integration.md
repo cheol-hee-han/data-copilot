@@ -16,11 +16,10 @@
 [사용자 질의]
   → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
   → context_retriever 노드 (reason 계층, 도구 기반 병렬 수집)
-     ├── ES table_meta     ← es_table_query
-     ├── ES report_sql     ← es_report_query
-     ├── History DB (ILIKE) ← history_db_query (키워드 기반)
-     ├── Qdrant biz_manual ← qdrant_query (Dense-only, MiniLM 384-dim)
-     └── ES code_meta      ← 전체 로드
+     ├── MongoDB table_meta  ← mongo_table_query
+     ├── History DB (ILIKE)  ← history_db_query (키워드 기반)
+     ├── Qdrant biz_manual   ← qdrant_query (Dense-only, MiniLM 384-dim)
+     └── MongoDB code_meta   ← 전체 로드
 ```
 
 ### 식별된 Gap
@@ -45,11 +44,10 @@
   → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
   → reasoning_preparer 노드 (규칙 기반 가설 생성·탐색 계획)
   → context_retriever 노드 (도구 기반 병렬 수집)
-     ├── ES table_meta
-     ├── ES report_sql
+     ├── MongoDB table_meta
      ├── History DB (ILIKE)        ← 기존 유지 (키워드 매칭 보완)
      ├── Qdrant biz_manual         ← BGE-M3 Dense
-     ├── ES code_meta
+     ├── MongoDB code_meta
      └── ★ Qdrant sql_history     ← BGE-M3 Hybrid (Dense 0.6 + Sparse 0.4)
            → Top-50 후보
            → ★ BGE-Reranker-v2-m3 → Top-5~10
@@ -319,3 +317,4 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 | 1.0 | 2026-03-21 | 초안 작성 |
 | 1.1 | 2026-04-01 | v3 파이프라인 리팩터링 반영: Context Service → context_retriever 노드, SQL Generator → sql_generator 노드, SearchQueryBuilder → query_normalizer 서비스 통합, 임베딩·재순위 QdrantConnector 통합, 파일 경로 현행화 (reranker.py 위치 변경, ContextInfo → models/context.py), 구현 상태 칼럼 추가 |
 | 1.2 | 2026-04-02 | planner → reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용) |
+| 1.3 | 2026-04-13 | ES(ElasticSearch) 참조를 MongoDB로 일괄 교체 — ES 제거 반영 |

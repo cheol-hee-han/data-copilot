@@ -43,10 +43,12 @@ class HiveConnector(DatabaseConnector):
 
     @property
     def dialect(self) -> str:
+        """SQL 방언 식별자."""
         return "hive"
 
     @property
     def default_schema(self) -> str:
+        """기본 스키마 (없음)."""
         return ""
 
     def __init__(self, use_dummy: bool = True) -> None:

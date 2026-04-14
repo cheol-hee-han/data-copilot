@@ -61,3 +61,9 @@ logs/
 
 # 온라인 다운로드된 model 은 제외
 models/
+
+# Claude agent isolation worktrees (transient)
+.claude/worktrees/
+
+# Editor/manual backups
+*.bak

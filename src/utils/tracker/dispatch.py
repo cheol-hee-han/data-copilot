@@ -103,4 +103,4 @@ async def dispatch_tracking_event(
         # LangGraph 실행 컨텍스트 밖 — 무시
         pass
     except Exception:
-        logger.debug("tracking event dispatch 실패", event=name)
+        logger.debug("tracking event dispatch 실패", event_name=name)

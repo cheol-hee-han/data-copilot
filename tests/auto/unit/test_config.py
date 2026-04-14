@@ -3,7 +3,7 @@
 테스트 대상:
     - DbConnectionInfo.dsn 프로퍼티 — DSN 문자열 구성 검증
     - DbConnectionInfo 기본값 검증
-    - Settings.history_db 프로퍼티 — Value Object 반환
+    - Settings.postgres_db 프로퍼티 — Value Object 반환
 
 외부 의존성 없음 (순수 Pydantic 모델 테스트).
 """
@@ -41,7 +41,7 @@ class TestDbConnectionInfoDsn:
         conn = DbConnectionInfo(
             host="localhost",
             port=5432,
-            name="info_db",
+            name="test_db",
             user="readonly",
             password="supersecret",
         )
@@ -154,46 +154,46 @@ class TestDbConnectionInfoDefaults:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 3. Settings.history_db 프로퍼티
+# 3. Settings.postgres_db 프로퍼티
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-class TestSettingsHistoryDb:
-    """Settings.history_db — DbConnectionInfo Value Object 반환 검증."""
+class TestSettingsPostgresDb:
+    """Settings.postgres_db — DbConnectionInfo Value Object 반환 검증."""
 
-    def test_history_db_returns_db_connection_info(self):
-        """history_db 프로퍼티가 DbConnectionInfo를 반환한다."""
+    def test_postgres_db_returns_db_connection_info(self):
+        """postgres_db 프로퍼티가 DbConnectionInfo를 반환한다."""
         s = Settings(
-            history_db_host="hist.host",
-            history_db_port=5433,
-            history_db_name="hist_db",
-            history_db_user="hist_user",
-            history_db_password="hist_pass",
+            postgres_db_host="pg.host",
+            postgres_db_port=5433,
+            postgres_db_name="pg_db",
+            postgres_db_user="pg_user",
+            postgres_db_password="pg_pass",
         )
-        info = s.history_db
+        info = s.postgres_db
         assert isinstance(info, DbConnectionInfo)
 
-    def test_history_db_fields_match_settings(self):
+    def test_postgres_db_fields_match_settings(self):
         """반환된 DbConnectionInfo 필드가 Settings 값과 일치한다."""
         s = Settings(
-            history_db_host="hist.example.com",
-            history_db_port=5433,
-            history_db_name="sql_history",
-            history_db_user="history_user",
-            history_db_password="hist_secret",
+            postgres_db_host="pg.example.com",
+            postgres_db_port=5433,
+            postgres_db_name="sql_history",
+            postgres_db_user="postgres_user",
+            postgres_db_password="pg_secret",
         )
-        info = s.history_db
-        assert info.host == "hist.example.com"
+        info = s.postgres_db
+        assert info.host == "pg.example.com"
         assert info.port == 5433
         assert info.name == "sql_history"
-        assert info.user == "history_user"
-        assert info.password == "hist_secret"
+        assert info.user == "postgres_user"
+        assert info.password == "pg_secret"
 
-    def test_history_db_dsn_excludes_password(self):
-        """history_db.dsn에 비밀번호가 포함되지 않는다."""
+    def test_postgres_db_dsn_excludes_password(self):
+        """postgres_db.dsn에 비밀번호가 포함되지 않는다."""
         s = Settings(
-            history_db_host="localhost",
-            history_db_password="topsecret",
+            postgres_db_host="localhost",
+            postgres_db_password="topsecret",
         )
-        dsn = s.history_db.dsn
+        dsn = s.postgres_db.dsn
         assert "topsecret" not in dsn

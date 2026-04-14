@@ -69,7 +69,10 @@ def _make_state(validated_sql: str):
     return PipelineState(
         user_input="테스트 질의",
         preprocessed_input="테스트 질의",
-        reason=ReasoningState(validated_sql=validated_sql),
+        reason=ReasoningState(
+            validated_sql=validated_sql,
+            target_db="ADW",
+        ),
     )
 
 

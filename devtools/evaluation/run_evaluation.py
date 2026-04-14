@@ -37,7 +37,6 @@ from devtools.evaluation.evaluator import (
 )
 from src.connectors.manager import get_connector_manager
 from src.agents.graph.runner import run_pipeline
-from src.tools.langsmith import setup_langsmith
 from src.utils.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -201,7 +200,6 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
-    setup_langsmith()
 
     # 골든셋 로드
     golden_set = load_golden_set(args.golden_path)

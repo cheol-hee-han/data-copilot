@@ -27,9 +27,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.config import settings
+# ── HuggingFace/Transformers 로딩 노이즈 억제 ──
+# FlagEmbedding/transformers import 전에 환경변수를 설정해야
+# "Fetching N files" tqdm 바와 tokenizer 경고가 억제된다.
+# (qdrant_connector.py에도 동일 설정이 있지만, import 순서에
+# 의존하지 않도록 양쪽 모두에 설정한다 — setdefault 이므로 멱등.)
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
+from src.config import settings  # noqa: E402
 from src.utils.logger import get_logger
-from src.utils.truncate import truncate_trace
 
 logger = get_logger(__name__)
 
@@ -53,6 +60,21 @@ class RerankCandidate:
     rerank_score: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class RerankStats:
+    """rerank 호출의 통계 정보 (tracker dispatch용 불변 객체).
+
+    Attributes:
+        input_count: rerank에 투입된 후보 수.
+        filtered_count: 사전 필터링 후 스코어링에 사용된 후보 수.
+        latency_ms: 백엔드 compute_scores 소요 시간 (ms).
+    """
+
+    input_count: int
+    filtered_count: int
+    latency_ms: float
+
+
 def _resolve_cpu_threads() -> int:
     """CPU 스레드 수를 결정한다.
 
@@ -68,7 +90,7 @@ def _resolve_cpu_threads() -> int:
         import psutil
         physical = psutil.cpu_count(logical=False)
         if physical:
-            return physical
+            return int(physical)
     except ImportError:
         pass
 
@@ -291,51 +313,84 @@ class Reranker:
         self._backend: Any = None
         self._enabled = settings.reranker_enabled
 
+    @property
+    def enabled(self) -> bool:
+        """외부에서 활성 상태 조회용 (private _enabled 노출 회피)."""
+        return self._enabled
+
+    def warmup(self) -> None:
+        """모델을 선로딩한다. 비활성화 시 no-op.
+
+        로딩 실패는 _ensure_model()에서 예외 전파 (fail-fast).
+        """
+        if not self._enabled:
+            return
+        self._ensure_model()
+
     def _ensure_model(self) -> None:
-        """백엔드를 초기화한다 (최초 1회)."""
+        """백엔드를 초기화한다 (최초 1회).
+
+        로딩 실패는 상위로 예외 전파하여 기동 시 fail-fast를 보장한다.
+        명시적 비활성화는 settings.reranker_enabled=False 로만 수행한다.
+        """
         if self._backend is not None or not self._enabled:
             return
 
-        try:
-            backend_type = settings.reranker_backend
-            if backend_type == "onnx":
-                self._backend = _OnnxRerankerBackend()
-            else:
-                self._backend = _PyTorchRerankerBackend()
-            self._backend.load()
-        except Exception as e:
-            logger.warning(
-                "Reranker 모델 로딩 실패, 비활성화 폴백",
-                backend=settings.reranker_backend,
-                error=str(e),
-            )
-            self._enabled = False
+        backend_type = settings.reranker_backend
+        if backend_type == "onnx":
+            self._backend = _OnnxRerankerBackend()
+        else:
+            self._backend = _PyTorchRerankerBackend()
+        self._backend.load()
 
     def rerank(
         self,
         query: str,
         candidates: list[RerankCandidate],
         top_k: int | None = None,
-    ) -> list[RerankCandidate]:
+    ) -> tuple[list[RerankCandidate], RerankStats]:
         """후보 문서를 재순위한다.
 
         최적화 파이프라인:
             1. 사전 필터링 (스코어 임계값)
             2. 백엔드 스코어링 (ONNX/PyTorch)
             3. 재순위 정렬
+
+        Returns:
+            (reranked: 재순위된 후보 리스트,
+             stats: tracker dispatch용 통계)
+
+        latency/통계 로그는 sync 컨텍스트에서 유지.
+        tracker dispatch는 호출자(async)가 stats를 이용해 수행.
         """
         if top_k is None:
             top_k = settings.reranker_top_k
 
         if not candidates:
-            return []
+            return [], RerankStats(
+                input_count=0, filtered_count=0, latency_ms=0.0,
+            )
 
         if not self._enabled:
-            return _sort_by_score(candidates)[:top_k]
+            return (
+                _sort_by_score(candidates)[:top_k],
+                RerankStats(
+                    input_count=len(candidates),
+                    filtered_count=len(candidates),
+                    latency_ms=0.0,
+                ),
+            )
 
         self._ensure_model()
         if not self._enabled or self._backend is None:
-            return _sort_by_score(candidates)[:top_k]
+            return (
+                _sort_by_score(candidates)[:top_k],
+                RerankStats(
+                    input_count=len(candidates),
+                    filtered_count=len(candidates),
+                    latency_ms=0.0,
+                ),
+            )
 
         # Step 1: 사전 필터링
         filtered = _prefilter(candidates)
@@ -357,55 +412,27 @@ class Reranker:
             key=lambda c: c.rerank_score,
             reverse=True,
         )
+        result_top = reranked[:top_k]
 
-        result_count = min(top_k, len(reranked))
         logger.info(
             "Reranker 재순위 완료",
             backend=settings.reranker_backend,
             input_count=len(candidates),
             filtered_count=len(filtered),
-            output_count=result_count,
+            output_count=len(result_top),
             latency_ms=round(elapsed, 1),
             top_score=(
-                round(reranked[0].rerank_score, 4)
-                if reranked else 0
+                round(result_top[0].rerank_score, 4)
+                if result_top else 0
             ),
         )
 
-        # 리랭킹 추적: sync 메서드이므로 fire-and-forget
-        from src.utils.tracker.dispatch import (
-            dispatch_tracking_event,
-            CONTEXT_RERANKED,
+        stats = RerankStats(
+            input_count=len(candidates),
+            filtered_count=len(filtered),
+            latency_ms=elapsed,
         )
-        import asyncio as _asyncio
-        try:
-            _loop = _asyncio.get_running_loop()
-        except RuntimeError:
-            _loop = None
-        if _loop and _loop.is_running():
-            _loop.create_task(dispatch_tracking_event(
-                CONTEXT_RERANKED, {
-                    "source": "reranker",
-                    "query": truncate_trace(query),
-                    "results_count": result_count,
-                    "results_summary": [
-                        f"backend={settings.reranker_backend}",
-                        f"input={len(candidates)}",
-                        f"filtered={len(filtered)}",
-                        f"output={result_count}",
-                        *(
-                            truncate_trace(
-                                f"{c.payload.get('description', '?')}"
-                                f" (score={c.rerank_score:.3f})"
-                            )
-                            for c in reranked[:3]
-                        ),
-                    ],
-                    "latency_ms": elapsed,
-                },
-            ))
-
-        return reranked[:top_k]
+        return result_top, stats
 
 
 # ──────────────────────────────────────────────────────────────
@@ -525,7 +552,7 @@ def _export_to_onnx(
         "attention_mask": {0: "batch", 1: "seq"},
         "logits": {0: "batch"},
     }
-    inputs = (
+    inputs: tuple[Any, ...] = (
         dummy["input_ids"],
         dummy["attention_mask"],
     )

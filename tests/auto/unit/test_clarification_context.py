@@ -2,7 +2,6 @@
 
 테스트 대상:
     - build_clarification_context() — resolved_signals를 프롬프트 섹션으로 변환
-    - build_auto_resolved_notice() — INFER 항목의 자연어 안내 문자열 생성
 
 핵심 검증 포인트:
     - turn_id 필터링: 현재 턴 시그널만 포함, 이전 턴 시그널 제외
@@ -16,10 +15,7 @@ from __future__ import annotations
 
 from src.agents.models.clarification import AmbiguitySignal, AmbiguityType, QuestionType
 from src.agents.state.state import PipelineState
-from src.agents.utils.clarification_context import (
-    build_auto_resolved_notice,
-    build_clarification_context,
-)
+from src.agents.utils.clarification_context import build_clarification_context
 from src.models.enums import ConfidenceLevel
 
 
@@ -221,115 +217,3 @@ class TestBuildClarificationContext:
         result = build_clarification_context(state)
         assert "명확화 대화" in result
         assert "자동 추론된 조건" not in result
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 2. build_auto_resolved_notice()
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-class TestBuildAutoResolvedNotice:
-    """build_auto_resolved_notice() 동작 검증."""
-
-    def test_empty_turn_id_returns_empty_string(self):
-        """turn_id가 빈 문자열이면 빈 문자열 반환."""
-        state = PipelineState(
-            user_input="test",
-            session_id="s1",
-            turn_id="",
-            resolved_signals=[
-                _infer_signal("기간?", "이번 달"),
-            ],
-        )
-        result = build_auto_resolved_notice(state)
-        assert result == ""
-
-    def test_no_infer_signals_returns_empty_string(self):
-        """INFER 시그널이 없으면 빈 문자열 반환."""
-        state = _state_with_signals(
-            [_ask_signal("질문?", "답변")],
-        )
-        result = build_auto_resolved_notice(state)
-        assert result == ""
-
-    def test_empty_signals_returns_empty_string(self):
-        """resolved_signals가 없으면 빈 문자열 반환."""
-        state = _state_with_signals([])
-        result = build_auto_resolved_notice(state)
-        assert result == ""
-
-    def test_infer_signal_included(self):
-        """INFER 시그널의 질문과 추론값이 출력에 포함된다."""
-        state = _state_with_signals(
-            [_infer_signal("기준월은?", "2026년 3월")],
-        )
-        result = build_auto_resolved_notice(state)
-        assert "조회 기준 안내" in result
-        assert "기준월은?" in result
-        assert "2026년 3월" in result
-
-    def test_notice_includes_change_prompt(self):
-        """다른 기준 안내 문구가 포함된다."""
-        state = _state_with_signals(
-            [_infer_signal("기간?", "2026년 3월")],
-        )
-        result = build_auto_resolved_notice(state)
-        assert "다른 기준을 원하시면" in result
-
-    def test_multiple_infer_signals_all_included(self):
-        """여러 INFER 시그널이 모두 포함된다."""
-        state = _state_with_signals(
-            [
-                _infer_signal("기간?", "이번 달"),
-                _infer_signal("지점?", "전체 지점"),
-            ],
-        )
-        result = build_auto_resolved_notice(state)
-        assert "기간?" in result
-        assert "이번 달" in result
-        assert "지점?" in result
-        assert "전체 지점" in result
-
-    def test_ask_signals_excluded_from_notice(self):
-        """ASK 시그널은 auto_resolved_notice에 포함되지 않는다."""
-        state = _state_with_signals(
-            [
-                _ask_signal("수동 질문?", "수동 답변"),
-                _infer_signal("자동 추론?", "자동 값"),
-            ],
-        )
-        result = build_auto_resolved_notice(state)
-        assert "수동 질문?" not in result
-        assert "수동 답변" not in result
-        assert "자동 추론?" in result
-
-    def test_previous_turn_infer_excluded(self):
-        """이전 턴의 INFER 시그널은 제외된다."""
-        prev_signal = _infer_signal("이전 질문?", "이전 값", turn_id="turn-001")
-        current_signal = _infer_signal("현재 질문?", "현재 값", turn_id="turn-002")
-        state = PipelineState(
-            user_input="test",
-            session_id="s1",
-            turn_id="turn-002",
-            resolved_signals=[prev_signal, current_signal],
-        )
-        result = build_auto_resolved_notice(state)
-        assert "현재 질문?" in result
-        assert "이전 질문?" not in result
-
-    def test_output_is_string_type(self):
-        """반환값은 항상 문자열 타입이다."""
-        state = _state_with_signals([])
-        result = build_auto_resolved_notice(state)
-        assert isinstance(result, str)
-
-    def test_no_infer_with_only_ask_returns_empty(self):
-        """ASK 시그널만 있는 상태에서 빈 문자열 반환."""
-        state = _state_with_signals(
-            [
-                _ask_signal("질문1?", "답변1"),
-                _ask_signal("질문2?", "답변2"),
-            ],
-        )
-        result = build_auto_resolved_notice(state)
-        assert result == ""

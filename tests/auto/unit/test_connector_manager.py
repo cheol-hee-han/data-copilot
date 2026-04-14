@@ -1,14 +1,16 @@
 """ConnectorManager 단위 테스트.
 
 테스트 대상:
-    - ConnectorManager.parse_db_source: 테이블명 → DB 소스 파싱 (static method)
-    - ConnectorManager.__init__: dummy 모드 초기화
-    - ConnectorManager.get_query_db: 배포 모드·db_source에 따른 라우팅
+    - ConnectorManager.parse_db_source: 테이블명 → 시스템 코드 파싱 (static method)
+    - ConnectorManager.__init__: dummy 모드 초기화 및 업무 DB 커넥터 등록
+    - ConnectorManager.get_query_db: 시스템 코드 → 업무 DB 커넥터 해석
     - reset_connector_manager: 싱글턴 초기화
+    - settings.target_db_code, settings.resolve_system_connector
 
 설계 원칙:
     - 실제 DB 연결 없음 (use_dummy=True)
-    - parse_db_source는 순수 함수이므로 외부 의존성 없음
+    - parse_db_source 는 순수 함수이므로 외부 의존성 없음
+    - 시스템 코드(ADW/BDP/CRP) 가 단일 식별자로 수렴
 
 실행:
     pytest tests/auto/unit/test_connector_manager.py -v
@@ -17,11 +19,13 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
+from src.config import Settings, settings
 from src.connectors.manager import (
     ConnectorManager,
-    reset_connector_manager,
     get_connector_manager,
+    reset_connector_manager,
 )
 
 
@@ -32,49 +36,48 @@ from src.connectors.manager import (
 
 @pytest.fixture(autouse=True)
 def reset_manager():
-    """각 테스트 전후로 ConnectorManager 싱글턴 초기화."""
     reset_connector_manager()
     yield
     reset_connector_manager()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# parse_db_source — 테이블명에서 DB 소스 파싱
+# parse_db_source — 테이블명에서 시스템 코드 파싱
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 def test_parse_adw_table():
-    """TB_ADW_CSC101M → 'adw' 반환."""
-    assert ConnectorManager.parse_db_source("TB_ADW_CSC101M") == "adw"
+    """TB_ADW_CSC101M → 'ADW' 반환."""
+    assert ConnectorManager.parse_db_source("TB_ADW_CSC101M") == "ADW"
 
 
 def test_parse_bdp_table():
-    """TB_BDP_LCT001L → 'bigdata' 반환."""
-    assert ConnectorManager.parse_db_source("TB_BDP_LCT001L") == "bigdata"
+    """TB_BDP_LCT001L → 'BDP' 반환."""
+    assert ConnectorManager.parse_db_source("TB_BDP_LCT001L") == "BDP"
 
 
-def test_parse_adw_lowercase():
+def test_parse_crp_table():
+    """TB_CRP_XXX → 'CRP' 반환."""
+    assert ConnectorManager.parse_db_source("TB_CRP_ACCT001") == "CRP"
+
+
+def test_parse_lowercase_normalized():
     """소문자 테이블명도 대문자로 변환 후 파싱."""
-    assert ConnectorManager.parse_db_source("tb_adw_dep201p") == "adw"
-
-
-def test_parse_bdp_lowercase():
-    """소문자 BDP 테이블명 파싱."""
-    assert ConnectorManager.parse_db_source("tb_bdp_log001l") == "bigdata"
+    assert ConnectorManager.parse_db_source("tb_adw_dep201p") == "ADW"
+    assert ConnectorManager.parse_db_source("tb_bdp_log001l") == "BDP"
 
 
 def test_parse_mixed_case():
-    """혼합 대소문자 테이블명 파싱."""
-    assert ConnectorManager.parse_db_source("Tb_Adw_Test001") == "adw"
+    assert ConnectorManager.parse_db_source("Tb_Adw_Test001") == "ADW"
 
 
 def test_parse_no_system_code_returns_empty():
-    """시스템코드가 없는 테이블명은 빈 문자열 반환."""
+    """시스템 코드가 없는 테이블명은 빈 문자열 반환."""
     assert ConnectorManager.parse_db_source("TB_CUST_INFO") == ""
 
 
 def test_parse_unknown_system_code_returns_empty():
-    """매핑되지 않은 시스템코드는 빈 문자열 반환."""
+    """target_db_schema_map 에 없는 시스템 코드는 빈 문자열 반환."""
     assert ConnectorManager.parse_db_source("TB_XYZ_TABLE001") == ""
 
 
@@ -85,47 +88,33 @@ def test_parse_too_short_table_name():
 
 
 def test_parse_empty_string():
-    """빈 문자열은 빈 문자열 반환."""
     assert ConnectorManager.parse_db_source("") == ""
 
 
-def test_parse_schema_prefixed_table():
-    """스키마명이 앞에 붙은 경우 파싱 결과 확인 (스키마 포함 → 파트 변위)."""
-    # "biz_schema.TB_ADW_CSC101M" → 파트: ['BIZ_SCHEMA.TB', 'ADW', 'CSC101M']
-    # 두 번째 파트가 ADW이므로 'adw' 반환
-    result = ConnectorManager.parse_db_source("BIZ_SCHEMA.TB_ADW_CSC101M")
-    # 스키마 구분자는 언더스코어가 아닌 점(.)이므로 전체가 첫 파트로 들어감
-    # 실제 동작에 따라 검증
-    assert isinstance(result, str)
-
-
 def test_parse_returns_string_type():
-    """반환 타입이 항상 str이어야 한다."""
     assert isinstance(ConnectorManager.parse_db_source("TB_ADW_TEST"), str)
     assert isinstance(ConnectorManager.parse_db_source("UNKNOWN"), str)
 
 
-def test_parse_multiple_adw_tables():
-    """다양한 ADW 테이블명 파싱."""
-    adw_tables = [
-        "TB_ADW_CSC101M",
-        "TB_ADW_LNB301M",
-        "TB_ADW_DEP201P",
-        "TB_ADW_TXN001L",
-    ]
-    for table in adw_tables:
-        assert ConnectorManager.parse_db_source(table) == "adw", f"Failed: {table}"
+def test_parse_schema_prefixed_adw():
+    """ADWOWN.TB_ADW_LNB333M → 'ADW' (스키마 접두사 제거)."""
+    assert ConnectorManager.parse_db_source(
+        "ADWOWN.TB_ADW_LNB333M",
+    ) == "ADW"
 
 
-def test_parse_multiple_bdp_tables():
-    """다양한 BDP 테이블명 파싱."""
-    bdp_tables = [
-        "TB_BDP_LCT001L",
-        "TB_BDP_LOG002L",
-        "TB_BDP_EVT003L",
-    ]
-    for table in bdp_tables:
-        assert ConnectorManager.parse_db_source(table) == "bigdata", f"Failed: {table}"
+def test_parse_schema_prefixed_bdp():
+    """BDPOWN.TB_BDP_XXX001L → 'BDP' (스키마 접두사 제거)."""
+    assert ConnectorManager.parse_db_source(
+        "BDPOWN.TB_BDP_XXX001L",
+    ) == "BDP"
+
+
+def test_parse_schema_prefixed_lowercase():
+    """adwown.tb_adw_dep201p → 'ADW' (소문자 + 스키마)."""
+    assert ConnectorManager.parse_db_source(
+        "adwown.tb_adw_dep201p",
+    ) == "ADW"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -133,38 +122,42 @@ def test_parse_multiple_bdp_tables():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def test_init_dummy_mode_creates_connectors():
-    """dummy 모드로 초기화하면 커넥터 인스턴스가 생성된다."""
+def test_init_creates_infra_connectors():
+    """인프라 커넥터(mongo/qdrant/postgres/neo4j) 는 항상 생성된다."""
     manager = ConnectorManager(use_dummy=True)
     assert manager.mongo is not None
     assert manager.qdrant is not None
+    assert manager.postgres is not None
     assert manager.neo4j is not None
-    assert manager.info_db is not None
-    assert manager.history_db is not None
 
 
-def test_init_dummy_mode_not_connected():
-    """초기화 직후에는 connect_all 전까지 _connected가 False."""
+def test_init_populates_db_connectors():
+    """target_db_schema_map 키를 resolve 한 결과로 _db_connectors 가 채워진다.
+
+    기본 설정(system_db_overrides={"ADW":"TEST"}) 에서는 ADW→TEST, BDP→BDP, CRP→CRP
+    로 매핑되어 BDP, CRP, TEST 세 개의 커넥터가 등록된다.
+    """
+    manager = ConnectorManager(use_dummy=True)
+    keys = set(manager._db_connectors.keys())
+    expected = {
+        settings.resolve_system_connector(code)
+        for code in settings.target_db_schema_map.keys()
+    }
+    assert keys == expected
+
+
+def test_init_not_connected_initially():
+    """초기화 직후에는 connect_all 전까지 _connected 가 False."""
     manager = ConnectorManager(use_dummy=True)
     assert manager._connected is False
 
 
 def test_init_use_dummy_flag_stored():
-    """use_dummy 플래그가 인스턴스에 저장된다."""
     manager = ConnectorManager(use_dummy=True)
     assert manager._use_dummy is True
 
 
-def test_init_adw_bigdata_none_in_external_mode():
-    """external 배포 모드에서는 _adw_db, _bigdata_db가 None."""
-    manager = ConnectorManager(use_dummy=True)
-    # use_dummy=True이면 internal 분기 진입 안 함
-    assert manager._adw_db is None
-    assert manager._bigdata_db is None
-
-
 def test_set_checkpointer_pool():
-    """set_checkpointer_pool로 pool을 주입하면 property로 접근 가능."""
     manager = ConnectorManager(use_dummy=True)
     mock_pool = object()
     manager.set_checkpointer_pool(mock_pool)
@@ -172,39 +165,41 @@ def test_set_checkpointer_pool():
 
 
 def test_checkpointer_pool_initially_none():
-    """초기 checkpointer_pool은 None이어야 한다."""
     manager = ConnectorManager(use_dummy=True)
     assert manager.checkpointer_pool is None
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# get_query_db — 배포 모드 라우팅
+# get_query_db — 시스템 코드 라우팅
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def test_get_query_db_external_returns_info_db():
-    """external 모드에서는 항상 info_db 반환."""
+def test_get_query_db_with_adw_source_resolves_override():
+    """db_source='ADW' 는 override 를 거쳐 TEST 커넥터로 해석된다."""
     manager = ConnectorManager(use_dummy=True)
-    # settings.deployment_mode가 'external'이면 info_db 반환
-    if manager._deployment == "external":
-        db = manager.get_query_db()
-        assert db is manager.info_db
+    db = manager.get_query_db(db_source="ADW")
+    expected = manager._db_connectors[
+        settings.resolve_system_connector("ADW")
+    ]
+    assert db is expected
 
 
-def test_get_query_db_with_bigdata_source():
-    """db_source='bigdata'이면 _bigdata_db 또는 info_db 반환."""
+def test_get_query_db_with_bdp_source_identity():
+    """override 가 없는 BDP 는 identity 로 BDP 커넥터 반환."""
     manager = ConnectorManager(use_dummy=True)
-    db = manager.get_query_db(db_source="bigdata")
-    # _bigdata_db가 None이므로 info_db로 폴백
-    assert db is manager.info_db or db is manager._bigdata_db
+    db = manager.get_query_db(db_source="BDP")
+    assert db is manager._db_connectors["BDP"]
 
 
-def test_get_query_db_with_adw_source():
-    """db_source='adw'이면 _adw_db 또는 info_db 반환."""
+def test_get_query_db_unknown_source_falls_back_or_raises():
+    """알 수 없는 시스템 코드는 단일 매핑 폴백 또는 RuntimeError."""
     manager = ConnectorManager(use_dummy=True)
-    db = manager.get_query_db(db_source="adw")
-    # dummy 모드에서 _adw_db=None이므로 info_db 반환
-    assert db is manager.info_db or db is manager._adw_db
+    if len(manager._db_connectors) == 1:
+        db = manager.get_query_db(db_source="UNKNOWN")
+        assert db is next(iter(manager._db_connectors.values()))
+    else:
+        with pytest.raises(RuntimeError):
+            manager.get_query_db(db_source="UNKNOWN")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -213,40 +208,62 @@ def test_get_query_db_with_adw_source():
 
 
 def test_get_connector_manager_returns_same_instance():
-    """get_connector_manager는 동일 인스턴스를 반환한다."""
     m1 = get_connector_manager(use_dummy=True)
     m2 = get_connector_manager(use_dummy=True)
     assert m1 is m2
 
 
 def test_reset_connector_manager_clears_singleton():
-    """reset 후 get_connector_manager는 새 인스턴스를 반환한다."""
     m1 = get_connector_manager(use_dummy=True)
     reset_connector_manager()
     m2 = get_connector_manager(use_dummy=True)
     assert m1 is not m2
 
 
-def test_get_connector_manager_dummy_true():
-    """use_dummy=True로 생성된 매니저의 플래그 확인."""
-    manager = get_connector_manager(use_dummy=True)
-    assert manager._use_dummy is True
-
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# _DB_SOURCE_MAP 일관성
+# settings.target_db_code 검증
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def test_db_source_map_contains_adw_and_bdp():
-    """_DB_SOURCE_MAP에 ADW와 BDP가 정의되어 있어야 한다."""
-    assert "ADW" in ConnectorManager._DB_SOURCE_MAP
-    assert "BDP" in ConnectorManager._DB_SOURCE_MAP
+def test_target_db_code_accepts_valid_system_code():
+    """유효한 시스템 코드(ADW) 는 통과하고 대문자로 보존된다."""
+    s = Settings(target_db_code="ADW")
+    assert s.target_db_code == "ADW"
 
 
-def test_db_source_map_adw_value():
-    assert ConnectorManager._DB_SOURCE_MAP["ADW"] == "adw"
+def test_target_db_code_normalizes_lowercase():
+    """소문자 입력도 허용하고 대문자로 정규화한다."""
+    s = Settings(target_db_code="bdp")
+    assert s.target_db_code == "BDP"
 
 
-def test_db_source_map_bdp_value():
-    assert ConnectorManager._DB_SOURCE_MAP["BDP"] == "bigdata"
+def test_target_db_code_rejects_unknown_code():
+    """target_db_schema_map 에 없는 시스템 코드는 거부된다."""
+    with pytest.raises(ValidationError):
+        Settings(target_db_code="XYZ")
+
+
+def test_target_db_code_empty_allowed():
+    """미지정(빈 문자열) 은 통과한다 (동적 결정 모드)."""
+    s = Settings(target_db_code="")
+    assert s.target_db_code == ""
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# settings.resolve_system_connector 및 override 적용
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def test_resolve_system_connector_identity_by_default():
+    """override 가 없는 시스템은 identity 매핑."""
+    s = Settings(_env_file=None, system_db_overrides={})
+    assert s.resolve_system_connector("ADW") == "ADW"
+    assert s.resolve_system_connector("BDP") == "BDP"
+    assert s.resolve_system_connector("CRP") == "CRP"
+
+
+def test_resolve_system_connector_applies_override():
+    """system_db_overrides 에 등록된 시스템은 override 된 커넥터로 해석."""
+    s = Settings(_env_file=None, system_db_overrides={"ADW": "TEST"})
+    assert s.resolve_system_connector("ADW") == "TEST"
+    assert s.resolve_system_connector("BDP") == "BDP"

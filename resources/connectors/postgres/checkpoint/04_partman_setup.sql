@@ -9,10 +9,10 @@
 -- 전제:
 --   - PostgreSQL에 pg_partman 패키지가 설치되어 있어야 함
 --     (RPM: pg_partman_16, DEB: postgresql-16-partman)
---   - 03번 DDL이 먼저 실행되어 checkpoint_dc_turn_texts 테이블이 존재해야 함
+--   - 03번 DDL이 먼저 실행되어 checkpoint_dc_messages 테이블이 존재해야 함
 --
 -- 목적:
---   checkpoint_dc_turn_texts 테이블의 월별 파티션을 자동으로
+--   checkpoint_dc_messages 테이블의 월별 파티션을 자동으로
 --   선행 생성하고, 보관 기간이 지난 파티션을 정리한다.
 --
 -- pg_partman 미설치 시:
@@ -44,7 +44,7 @@ CREATE EXTENSION IF NOT EXISTS pg_partman SCHEMA partman;
 -- p_premake:      선행 생성 개수 (4개월 앞까지 미리 생성)
 
 SELECT partman.create_parent(
-    p_parent_table   := 'BDPTBL.checkpoint_dc_turn_texts',
+    p_parent_table   := 'BDPTBL.checkpoint_dc_messages',
     p_control        := 'base_ymd',
     p_interval       := 'monthly',
     p_type           := 'range',
@@ -63,7 +63,7 @@ UPDATE partman.part_config
 SET retention                = '12 months',
     retention_keep_table     = true,
     infinite_time_partitions = true
-WHERE parent_table = 'BDPTBL.checkpoint_dc_turn_texts';
+WHERE parent_table = 'BDPTBL.checkpoint_dc_messages';
 
 
 -- ============================================================================
@@ -72,7 +72,7 @@ WHERE parent_table = 'BDPTBL.checkpoint_dc_turn_texts';
 -- 등록 직후 선행 파티션을 즉시 생성
 -- 이후에는 pg_cron 또는 OS cron으로 주기적 실행 필요
 
-SELECT partman.run_maintenance('BDPTBL.checkpoint_dc_turn_texts');
+SELECT partman.run_maintenance('BDPTBL.checkpoint_dc_messages');
 
 
 -- ============================================================================
@@ -83,17 +83,17 @@ SELECT partman.run_maintenance('BDPTBL.checkpoint_dc_turn_texts');
 --
 -- CREATE EXTENSION IF NOT EXISTS pg_cron;
 -- SELECT cron.schedule(
---     'partman-maintenance-dc-turn-texts',
+--     'partman-maintenance-dc-messages',
 --     '0 3 * * *',
---     $$SELECT partman.run_maintenance('BDPTBL.checkpoint_dc_turn_texts')$$
+--     $$SELECT partman.run_maintenance('BDPTBL.checkpoint_dc_messages')$$
 -- );
 --
 -- pg_cron 미사용 시 OS crontab으로 대체:
---   0 3 * * * psql -U BDPETL -d history_db -c "SELECT partman.run_maintenance('BDPTBL.checkpoint_dc_turn_texts')"
+--   0 3 * * * psql -U BDPETL -d history_db -c "SELECT partman.run_maintenance('BDPTBL.checkpoint_dc_messages')"
 
 
 -- ============================================================================
 -- 검증 쿼리
 -- ============================================================================
--- SELECT * FROM partman.part_config WHERE parent_table = 'BDPTBL.checkpoint_dc_turn_texts';
--- SELECT tableowner, tablename FROM pg_tables WHERE schemaname = 'bdptbl' AND tablename LIKE 'checkpoint_dc_turn_texts_%' ORDER BY tablename;
+-- SELECT * FROM partman.part_config WHERE parent_table = 'BDPTBL.checkpoint_dc_messages';
+-- SELECT tableowner, tablename FROM pg_tables WHERE schemaname = 'bdptbl' AND tablename LIKE 'checkpoint_dc_messages_%' ORDER BY tablename;

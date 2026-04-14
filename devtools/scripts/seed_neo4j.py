@@ -521,6 +521,7 @@ def full_reset(driver) -> None:
 # ══════════════════════════════════════════════════════════════
 
 def main() -> None:
+    """Neo4j 온톨로지 그래프를 단계별로 시딩한다."""
     parser = argparse.ArgumentParser(description="Neo4j 온톨로지 시딩")
     parser.add_argument(
         "--phases", default="1,2,3",

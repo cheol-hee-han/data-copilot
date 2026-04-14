@@ -16,7 +16,7 @@
 --           ├── checkpoint_blobs        -- LangGraph 상태 데이터 (msgpack)
 --           ├── checkpoint_writes       -- LangGraph 임시 기록
 --           ├── checkpoint_migrations   -- LangGraph 마이그레이션 버전
---           ├── checkpoint_dc_turn_texts      -- 대화 이력 (파티션)
+--           ├── checkpoint_dc_messages        -- 대화 이력 (파티션)
 --           └── checkpoint_dc_session_index   -- 세션 인덱스
 --
 -- 애플리케이션 연결 시 search_path:

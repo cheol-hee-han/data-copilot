@@ -9,9 +9,6 @@
 # ============================================================
 
 services:
-  elasticsearch:
-    image: registry.internal.bank.co.kr/elasticsearch-nori:8.15
-
   postgres:
     image: registry.internal.bank.co.kr/postgres:16
 

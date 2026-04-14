@@ -27,7 +27,7 @@ from src.agents.state.state import (
     StepStatus,
     MAX_TOOL_CALLS,
 )
-from src.connectors.manager import get_connector_manager
+from src.connectors.manager import ConnectorManager, get_connector_manager
 from src.agents.nodes.reason.tools import (
     execute_tool,
     lookup_code_meta,
@@ -46,6 +46,42 @@ from src.utils.tracker.dispatch import (
 )
 
 logger = get_logger(__name__)
+
+
+def _forced_target_db() -> str:
+    """FORCED 모드에서 허용되는 시스템 코드를 반환한다.
+
+    settings.target_db_code 는 시스템 코드(ADW/BDP/CRP) 이며,
+    TableMeta.db_source 도 동일 어휘이므로 직접 비교에 사용한다.
+    비어있으면 빈 문자열을 반환(필터 없음).
+    """
+    from src.config import settings
+    return settings.target_db_code
+
+
+def _filter_by_forced_target(
+    tables: list[TableMeta],
+) -> list[TableMeta]:
+    """FORCED 모드에서 타겟 외 시스템 테이블을 제거한다.
+
+    FORCED 모드가 아니면 원본을 그대로 반환한다. PR2의 push-down
+    필터 도입 시 이 함수는 완전 제거될 예정이다.
+    """
+    target = _forced_target_db()
+    if not target:
+        return tables
+    filtered: list[TableMeta] = []
+    for t in tables:
+        if not t.db_source or t.db_source == target:
+            filtered.append(t)
+        else:
+            logger.info(
+                "FORCED 모드: 타겟 외 테이블 제외",
+                table=t.table_name,
+                db_source=t.db_source,
+                target=target,
+            )
+    return filtered
 
 
 def _should_skip_step(
@@ -116,13 +152,21 @@ def _qualify_table_in_input(
         return tool_input
 
     # explored_tables에서 테이블명으로 스키마 조회
+    matched_db_source = ""
     for t in explored_tables:
         if t.table_name == raw_table and t.schema_name:
             parts[0] = f"{t.schema_name}.{raw_table}"
             return ",".join(parts)
+        if t.table_name == raw_table:
+            matched_db_source = t.db_source
 
-    # explored_tables에 없으면 커넥터의 기본 스키마로 폴백
-    db = get_connector_manager().get_query_db()
+    # explored_tables 의 db_source 또는 테이블명 시스템코드로 적절한 커넥터를 고른다.
+    # (외부망 환경에서는 system_db_overrides 에 의해 ADW → TEST 로 해석된다.)
+    db_source = matched_db_source or ConnectorManager.parse_db_source(raw_table)
+    if not db_source:
+        return tool_input
+
+    db = get_connector_manager().get_query_db(db_source=db_source)
     if db.default_schema:
         parts[0] = f"{db.default_schema}.{raw_table}"
         return ",".join(parts)
@@ -293,7 +337,7 @@ async def _enrich_use_cases(
     all_codes: set[str] = set()
 
     for uc in use_cases:
-        uc_id = uc.get("id", "")
+        uc_id = str(uc.get("_point_id", ""))
         sql = uc.get("sql", "")
         if not sql:
             uc_hints[uc_id] = {"tables": [], "codes": []}
@@ -333,12 +377,15 @@ async def _enrich_use_cases(
                 )
                 continue
             if isinstance(result, list):
-                entries = []
+                candidates: list[TableMeta] = []
                 for m in result:
                     ct = TableMeta.from_meta(m)
                     if ct is None:
                         continue
                     _finalize_table_meta(ct, m)
+                    candidates.append(ct)
+                entries = []
+                for ct in _filter_by_forced_target(candidates):
                     explored_tables.append(ct)
                     seen_tables.add(ct.table_name)
                     entries.append(ct.model_dump())
@@ -390,7 +437,7 @@ async def _enrich_use_cases(
     # (5) use_case별 결과 매핑
     enriched: list[dict] = []
     for uc in use_cases:
-        uc_id = uc.get("id", "")
+        uc_id = str(uc.get("_point_id", ""))
         hints_for_uc = uc_hints.get(uc_id, {"tables": [], "codes": []})
 
         # 해당 use_case SQL에서 추출된 테이블의 조회 결과만 매핑
@@ -681,4 +728,4 @@ def _extract_tables(
             continue
         _finalize_table_meta(ct, meta)
         tables.append(ct)
-    return tables
+    return _filter_by_forced_target(tables)

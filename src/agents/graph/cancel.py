@@ -87,7 +87,7 @@ async def pop_cancel(session_id: str) -> str | None:
 CANCEL_MESSAGE = "사용자 요청으로 중단되었습니다."
 
 
-def with_cancel_check(node_fn):  # noqa: ANN001
+def with_cancel_check(node_fn: Any) -> Any:
     """노드 진입 시 cancel 플래그를 체크하는 래퍼.
 
     ``pipeline.py``의 ``add_node`` 호출부에서 사용하여
@@ -95,12 +95,14 @@ def with_cancel_check(node_fn):  # noqa: ANN001
     """
     @functools.wraps(node_fn)
     async def wrapper(state: PipelineState) -> dict:
+        """취소 플래그 확인 후 원본 노드를 실행한다."""
         if await check_cancel(state.session_id, state.turn_id):
             return {
                 "status": QueryStatus.CANCELLED,
                 "error_message": CANCEL_MESSAGE,
             }
-        return await node_fn(state)
+        result: dict[str, Any] = await node_fn(state)
+        return result
     return wrapper
 
 

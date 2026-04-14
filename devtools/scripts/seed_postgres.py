@@ -26,19 +26,19 @@ from psycopg2.extras import execute_values  # type: ignore[import-untyped]
 # 연결 정보
 # ══════════════════════════════════════════════════════════════
 
-_PG_HOST = os.getenv("INFO_DB_HOST", "localhost")
-_PG_PORT = os.getenv("INFO_DB_PORT", "5432")
+_PG_HOST = os.getenv("TEST_DB_HOST", "localhost")
+_PG_PORT = os.getenv("TEST_DB_PORT", "5432")
 _PG_USER = os.getenv("PG_SEED_USER", "postgres")
 _PG_PASS = os.getenv("PG_SEED_PASSWORD", "postgres")
 
-INFO_DB_CONNINFO = (
+TEST_DB_CONNINFO = (
     f"host={_PG_HOST} port={_PG_PORT} "
-    f"dbname={os.getenv('INFO_DB_NAME', 'info_db')} "
+    f"dbname={os.getenv('TEST_DB_NAME', 'test_db')} "
     f"user={_PG_USER} password={_PG_PASS}"
 )
-HISTORY_DB_CONNINFO = (
+POSTGRES_DB_CONNINFO = (
     f"host={_PG_HOST} port={_PG_PORT} "
-    f"dbname={os.getenv('HISTORY_DB_NAME', 'history_db')} "
+    f"dbname={os.getenv('POSTGRES_DB_NAME', 'postgres_db')} "
     f"user={_PG_USER} password={_PG_PASS}"
 )
 
@@ -1249,9 +1249,9 @@ def _base_ym(d: date) -> str:
 # 정보계 DB 시딩
 # ══════════════════════════════════════════════════════════════
 
-def seed_info_db() -> None:
+def seed_test_db() -> None:
     """ADWOWN 테이블 DDL 생성 + ★ 테이블 데이터 적재."""
-    conn = _connect(INFO_DB_CONNINFO)
+    conn = _connect(TEST_DB_CONNINFO)
     cur = conn.cursor()
 
     try:
@@ -1357,7 +1357,7 @@ def seed_info_db() -> None:
         conn.commit()
 
         # ── 권한 부여: readonly_user ────────────────────────
-        ro_user = os.getenv("INFO_DB_USER", "readonly_user")
+        ro_user = os.getenv("TEST_DB_USER", "readonly_user")
         cur.execute(
             f"GRANT USAGE ON SCHEMA adwown TO {ro_user};"
         )
@@ -2625,7 +2625,7 @@ def seed_non_star_tables(cur, catalog: list[dict]) -> None:
 def setup_checkpoint_dc_tables(conn) -> None:  # type: ignore[type-arg]
     """Data Copilot 커스텀 테이블을 초기화한다.
 
-    checkpoint_dc_turn_texts (파티션), checkpoint_dc_session_index,
+    checkpoint_dc_messages (파티션), checkpoint_dc_session_index,
     mask_pii() 함수를 생성한다.
     """
     ddl_path = (
@@ -2641,7 +2641,7 @@ def setup_checkpoint_dc_tables(conn) -> None:  # type: ignore[type-arg]
         cur.execute(ddl_path.read_text(encoding="utf-8"))
         conn.commit()
         print(
-            "  checkpoint_dc_turn_texts, checkpoint_dc_session_index,"
+            "  checkpoint_dc_messages, checkpoint_dc_session_index,"
             " mask_pii() 초기화 완료"
         )
     except Exception:
@@ -2651,9 +2651,9 @@ def setup_checkpoint_dc_tables(conn) -> None:  # type: ignore[type-arg]
         cur.close()
 
 
-def seed_history_db() -> None:
+def seed_postgres_db() -> None:
     """sys_schema.sql_exec_log에 SQL 실행 이력 적재 (신규 테이블명 반영)."""
-    conn = _connect(HISTORY_DB_CONNINFO)
+    conn = _connect(POSTGRES_DB_CONNINFO)
     cur = conn.cursor()
 
     # 테이블 DDL
@@ -2885,11 +2885,11 @@ if __name__ == "__main__":
     print("PostgreSQL 테스트 데이터 시딩 (신규 명명규칙)")
     print("=" * 60)
     print("\n[정보계 DB - ADWOWN]")
-    seed_info_db()
+    seed_test_db()
     print("\n[이력 DB - sys_schema]")
-    seed_history_db()
+    seed_postgres_db()
     print("\n[이력 DB - Data Copilot 커스텀 테이블]")
-    _dc_conn = _connect(HISTORY_DB_CONNINFO)
+    _dc_conn = _connect(POSTGRES_DB_CONNINFO)
     try:
         setup_checkpoint_dc_tables(_dc_conn)
     finally:
