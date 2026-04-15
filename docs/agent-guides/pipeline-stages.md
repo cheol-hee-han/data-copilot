@@ -83,7 +83,7 @@
 - 출력: ContextInfo (table_metas, report_sqls, past_sqls, manual_refs, domain_terms)
 - 처리:
   1. QueryStrategyBuilder가 소스별 최적화 쿼리 생성 (6단계: 도메인 매칭→불용어 제거→동의어 확장→domain_cd 주입)
-  2. asyncio.gather()로 5개 소스 병렬 수집 (ES table/report/code, Qdrant manual, History DB)
+  2. asyncio.gather()로 5개 소스 병렬 수집 (MongoDB table/report/code, Qdrant manual, History DB) — 2026-04 ES→MongoDB 이전
   3. 테이블 설명 보강 (LLM 3관점: 엔티티 정의, 기능 정의, 발생규칙)
   4. 유사 테이블 그룹 감지 + 구분 가이드 생성
 - 참고: `docs/agent-guides/context-assembly.md` 상세 가이드

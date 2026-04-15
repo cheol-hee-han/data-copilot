@@ -39,14 +39,14 @@
 | ------ | ---- | --------- |
 | **PostgreSQL (정보계)** | 실 데이터 추출 대상 DB (읽기 전용) | 호스트, 포트, DB명, **읽기 전용** 계정/비밀번호 |
 | **PostgreSQL (이력)** | 과거 SQL 실행 이력 저장 | 호스트, 포트, DB명, 계정/비밀번호 |
-| **ElasticSearch** | 보고서 SQL 검색 + 코드 메타 (보조) | 호스트, 포트, 인증 정보 |
-| **MongoDB** | 테이블/컬럼/코드/용어사전 메타 (메타 주 소스) | 호스트, 포트, 인증 정보, DB명 |
+| **MongoDB** | 테이블/컬럼/코드/용어사전 메타 (메타 단일 소스, 2026-04 ES 제거 후 통합) | 호스트, 포트, 인증 정보, DB명 |
 | **Qdrant** | 업무 매뉴얼 + SQL 이력 벡터 검색 | 호스트, 포트 |
 | **Neo4j** | 온톨로지 그래프 (테이블 관계, JOIN 경로, 산출식) | 호스트, 포트, 인증 정보, DB명 |
 | **Redis** | 세션 캐시 (선택) | 호스트, 포트 |
 | **폐쇄망 LLM API** | Claude 대체 LLM 서비스 | 엔드포인트 URL, API 키, 모델명 |
-| **Sybase IQ** | ADW 정보계 (폐쇄망 전용, `DEPLOYMENT_MODE=internal`) | 호스트, 포트, DB명, 계정 |
-| **Impala** | BDP 빅데이터 (폐쇄망 전용, `DEPLOYMENT_MODE=internal`) | 호스트, 포트, LDAP 인증 정보 |
+| **ADW (Sybase IQ)** | ADW 정보계 (폐쇄망 전용, `adw_connector.py`) | 호스트, 포트, DB명, 계정 |
+| **BDP (Impala)** | BDP 빅데이터 (폐쇄망 전용, `bdp_connector.py`, LDAP 인증) | 호스트, 포트, LDAP 인증 정보 |
+| **CRP** | CRP 플랫폼 (폐쇄망 전용, `crp_connector.py`) | 호스트, 포트, 인증 정보 |
 
 ### 1-2. 폐쇄망 PC 환경 확인
 
@@ -75,11 +75,11 @@ v0.1.0 기준 시스템은 다음 구성 요소로 이루어진다.
 │                                                                │
 │  ┌─── 커넥터 (10종) ─────────────────────────────────────┐   │
 │  │  LLM Client (Anthropic / OpenAI Compatible)            │   │
-│  │  MongoDB (메타 주 소스) + ElasticSearch (보고서 SQL)    │   │
+│  │  MongoDB (메타 단일 소스, 2026-04 ES 제거)             │   │
 │  │  Qdrant (매뉴얼 + SQL이력, BGE-M3 임베딩)             │   │
 │  │  Neo4j (온톨로지 그래프)                                │   │
-│  │  PostgreSQL (정보계 RO + 이력 RW)                      │   │
-│  │  Sybase IQ / Impala / Hive (폐쇄망 전용)              │   │
+│  │  PostgreSQL (정보계 RO + 이력 RW + 체크포인터)         │   │
+│  │  ADW / BDP / CRP / Hive (폐쇄망 전용)                 │   │
 │  │  BGE-Reranker (Cross-Encoder, ONNX 최적화)            │   │
 │  │  Redis (세션 캐시)                                     │   │
 │  └────────────────────────────────────────────────────────┘   │
@@ -123,7 +123,7 @@ pip download uv -d packages/ \
 > | LLM/Agent | `anthropic>=0.40.0`, `openai>=1.0.0`, `langgraph>=0.2.0`, `langchain-core>=0.3.0` |
 > | Web | `fastapi>=0.115.0`, `uvicorn[standard]>=0.32.0`, `websockets>=13.0` |
 > | DB 드라이버 | `asyncpg>=0.30.0`, `psycopg2-binary>=2.9.0`, `motor>=3.6.0`, `neo4j>=5.20.0` |
-> | 검색/벡터 | `elasticsearch>=8.0.0`, `qdrant-client>=1.12.0` |
+> | 검색/벡터 | `qdrant-client>=1.12.0` (ElasticSearch는 2026-04 제거) |
 > | 임베딩/리랭킹 | `FlagEmbedding>=1.3.0`, `transformers>=4.45.0,<5.0.0`, `torch>=2.4.0`, `onnxruntime>=1.18.0` |
 > | SQL 파싱 | `sqlglot>=25.0.0` |
 > | 폐쇄망 DB | `impyla>=0.20.0`, `thrift==0.16.0`, `pyodbc>=5.0.0`, `sqlanydb>=1.0.13` |
@@ -165,8 +165,8 @@ ls ~/.cache/huggingface/hub/ | grep -E "bge-m3|bge-reranker"
 | `packages/` 디렉토리 | 오프라인 설치용 wheel 파일 전체 |
 | HuggingFace 모델 캐시 디렉토리 | BGE-M3 + BGE-Reranker 모델 파일 |
 | Python 3.12+ 설치 파일 | 폐쇄망 PC에 Python 미설치 시 |
-| Docker 이미지 tar (선택) | ES+Qdrant+MongoDB+Neo4j+Redis+PostgreSQL |
-| nori 플러그인 zip (선택) | ES 한글 분석기 오프라인 설치용 |
+| Docker 이미지 tar (선택) | Qdrant+MongoDB+Neo4j+Redis+PostgreSQL |
+| `deploy/offline-bundle/` 산출물 | uv 기반 오프라인 wheel 번들 + 모델 파일 |
 
 ### 2-4. 폐쇄망 PC에서 오프라인 설치
 
@@ -257,16 +257,10 @@ HISTORY_DB_NAME=data_copilot_hist
 HISTORY_DB_USER=history_user
 HISTORY_DB_PASSWORD=실제비밀번호
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ElasticSearch
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ES_HOST=10.xx.xx.xx
-ES_PORT=9200
-ES_USER=data_copilot
-ES_PASSWORD=실제비밀번호
+# ElasticSearch — 제거됨(2026-04). 모든 메타는 MongoDB, SQL이력은 Qdrant로 통합됨.
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# MongoDB (메타 주 소스 — 신규)
+# MongoDB (메타 단일 소스)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MONGO_HOST=10.xx.xx.xx
 MONGO_PORT=27017
@@ -321,7 +315,8 @@ IMPALA_DATABASE=BDPOWN
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 기타
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGSMITH_ENABLED=false                            # 폐쇄망에서 반드시 false
+# LangSmith — 제거됨(2026-04). 트레이싱은 src/utils/tracker/ 자체 구현 사용.
+EVAL_TRACKER_ENABLED=true
 LOG_LEVEL=INFO                                     # 초기 연동 테스트 시 DEBUG 권장
 LOG_FORMAT=json                                    # 폐쇄망에서는 json 포맷 권장
 MAX_QUERY_ROWS=10000
@@ -687,12 +682,13 @@ asyncio.run(test())
 
 ## 7. 데이터소스별 연동 작업
 
-### 7-1. MongoDB — 메타데이터 주 소스 (신규)
+### 7-1. MongoDB — 메타데이터 단일 소스 (2026-04 ES 제거)
 
 ```text
-v0.1.0에서 메타데이터 주 소스가 ElasticSearch → MongoDB로 변경되었다.
-테이블/컬럼 메타, 코드값, 용어사전을 MongoDB에서 관리한다.
-ElasticSearch는 보고서 SQL 검색에 집중한다.
+v0.1.0에서 메타데이터 주 소스가 ElasticSearch → MongoDB로 변경되었고,
+2026-04에는 ElasticSearch가 완전히 제거되어 MongoDB가 메타 단일 소스가 되었다.
+테이블/컬럼 메타, 코드값, 용어사전은 모두 MongoDB에서 관리한다.
+과거 보고서 SQL/SQL 이력은 Qdrant(`sql_history` 컬렉션, 하이브리드 + Reranker)로 이전되었다.
 ```
 
 #### MongoDB 스키마 초기화
@@ -783,91 +779,15 @@ python devtools/scripts/seed_neo4j.py --phases 1,2
 python devtools/scripts/seed_neo4j.py --full-reset
 ```
 
-### 7-3. ElasticSearch — 보고서 SQL 검색
+### 7-3. ElasticSearch — 제거됨(2026-04)
 
 ```text
-v0.1.0에서 ES의 역할이 축소되었다.
-  이전: 테이블 메타 + 보고서 SQL + 코드 메타 (3개 인덱스, 메타 주 소스)
-  현재: 보고서 SQL 검색 (주 역할) + table_meta 하위호환 (보조)
-
-메타데이터 주 소스는 MongoDB로 이전되었으나,
-보고서 SQL 검색과 ES 쿼리 기반 table_meta 검색은 유지된다.
-```
-
-#### ES 인덱스 생성 (nori 한글 분석기 필수)
-
-```bash
-# nori 플러그인 설치 확인 (폐쇄망에서는 오프라인 설치)
-# 온라인: bin/elasticsearch-plugin install analysis-nori
-# 오프라인: bin/elasticsearch-plugin install file:///path/to/analysis-nori-8.15.0.zip
-
-# 1) 보고서 SQL 인덱스 (주 인덱스)
-curl -X PUT "http://${ES_HOST}:${ES_PORT}/report_sql" -H 'Content-Type: application/json' -d '{
-  "mappings": {
-    "properties": {
-      "report_name":  {"type": "text", "analyzer": "nori"},
-      "description":  {"type": "text", "analyzer": "nori"},
-      "sql":          {"type": "text"}
-    }
-  }
-}'
-
-# 2) 테이블 메타 인덱스 (하위호환, 보조)
-curl -X PUT "http://${ES_HOST}:${ES_PORT}/table_meta" -H 'Content-Type: application/json' -d '{
-  "mappings": {
-    "properties": {
-      "table_name":        {"type": "keyword"},
-      "table_description": {"type": "text", "analyzer": "nori"},
-      "schema":            {"type": "keyword"},
-      "update_cycle":      {"type": "keyword"},
-      "columns": {
-        "type": "nested",
-        "properties": {
-          "name": {"type": "keyword"},
-          "type": {"type": "keyword"},
-          "desc": {"type": "text", "analyzer": "nori"},
-          "pk":   {"type": "boolean"},
-          "pii":  {"type": "boolean"},
-          "fk":   {"type": "keyword"}
-        }
-      }
-    }
-  }
-}'
-
-# 3) 코드 메타 인덱스 (보조)
-curl -X PUT "http://${ES_HOST}:${ES_PORT}/code_meta" -H 'Content-Type: application/json' -d '{
-  "mappings": {
-    "properties": {
-      "code_field": {"type": "keyword"},
-      "codes":      {"type": "object", "enabled": true}
-    }
-  }
-}'
-```
-
-**nori 한글 분석기 정확도 영향:**
-
-| 검색어 | standard (미적용) | nori (적용 후) |
-| ------ | ----------------- | -------------- |
-| "여신" | 2건 | 29건 |
-| "대출" | 0건 | 7건 |
-| "연체" | 0건 | 5건 |
-| "고객" | 0건 | 41건 |
-
-> **추가 권장:** 은행 고유 용어(상품명, 내부 코드 등)를 nori 사용자 사전에 등록하면 검색 정확도가 추가 향상된다.
-
-#### ES 쿼리 템플릿
-
-```text
-ES 쿼리 바디가 resources/connectors/elasticsearch/ 에 외부화되어 있다.
-
-  table_meta_query.json  — 테이블 메타 multi_match 검색
-  report_sql_query.json  — 보고서 SQL multi_match 검색
-  code_meta_query.json   — 코드 메타 매칭 검색
-
-{query} 플레이스홀더가 런타임에 검색어로 치환된다.
-필드 가중치 조정이 필요하면 이 JSON 파일을 직접 수정한다.
+ElasticSearch는 2026-04 기준 제거되었다.
+  - 테이블/컬럼 메타·코드 메타·용어사전 → MongoDB로 통합
+  - 보고서 SQL·SQL 이력 → Qdrant(sql_history, 하이브리드 + Reranker)로 이전
+  - nori 한글 분석기 설정은 더 이상 적용 대상이 아님
+  - resources/connectors/elasticsearch/, devtools/docker/elasticsearch/,
+    devtools/scripts/seed_elasticsearch.py 는 모두 제거됨
 ```
 
 ### 7-4. Qdrant — 벡터 검색 (임베딩 모델 변경)
@@ -949,19 +869,19 @@ print('[PASS] Redis 연결 성공')
 ```
 
 ```text
-v0.1.0에서 세션 관리가 Memory/Redis 백엔드로 분리되었다.
-  src/services/session/memory_store.py  — 인메모리 (개발용)
-  src/services/session/redis_store.py   — Redis (운영용, TTL 30분)
-
-.env 설정:
-  SESSION_BACKEND=redis   (운영 환경 권장)
-  SESSION_TTL=1800        (세션 TTL, 기본 30분)
+세션 스토어(src/services/session/*)는 2026-04 기준 제거되었다.
+대화 이력은 LangGraph 체크포인터(PostgreSQL, checkpoint_dc_messages 테이블)에
+단일 소스로 저장된다. Redis는 CancelStore / ActiveRunStore 용도로만 사용된다.
+  - REDIS_BACKEND=memory | redis (단일 워커: memory, 멀티 워커: redis)
+  - 턴 단위 메시지 저장은 src/services/message_store.py 가 담당
+    (과거 turn_text_store.py에서 rename)
 ```
 
-### 7-8. Sybase IQ (폐쇄망 ADW — DEPLOYMENT_MODE=internal)
+### 7-8. ADW — Sybase IQ (폐쇄망 ADW)
 
 ```text
-src/connectors/impl/sybase_connector.py — SAP Sybase IQ 16.1
+src/connectors/impl/adw_connector.py — SAP Sybase IQ 16.1
+  (2026-04 sybase_connector.py → adw_connector.py 로 rename)
 
 두 가지 연결 방식:
   native: sqlanydb (libdbcapi_r.so 필요)
@@ -973,15 +893,15 @@ SQL 방언: "tsql"
 ```
 
 ```bash
-# Sybase IQ 연결 테스트
+# ADW (Sybase IQ) 연결 테스트
 python -m uv run python -c "
 import asyncio
-from src.connectors.impl.sybase_connector import SybaseIQConnector
+from src.connectors.impl.adw_connector import ADWConnector
 
 async def test():
-    db = SybaseIQConnector(use_dummy=False)
+    db = ADWConnector(use_dummy=False)
     await db.connect()
-    print(f'[PASS] Sybase IQ 연결 성공 (dialect: {db.dialect})')
+    print(f'[PASS] ADW 연결 성공 (dialect: {db.dialect})')
     rows = await db.execute_query('SELECT 1 AS test_col')
     print(f'[PASS] SELECT 실행 성공: {rows}')
     await db.disconnect()
@@ -990,10 +910,11 @@ asyncio.run(test())
 "
 ```
 
-### 7-9. Impala (폐쇄망 BDP — DEPLOYMENT_MODE=internal)
+### 7-9. BDP — Impala (폐쇄망 BDP)
 
 ```text
-src/connectors/impl/impala_connector.py — Cloudera CDP 7.1.9, HiveServer2 Thrift
+src/connectors/impl/bdp_connector.py — Cloudera CDP 7.1.9, HiveServer2 Thrift
+  (2026-04 impala_connector.py → bdp_connector.py 로 rename)
 
 드라이버: impyla (asyncio.to_thread 래핑)
 SQL 방언: "hive"
@@ -1002,15 +923,15 @@ SQL 방언: "hive"
 ```
 
 ```bash
-# Impala 연결 테스트
+# BDP (Impala) 연결 테스트
 python -m uv run python -c "
 import asyncio
-from src.connectors.impl.impala_connector import ImpalaConnector
+from src.connectors.impl.bdp_connector import BDPConnector
 
 async def test():
-    db = ImpalaConnector(use_dummy=False)
+    db = BDPConnector(use_dummy=False)
     await db.connect()
-    print(f'[PASS] Impala 연결 성공 (dialect: {db.dialect})')
+    print(f'[PASS] BDP 연결 성공 (dialect: {db.dialect})')
     rows = await db.execute_query('SELECT 1 AS test_col')
     print(f'[PASS] SELECT 실행 성공: {rows}')
     await db.disconnect()
@@ -1037,7 +958,7 @@ v0.1.0에서 도메인 설정이 코드에서 YAML 파일로 전면 외부화되
 | ---------- | ---- | --------- |
 | `business_dictionary.yaml` | 금융 용어 사전 (자연어 → DB 스키마 매핑) | 실 테이블명/컬럼명/코드값으로 전면 교체 |
 | `business_synonyms.yaml` | 동의어/약어 사전 (정규화·검색 확장용) | 은행 고유 약어·상품명·부서명 추가 |
-| `business_categories.yaml` | 카테고리 → ES domain_cd 매핑 | 실 ES 인덱스의 domain_cd 필드값에 맞게 재매핑 |
+| `business_categories.yaml` | 카테고리 → domain_cd 매핑 | 실 MongoDB 컬렉션의 domain_cd 필드값에 맞게 재매핑 |
 | `pii_columns.yaml` | PII 컬럼 정의 (forbidden + masking + conditional) | 실 DB PII 컬럼명으로 전면 교체 |
 | `chart_config.yaml` | 차트 폰트/색상/레이아웃 설정 | 서버 OS 폰트 + 기업 브랜드 색상 |
 | `output_templates.yaml` | 출력 템플릿 정의 (거래명세, 여신현황 등 9종) | 실제 업무 보고서 양식에 맞게 교체 |
@@ -1117,14 +1038,13 @@ resources/evaluation/ 에 골든셋이 외부화되어 있다.
 ```text
 resources/connectors/ 에 커넥터별 쿼리 템플릿이 외부화되어 있다.
 
-  elasticsearch/*.json  — ES multi_match 쿼리 바디
+  # elasticsearch/*.json — 제거됨(2026-04)
   mongo/*.json          — MongoDB 집계 파이프라인 (참조 문서)
   mongo/init_mongodb.js — MongoDB 스키마 초기화
   neo4j/*.cypher        — Cypher 그래프 쿼리
   neo4j/init_neo4j.cypher — Neo4j 스키마 초기화
 
 실 환경에 맞게 교체가 필요한 항목:
-  - ES 쿼리: 필드 가중치 조정 (table_name^3 → ^5 등)
   - MongoDB 파이프라인: 실 컬렉션 필드명에 맞게 조정
   - Neo4j Cypher: 실 그래프 스키마에 맞게 조정
 ```
@@ -1216,8 +1136,7 @@ sql_generator_system.txt 주요 변수:
 
 | 서비스 | 이미지 | 포트 | 비고 |
 | ------ | ------ | ---- | ---- |
-| PostgreSQL | `postgres:16-alpine` | 5432 | 정보계 + 이력 |
-| ElasticSearch | `dc-elasticsearch:8.15.0-nori` (커스텀) | 9200 | nori 플러그인 포함 |
+| PostgreSQL | `postgres:16-alpine` | 5432 | 정보계 + 이력 + 체크포인터 |
 | Qdrant | `qdrant/qdrant:v1.12.6` | 6333, 6334 | REST + gRPC |
 | **MongoDB** | `mongo:8.0.6` | 27017 | **신규** |
 | **Neo4j** | `neo4j:5-community` | 7687, 7474 | **신규** |
@@ -1233,29 +1152,35 @@ docker pull mongo:8.0.6
 docker pull neo4j:5-community
 docker pull redis:7-alpine
 
-# ES 커스텀 이미지 빌드 (nori 플러그인 포함)
-docker build -t dc-elasticsearch:8.15.0-nori devtools/docker/elasticsearch/
+# (ElasticSearch 커스텀 이미지 빌드는 2026-04 제거됨)
 
 # tar로 저장
 docker save postgres:16-alpine qdrant/qdrant:v1.12.6 mongo:8.0.6 \
-    neo4j:5-community redis:7-alpine dc-elasticsearch:8.15.0-nori \
+    neo4j:5-community redis:7-alpine \
     | gzip > docker-images.tar.gz
 
 # 폐쇄망에서 로드
 docker load < docker-images.tar.gz
 ```
 
-### 10-3. ES nori 플러그인 오프라인 설치
+### 10-3. 오프라인 번들 스캐폴드 (신규 2026-04)
 
 ```text
-devtools/docker/elasticsearch/Dockerfile 에서 nori 플러그인을 온라인 설치한다.
-폐쇄망에서는 플러그인 zip 파일을 사전에 다운로드하여 Dockerfile에 COPY 해야 한다.
+deploy/ 디렉토리에 오프라인 배포용 스캐폴드가 정리되어 있다.
 
-방법 1: 커스텀 이미지를 인터넷에서 빌드하여 tar로 이관 (위 10-2)
-방법 2: nori zip을 별도 다운로드 → Dockerfile 수정 → 폐쇄망에서 빌드
+  deploy/offline-bundle/
+    build.sh            — 외부망에서 wheel + 모델 번들 생성 (uv 기반)
+    install.sh          — 폐쇄망에서 번들 설치
+    download_models.sh  — BGE-M3 / BGE-Reranker 사전 다운로드
+    os-packages.txt     — OS 레벨 패키지 목록
+  deploy/db-init/
+    postgres/init.sh    — PostgreSQL 체크포인터·커스텀 테이블 초기화
+    mongo/init.sh       — MongoDB 컬렉션·인덱스 초기화
+    qdrant/init.sh      — Qdrant 컬렉션 초기화
+  deploy/systemd/
+    data-copilot.service — 운영 서비스 등록용 systemd 유닛
 
-nori zip 다운로드:
-  https://artifacts.elastic.co/downloads/elasticsearch-plugins/analysis-nori/analysis-nori-8.15.0.zip
+(ElasticSearch nori 오프라인 설치 절차는 ES 제거와 함께 폐기됨.)
 ```
 
 ---
@@ -1324,7 +1249,6 @@ curl http://localhost:8000/health
 # {
 #   "status": "ok",
 #   "connectors": {
-#     "elasticsearch": true,
 #     "mongodb": true,
 #     "info_db": true,
 #     "history_db": true,
@@ -1403,13 +1327,13 @@ python -m uv run python -m devtools.evaluation.run_evaluation
 
 - [ ] **폐쇄망 방화벽 규칙 확인** — 로컬 PC → 각 서버 간 포트 통신 허용
   - PostgreSQL: 5432
-  - ElasticSearch: 9200
   - MongoDB: 27017
   - Qdrant: 6333
   - Neo4j: 7687
   - Redis: 6379
-  - Sybase IQ: 2638
-  - Impala: 21050
+  - ADW(Sybase IQ): 2638
+  - BDP(Impala): 21050
+  - CRP: 환경별 상이
   - 폐쇄망 LLM API: 해당 포트
 - [ ] **DNS 확인** — 호스트명 해석 안 되면 IP 직접 지정
 - [ ] **프록시 설정** — 필요 시 `HTTP_PROXY`, `HTTPS_PROXY` 환경변수
@@ -1422,17 +1346,16 @@ python -m uv run python -m devtools.evaluation.run_evaluation
 
 ### 데이터
 
-- [ ] **ES 인덱스에 nori 한글 분석기 설치 확인**
 - [ ] **MongoDB 스키마 초기화 확인** — `init_mongodb.js` 실행 여부
 - [ ] **Neo4j 스키마 초기화 확인** — `init_neo4j.cypher` 실행 여부
 - [ ] **Qdrant 임베딩 모델 오프라인 배포 확인** — `EMBEDDING_CACHE_PATH` 설정
 - [ ] **리랭커 모델 오프라인 배포 확인** — `RERANKER_CACHE_PATH` 설정
 - [ ] **MongoDB 메타와 도메인 사전 매핑 정합성** — 테이블명/컬럼명 오타 시 SQL 생성 실패
-- [ ] **시딩 순서 확인** — PostgreSQL → ES → MongoDB → Neo4j → Qdrant
+- [ ] **시딩 순서 확인** — PostgreSQL → MongoDB → Neo4j → Qdrant (ES 제거됨 2026-04)
 
 ### 외부 통신 차단
 
-- [ ] **LANGSMITH_ENABLED=false 확인** — LangSmith 외부 통신 차단
+- [ ] **LangSmith 잔존 참조 확인** — 2026-04 제거됨, 코드/설정에 `LANGSMITH_*` 키 없어야 함
 - [ ] **HuggingFace Hub 접근 차단 확인** — `EMBEDDING_CACHE_PATH`, `RERANKER_CACHE_PATH` 설정으로 오프라인 로딩
 - [ ] **openai_referer, openai_title 확인** — `src/config.py` 의 기본값이 외부 URL이면 변경
 
@@ -1505,12 +1428,11 @@ python -m uv run python -m devtools.evaluation.run_evaluation
 | 파일 | 수정 유형 | 내용 |
 | ---- | --------- | ---- |
 | `resources/domain/business_synonyms.yaml` | 보강 | 은행 고유 동의어/약어 추가 |
-| `resources/domain/business_categories.yaml` | 재매핑 | 실 ES domain_cd 매핑 |
+| `resources/domain/business_categories.yaml` | 재매핑 | 실 MongoDB domain_cd 매핑 |
 | `resources/domain/chart_config.yaml` | 폰트 변경 | 서버 OS에 맞는 한글 폰트 |
 | `resources/domain/output_templates.yaml` | 커스터마이징 | 실 업무 보고서 양식 |
 | `resources/domain/stopwords.yaml` | 보강 | 은행 내부 표현 반영 |
 | `resources/prompts/**/*.txt` | 재튜닝 | 폐쇄망 모델 특성에 맞게 조정 |
-| `resources/connectors/elasticsearch/*.json` | 가중치 조정 | 필드 가중치 최적화 |
 | `resources/connectors/mongo/init_mongodb.js` | 스키마 확인 | 실 메타 구조에 맞게 검증 |
 | `resources/connectors/neo4j/init_neo4j.cypher` | 스키마 확인 | 실 온톨로지 구조에 맞게 검증 |
 
@@ -1536,19 +1458,16 @@ python -m uv run python -m devtools.evaluation.run_evaluation
 # 1. PostgreSQL — 테스트 데이터 + DDL
 python devtools/scripts/seed_postgres.py
 
-# 2. ElasticSearch — 보고서 SQL + 메타 (보조)
-python devtools/scripts/seed_elasticsearch.py
-
-# 3. MongoDB — 테이블/컬럼/코드/용어사전 메타
+# 2. MongoDB — 테이블/컬럼/코드/용어사전 메타 (ES 대체, 2026-04)
 python devtools/scripts/seed_mongodb.py
 
-# 4. Neo4j — 온톨로지 그래프 (MongoDB 데이터 기반)
+# 3. Neo4j — 온톨로지 그래프 (MongoDB 데이터 기반)
 python devtools/scripts/seed_neo4j.py
 
-# 5. Qdrant — 매뉴얼 + SQL 이력 벡터
+# 4. Qdrant — 매뉴얼 + SQL 이력 벡터
 python devtools/scripts/seed_qdrant.py
 
-# 6. SQL 이력 임베딩 (실 데이터 기반)
+# 5. SQL 이력 임베딩 (실 데이터 기반)
 python -m src.tools.seed_sql_history
 ```
 
@@ -1564,7 +1483,7 @@ python -m src.tools.seed_sql_history
 | 2 | 임베딩 모델 오프라인 배포 (§5-1) | Qdrant 벡터 검색 불가 |
 | 3 | Docker 이미지/패키지 오프라인 준비 (§10) | 인프라 구동 불가 |
 | 4 | 리랭커 모델 오프라인 배포 (§5-2) | SQL 이력 검색 품질 저하 |
-| 5 | nori 플러그인 오프라인 설치 (§7-3) | 한글 검색 급락 |
+| 5 | 오프라인 번들(`deploy/offline-bundle/`) 준비 (§10-3) | 폐쇄망 의존성·모델 반입 |
 
 ### P1 — 정확도 핵심 (미수행 시 답변 품질 심각 저하)
 
@@ -1584,7 +1503,7 @@ python -m src.tools.seed_sql_history
 | 12 | 골든셋 재작성 (§8-5) | 정확도 측정·개선 기반 |
 | 13 | 업무 매뉴얼 실데이터 Qdrant 적재 | 금융지표 산출식 참조 |
 | 14 | SQL 이력 임베딩 (§7-4) | 유사 SQL 참조 품질 |
-| 15 | ES 쿼리 가중치 조정 (§8-6) | 보고서 SQL 검색 정밀도 |
+| 15 | MongoDB/Qdrant 쿼리 튜닝 (§8-6) | 메타·SQL이력 검색 정밀도 |
 | 16 | Thinking 모드 조정 (§4-4) | 모델별 추론 품질 최적화 |
 
 ### P3 — 부가 (세부 품질 개선)
@@ -1594,5 +1513,5 @@ python -m src.tools.seed_sql_history
 | 17 | 불용어 보강 (§8-1) | 검색 노이즈 감소 |
 | 18 | SVG 폰트 (§8-4) | 차트 한글 깨짐 방지 |
 | 19 | 출력 템플릿 교체 (§8-1) | 업무 보고서 양식 일치 |
-| 20 | LangSmith 비활성화 확인 (§12) | 외부 통신 차단 확인 |
+| 20 | 자체 tracker 출력 경로 점검 (§12) | 2026-04 LangSmith 제거 후 관측성 유지 |
 | 21 | 세션 Redis 전환 (§7-7) | 서버 재시작 시 세션 유지 |

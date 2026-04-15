@@ -17,7 +17,7 @@
 5. [파이프라인 제어](#5-파이프라인-제어)
 6. [질의 정규화](#6-질의-정규화)
 7. [PostgreSQL](#7-postgresql)
-8. [ElasticSearch](#8-elasticsearch)
+8. [ElasticSearch (제거됨)](#8-elasticsearch-제거됨-2026-04)
 9. [Qdrant](#9-qdrant)
 10. [MongoDB](#10-mongodb)
 11. [Redis / 세션](#11-redis--세션)
@@ -151,21 +151,10 @@
 
 ---
 
-## 8. ElasticSearch
+## 8. ElasticSearch (제거됨 2026-04)
 
-| 키 | 설명 | 값 예시 | 권장값 |
-| --- | --- | --- | --- |
-| `ES_HOST` | 호스트 | `localhost` | 환경별 상이 |
-| `ES_PORT` | 포트 | `9200` | `9200` |
-| `ES_USER` | 사용자 | `elastic` | |
-| `ES_PASSWORD` | 비밀번호 | | |
-| `ES_TABLE_META_INDEX` | 테이블 메타 인덱스명 | `table_meta` | 폐쇄망에서 변경 가능 |
-| `ES_REPORT_SQL_INDEX` | 보고서 SQL 인덱스명 | `report_sql` | 폐쇄망에서 변경 가능 |
-| `ES_CODE_META_INDEX` | 코드 메타 인덱스명 | `code_meta` | 폐쇄망에서 변경 가능 |
-| `ES_TABLE_META_SIZE` | 테이블 메타 검색 결과 수 | `10` | `10` |
-| `ES_REPORT_SQL_SIZE` | 보고서 SQL 검색 결과 수 | `5` | `5` |
-| `ES_CODE_META_SIZE` | 코드 메타 검색 결과 수 | `20` | `20` — 금융 코드값이 많아 넉넉하게 |
-| `ES_REQUEST_TIMEOUT` | ES 검색 요청 타임아웃 (초) | `10` | `10` |
+> ElasticSearch는 제거되었다. 테이블/컬럼 메타·코드 메타·용어사전은 **MongoDB**,
+> 과거 SQL 이력은 **Qdrant**로 이전되었다. 관련 `ES_*` 환경변수는 더 이상 사용하지 않는다.
 
 ---
 
@@ -273,11 +262,7 @@
 
 | 키 | 설명 | 값 예시 | 권장값 |
 | --- | --- | --- | --- |
-| `LANGSMITH_ENABLED` | LangSmith 트레이싱 활성화 | `true` \| `false` | 온라인 개발: `true`, 폐쇄망: `false` (외부 통신 불가) |
-| `LANGSMITH_API_KEY` | LangSmith API 키 | `lsv2_pt_...` | LANGSMITH_ENABLED=true 시 필수 |
-| `LANGSMITH_PROJECT` | LangSmith 프로젝트명 | `data-copilot` | `data-copilot` |
-| `LANGSMITH_ENDPOINT` | LangSmith 엔드포인트 | `https://api.smith.langchain.com` | |
-| `EVAL_TRACKER_ENABLED` | 자체 평가 트래커 활성화 (폐쇄망 호환) | `true` \| `false` | `true` — LangSmith 대안, JSON 파일로 저장 |
+| `EVAL_TRACKER_ENABLED` | 자체 평가 트래커 활성화 (`src/utils/tracker/`) | `true` \| `false` | `true` — JSON 파일로 저장 |
 | `EVAL_TRACKER_OUTPUT_DIR` | 트래커 출력 디렉토리 | `logs/traces` | `logs/traces` |
 
 ---
@@ -351,7 +336,6 @@
 | 5 | `RERANKER_CACHE_PATH` | (빈값) | `/models/reranker` (사전 다운로드) |
 | 6 | `NORMALIZATION_PHASE2_ENABLED` | `false` | `true` (소형 LLM 품질 보완) |
 | 7 | `LLM_PARSE_MAX_RETRY` | `2` | `4` (소형 LLM 포맷 오류 대응) |
-| 8 | `LANGSMITH_ENABLED` | `true` | `false` (외부 통신 불가) |
 | 9 | `REDIS_BACKEND` | `redis` | `redis` (멀티 워커 시) |
 | 10 | `USE_DUMMY` | `false` | `false` |
 | 11 | 인프라 호스트 (DB/ES/Qdrant) | `localhost` | 폐쇄망 내부 주소 |

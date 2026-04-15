@@ -33,7 +33,7 @@ Data Copilot은 사용자의 자연어 질의를 SQL로 변환하여 데이터�
 
 | 원칙 | 설명 |
 |------|------|
-| 실데이터 우선 | Mock/Dummy 대신 실제 LLM 호출, 실제 DB/ES/Qdrant 연동 |
+| 실데이터 우선 | Mock/Dummy 대신 실제 LLM 호출, 실제 DB/MongoDB/Qdrant 연동 |
 | 격리 가능 | 외부 인프라 미연결 시 `@pytest.mark.skipif`로 안전하게 건너뜀 |
 | 트래커 로깅 | 모든 테스트 케이스의 입출력을 `logs/test/{yyyymmdd}-{모듈명}.log`에 기록 |
 | 순수함수 분리 | LLM 호출 없이 검증 가능한 파싱/검증/후처리 로직은 별도 테스트 |
@@ -96,7 +96,7 @@ tests/
 │   ├── test_finance_terms_edge_cases.py # 도메인 사전 엣지 (30 tests)
 │   ├── test_evaluation_tracker.py       # 평가 트래커 (15 tests)
 │   ├── test_evaluator.py                # 평가 모듈 (8 tests)
-│   ├── test_langsmith.py                # LangSmith 트레이싱 (6 tests)
+│   # test_langsmith.py — 제거됨(2026-04)
 │   ├── test_trace.py                    # 추론 추적 로그 (11 tests)
 │   │
 │   │  ── 횡단 테스트 (개선사항) ──
@@ -235,12 +235,12 @@ AMBIGUOUS     → CLARIFICATION_NEEDED
 6개 병렬 소스:
 
 ```
-┌─ ES table_meta ────────┐
-├─ ES report_sql ────────┤
+┌─ Mongo dpasset_table ──┐    (2026-04 ES→MongoDB 이전)
+├─ Qdrant sql_history ───┤
 ├─ PG history_db ────────┼── asyncio.gather() ──→ ContextInfo
 ├─ Qdrant biz_manual ────┤
-├─ Qdrant sql_history ───┤
-└─ ES code_meta ─────────┘
+├─ Neo4j onto ───────────┤
+└─ Mongo standard_code ──┘
 ```
 
 - 인프라 연결 시: 각 소스 반환값 검증 (9 tests)
@@ -342,7 +342,7 @@ log_test_case(logger, test_name, input, expected, actual, passed)
 | 마커 | 용도 | skip 조건 |
 |------|------|----------|
 | `@pytest.mark.live_llm` | 실제 LLM 호출 테스트 | `ANTHROPIC_API_KEY` 미설정 |
-| `@pytest.mark.live_infra` | 외부 인프라 연동 테스트 | ES/PG/Qdrant 미연결 |
+| `@pytest.mark.live_infra` | 외부 인프라 연동 테스트 | MongoDB/PG/Qdrant/Neo4j 미연결 |
 | `@pytest.mark.asyncio` | 비동기 테스트 | (자동) |
 
 ---
@@ -405,8 +405,9 @@ ANTHROPIC_API_KEY=sk-... python -m pytest tests/unit/ -v -m live_llm
 | 도메인 사전 | `test_finance_terms*.py` (2파일) | 37 |
 | 평가 트래커 | `test_evaluation_tracker.py` | 15 |
 | 평가 모듈 | `test_evaluator.py` | 8 |
-| LangSmith | `test_langsmith.py` | 6 |
 | 추론 추적 | `test_trace.py` | 11 |
+<!-- test_langsmith.py — 제거됨(2026-04), LangSmith 통합 폐기 -->
+
 
 ### 7.3 횡단 테스트
 

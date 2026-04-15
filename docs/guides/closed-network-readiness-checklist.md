@@ -78,14 +78,13 @@
 - src/agents/nodes/ 모듈 docstring·함수 docstring 완비
 
 ### ❌ 안 된 것
-- **ES 레거시 잔존**:
-  - `devtools/scripts/seed_elasticsearch.py` 존재, `seed_all.sh`에서 호출 중
-  - `resources/connectors/elasticsearch/` 쿼리 JSON 3개 잔존
-  - `src/connectors/elasticsearch_connector.py` 레거시 유지
-  - `elasticsearch>=8.0.0` pyproject.toml deps 잔존
-  - `docs/guides/env-configuration-guide.md` 등에 ES 절차 일부 잔존
 - **embedding-search-integration.md(v1.2)** — 일부 MiniLM 384-dim 기준 분석이 남아 현재 BGE-M3 구현과 정렬 재확인 필요
 - **git M 대량 변경 미커밋**(섹션 2 중복)
+
+### ✅ 해결됨 (2026-04-14)
+- ~~**ES 레거시 잔존**~~ → `seed_elasticsearch.py`, `resources/connectors/elasticsearch/`,
+  `elasticsearch_connector.py`, `elasticsearch>=8.0.0` deps, ES 관련 env 절차 전부 제거 완료.
+  docs 전역에서 ES 참조를 MongoDB(메타) / Qdrant(SQL 이력)로 교체
 
 ---
 

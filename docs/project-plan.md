@@ -34,8 +34,8 @@ AI 에이전트 프로젝트는 불확실성이 크기 때문에
 | 에이전트 | 핵심 역할 | 산출물 |
 |---------|----------|--------|
 | **nl-sql-developer** | LangGraph 노드 구현, SQL 생성 로직 | src/agents/nodes/*.py |
-| **api-integrator** | ES·PostgreSQL·Qdrant·Redis 커넥터 구현 | src/connectors/*.py |
-| **schema-architect** | DB 스키마 분석, 메타데이터 문서화, 유사 테이블 구분 규칙 | 스키마 문서, ES 매핑 |
+| **api-integrator** | MongoDB·PostgreSQL·Qdrant·Neo4j·Redis 커넥터 구현 (2026-04 ES 제거) | src/connectors/*.py |
+| **schema-architect** | DB 스키마 분석, 메타데이터 문서화, 유사 테이블 구분 규칙 | 스키마 문서, MongoDB 스키마 매핑 |
 
 ### 지식 그룹 (Knowledge)
 
@@ -210,14 +210,15 @@ project-planner ──→ pipeline-designer ──→ design-critic
 **Step 2-1: schema-architect** (단독, 선행)
 - [ ] 정보계 DB 스키마 분석 (테이블 목록, 컬럼 정의, FK 관계)
 - [ ] 유사 테이블 구분 규칙 문서화 (TB_LOAN_INFO vs TB_LOAN_OVERDUE_STAT 등)
-- [ ] ES 메타 인덱스 매핑 설계
+- [ ] MongoDB 메타 스키마 설계 (2026-04 ES→MongoDB)
 - [ ] 코드 메타 매핑 (코드 필드별 코드값 정의)
-- [ ] **파일 소유권**: 스키마 문서, `src/connectors/elasticsearch_connector.py` (Dummy 데이터 부분)
+- [ ] **파일 소유권**: 스키마 문서, `src/connectors/impl/mongo_connector.py` (Dummy 데이터 부분)
 
 **Step 2-2: api-integrator** (← schema-architect 완료 후)
-- [ ] PostgreSQL 커넥터 (정보계 읽기 전용 + SQL 이력)
-- [ ] ElasticSearch 커넥터 (메타 검색 + 보고서 SQL)
-- [ ] Qdrant 커넥터 (업무 매뉴얼 벡터 검색)
+- [ ] PostgreSQL 커넥터 (정보계 읽기 전용 + SQL 이력 + 체크포인터)
+- [ ] MongoDB 커넥터 (테이블/컬럼/코드/용어사전 메타, 2026-04 ES 대체)
+- [ ] Qdrant 커넥터 (업무 매뉴얼 + SQL 이력 하이브리드 검색)
+- [ ] Neo4j 커넥터 (온톨로지 그래프)
 - [ ] Redis 커넥터 (캐시 - 동일 질의 캐싱)
 - [ ] ConnectorManager 통합 관리
 - [ ] Dummy/실제 모드 전환 (설정 파일만으로 전환 가능)

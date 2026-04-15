@@ -238,7 +238,7 @@ research (tool-augmented LLM) → generate_sql (LLM) → validate (rule+exec)
 
 현재 구조에서 각 노드가 하는 일을 분석가 관점에서 보면:
 - reasoning_preparer: "무엇을 찾아야 하는지" 계획 → **생각하기**
-- context_retriever/context_interpreter: 실제로 ES/Qdrant/DB를 검색·해석 → **찾기**
+- context_retriever/context_interpreter: 실제로 MongoDB/Qdrant/DB를 검색·해석 → **찾기**
 - readiness_gate: "충분한지" 판단 → **생각하기**
 
 "생각하기" 3번 + "찾기" 1번인데, 추론 가능한 모델이면 **"찾으면서 동시에 생각"**할 수 있다.

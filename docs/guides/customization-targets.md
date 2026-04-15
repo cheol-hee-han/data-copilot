@@ -14,7 +14,7 @@
 2. [임베딩 모델 교체 (Qdrant 벡터 검색)](#2-임베딩-모델-교체-qdrant-벡터-검색)
 3. [프롬프트 전면 재튜닝](#3-프롬프트-전면-재튜닝)
 4. [LLM 포맷 재시도 설정](#4-llm-포맷-재시도-설정)
-5. [ElasticSearch nori 한글 분석기](#5-elasticsearch-nori-한글-분석기)
+5. [ElasticSearch nori 분석기 (제거됨 2026-04)](#5-elasticsearch-nori-한글-분석기-제거됨-2026-04)
 6. [도메인 사전 커스터마이징](#6-도메인-사전-커스터마이징)
 7. [카테고리-domain_cd 매핑](#7-카테고리-domain_cd-매핑)
 8. [유사 테이블 그룹 재정의](#8-유사-테이블-그룹-재정의)
@@ -24,7 +24,7 @@
 12. [Few-shot SQL 예제 교체](#12-few-shot-sql-예제-교체)
 13. [골든셋 & 평가 프레임워크](#13-골든셋--평가-프레임워크)
 14. [업무 매뉴얼 데이터 교체](#14-업무-매뉴얼-데이터-교체)
-15. [LangSmith 비활성화 확인 & 대체 트레이싱](#15-langsmith-비활성화-확인--대체-트레이싱)
+15. [LangSmith (제거됨 2026-04) — 자체 tracker 사용](#15-langsmith-제거됨-2026-04--자체-tracker-사용)
 16. [테이블 메타 시딩 데이터](#16-테이블-메타-시딩-데이터)
 17. [SVG 시각화 폰트](#17-svg-시각화-폰트)
 18. [Docker 이미지 빌드 (오프라인)](#18-docker-이미지-빌드-오프라인)
@@ -102,24 +102,12 @@ LLM_PARSE_MAX_RETRY=4
 
 ---
 
-## 5. ElasticSearch nori 한글 분석기
+## 5. ElasticSearch nori 한글 분석기 (제거됨 2026-04)
 
-| 위치 | 현재 설정 | 커스터마이징 내용 |
-|------|-----------|-------------------|
-| `devtools/docker/elasticsearch/Dockerfile` | `analysis-nori` 플러그인 온라인 설치 | 폐쇄망에서는 **nori 플러그인 오프라인 설치** (zip 파일 사전 배포) |
-| `devtools/scripts/seed_elasticsearch.py` | `korean` analyzer 적용 | 커스텀 nori 분석기 설정(사용자 사전, 동의어 필터) 추가 검토 |
-
-**정확도 영향**: nori 미적용 시 한글 검색 정확도 급락 (적용 전/후 비교):
-
-| 검색어 | standard (적용 전) | nori (적용 후) |
-|--------|-------------------|---------------|
-| "여신" | 2건 | 29건 |
-| "대출" | 0건 | 7건 |
-| "연체" | 0건 | 5건 |
-| "고객" | 0건 | 41건 |
-| "카드" | 0건 | 23건 |
-
-**추가 권장**: 은행 고유 용어(상품명, 내부 코드 등)를 **nori 사용자 사전**에 등록하면 검색 정확도가 추가 향상된다.
+> ElasticSearch 스택은 2026-04 기준 제거되었다. 메타 검색은 MongoDB, SQL 이력은
+> Qdrant(하이브리드 + Reranker)로 대체되었으며 nori 한글 분석기 관련 설정은
+> 더 이상 적용 대상이 아니다. 한글 매칭 품질은 Qdrant 측 임베딩 모델(BGE-M3)과
+> MongoDB 측 동의어/별칭 사전(`resources/domain/business_synonyms.yaml`)으로 흡수되었다.
 
 ---
 
@@ -297,18 +285,11 @@ _CATEGORY_TO_DOMAIN_CD = {
 
 ---
 
-## 15. LangSmith 비활성화 확인 & 대체 트레이싱
+## 15. LangSmith (제거됨 2026-04) — 자체 tracker 사용
 
-| 위치 | 현재 설정 | 커스터마이징 내용 |
-|------|-----------|-------------------|
-| `src/config.py:56-59` | `langsmith_enabled: False`, 엔드포인트 `https://api.smith.langchain.com` | 폐쇄망에서 **반드시 False 유지** 확인. 외부 호출 시도 자체를 차단하려면 환경변수 제거 |
-| `src/utils/tracker/evaluation.py` | 자체 JSON 트레이싱 (폐쇄망 호환) | 이미 폐쇄망 호환으로 설계됨. 내부 모니터링 시스템 연동 시 출력 포맷 확장 가능 |
-
-**환경변수**:
-```env
-LANGSMITH_ENABLED=false
-# LANGSMITH_API_KEY, LANGSMITH_ENDPOINT 는 설정하지 않음
-```
+> LangSmith 연동(`src/tools/langsmith.py`, `LANGSMITH_*` 환경변수)은 2026-04 기준 전면 제거되었다.
+> 트레이싱/관측성은 `src/utils/tracker/` 자체 구현(JSON 파일 기반, 폐쇄망 호환)으로 단일화되었으며
+> 외부 통신 경로는 존재하지 않는다. `EVAL_TRACKER_ENABLED=true` 유지만 확인하면 된다.
 
 ---
 
@@ -316,14 +297,15 @@ LANGSMITH_ENABLED=false
 
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
-| `devtools/scripts/seed_elasticsearch.py` | 샘플 8개 테이블 메타 | 실제 정보계 DB의 **전체 테이블 레이아웃(DDL)을 ES에 적재** |
+| `devtools/scripts/seed_mongodb.py` | 샘플 8개 테이블 메타 | 실제 정보계 DB의 **전체 테이블 레이아웃(DDL)을 MongoDB에 적재** |
 | `devtools/scripts/seed_postgres.py` | 샘플 테스트 데이터 | 실제 DB 연결로 교체 (시딩 불필요, 읽기 전용 접근) |
 
-### ES 인덱스 적재 대상
+### MongoDB 컬렉션 적재 대상 (2026-04 ES→MongoDB 전환)
 
 - `table_meta`: 테이블명, 컬럼 정보, 설명, domain_cd, 갱신주기
 - `code_meta`: 코드 컬럼별 코드값-한글명 매핑
-- `report_sql`: 기존 보고서 SQL + 요건 설명
+- `biz_meta`: 비즈 용어 사전
+- 과거 보고서 SQL은 Qdrant `sql_history` 컬렉션에서 처리
 
 ---
 
@@ -345,18 +327,21 @@ font-family="'Noto Sans KR','NanumGothic',sans-serif"
 
 | 위치 | 현재 설정 | 커스터마이징 내용 |
 |------|-----------|-------------------|
-| `devtools/docker/docker-compose.dev.yml` | PostgreSQL 16, ES 8.15, Qdrant 1.12.6, Redis 이미지 | 폐쇄망 내부 레지스트리에서 pull 가능하도록 **이미지 사전 빌드·배포** |
-| `devtools/docker/elasticsearch/Dockerfile` | nori 플러그인 온라인 설치 | **빌드 시점에 플러그인 포함된 커스텀 이미지** 사전 준비 |
-| `pyproject.toml` | pip 패키지 의존성 | 내부 PyPI 미러 또는 **오프라인 wheel 번들** 준비 |
+| `devtools/docker/docker-compose.dev.yml` | PostgreSQL 16, MongoDB, Qdrant 1.12.6, Redis, Neo4j 이미지 | 폐쇄망 내부 레지스트리에서 pull 가능하도록 **이미지 사전 빌드·배포** |
+| `deploy/offline-bundle/` | `uv` 기반 오프라인 번들 빌드 스크립트 (`build.sh`, `install.sh`, `download_models.sh`, `os-packages.txt`) | 외부망에서 번들 생성 → 내부망 반입 후 `install.sh` 실행 |
+| `deploy/db-init/` | postgres/mongo/qdrant `init.sh` | 폐쇄망 최초 기동 시 스키마/컬렉션 초기화 |
+| `deploy/systemd/data-copilot.service` | systemd 유닛 | 운영 서비스 등록 |
+| `pyproject.toml` | `uv` 기반 의존성 | 내부 PyPI 미러 또는 오프라인 wheel 번들 (`deploy/offline-bundle/`)로 준비 |
 
 ### 사전 준비 체크리스트
 
 - [ ] PostgreSQL 16 이미지 → 내부 레지스트리 push
-- [ ] ES 8.15 + nori 플러그인 커스텀 이미지 빌드 → 내부 레지스트리 push
+- [ ] MongoDB 이미지 → 내부 레지스트리 push
 - [ ] Qdrant v1.12.6 이미지 → 내부 레지스트리 push
 - [ ] Redis 이미지 → 내부 레지스트리 push
+- [ ] Neo4j 이미지 → 내부 레지스트리 push
 - [ ] Python 3.12 이미지 → 내부 레지스트리 push
-- [ ] pip 패키지 오프라인 번들 (anthropic, fastembed, qdrant-client, sqlglot, pydantic 등)
+- [ ] `deploy/offline-bundle/build.sh`로 uv 기반 오프라인 wheel 번들 생성 → 내부망 반입
 
 ---
 
@@ -389,7 +374,6 @@ TextEmbedding(model_name=_EMBEDDING_MODEL, cache_dir="/opt/models/fastembed")
 | 2 | [임베딩 모델 오프라인 배포](#2-임베딩-모델-교체-qdrant-벡터-검색) | Qdrant 벡터 검색 불가 |
 | 18 | [Docker 이미지/패키지 오프라인 준비](#18-docker-이미지-빌드-오프라인) | 인프라 구동 불가 |
 | 19 | [fastembed 모델 캐시 경로](#19-fastembed-모델-캐시-경로) | 임베딩 생성 불가 |
-| 5 | [nori 플러그인 오프라인 설치](#5-elasticsearch-nori-한글-분석기) | 한글 검색 66.7%로 급락 |
 
 ### P1 — 정확도 핵심 (미수행 시 답변 품질 심각 저하)
 
@@ -408,7 +392,7 @@ TextEmbedding(model_name=_EMBEDDING_MODEL, cache_dir="/opt/models/fastembed")
 |---|------|------|
 | 8 | [유사 테이블 그룹 재정의](#8-유사-테이블-그룹-재정의) | 테이블 선택 정확도 |
 | 13 | [골든셋 재작성](#13-골든셋--평가-프레임워크) | 정확도 측정·개선 기반 |
-| 7 | [domain_cd 매핑](#7-카테고리-domain_cd-매핑) | ES 검색 정밀도 |
+| 7 | [domain_cd 매핑](#7-카테고리-domain_cd-매핑) | MongoDB 검색 정밀도 |
 | 12 | [Few-shot SQL 예제 교체](#12-few-shot-sql-예제-교체) | SQL 생성 품질 |
 | 16 | [테이블 메타 시딩](#16-테이블-메타-시딩-데이터) | 컨텍스트 수집 품질 |
 
@@ -418,4 +402,4 @@ TextEmbedding(model_name=_EMBEDDING_MODEL, cache_dir="/opt/models/fastembed")
 |---|------|------|
 | 11 | [불용어 보강](#11-한국어-불용어조사-패턴) | 검색 노이즈 감소 |
 | 17 | [SVG 폰트](#17-svg-시각화-폰트) | 차트 한글 깨짐 방지 |
-| 15 | [LangSmith 확인](#15-langsmith-비활성화-확인--대체-트레이싱) | 외부 통신 차단 확인 |
+| 15 | [LangSmith (제거됨)](#15-langsmith-제거됨-2026-04--자체-tracker-사용) | 자체 tracker로 대체됨 |

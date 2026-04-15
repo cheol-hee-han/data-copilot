@@ -15,7 +15,7 @@
 - 은행 정보계 DB는 통상 **수천~수만 개 테이블**로 구성됨. 에이전트가 올바른 테이블을 선택하려면 충분한 노이즈(유사 테이블)가 필요
 - **최소 500개 이상의 테이블 메타**를 생성하여 테이블 선택 난이도를 실무 수준으로 확보
 - 각 도메인마다 **실제 데이터가 적재되는 핵심 테이블**(★ 표시)과 **메타만 존재하는 보조 테이블**을 구분
-- 핵심 테이블에만 PG 실데이터를 적재하고, 나머지는 ES 메타(table_meta, column_meta)만 등록하여 에이전트의 테이블 탐색 난이도를 높임
+- 핵심 테이블에만 PG 실데이터를 적재하고, 나머지는 MongoDB 메타(dpasset_table, dpasset_column)만 등록하여 에이전트의 테이블 탐색 난이도를 높임 (2026-04 ES→MongoDB 이전)
 
 ---
 
@@ -211,7 +211,7 @@
 | 저장소 | 역할 | 재현 대상 |
 |--------|------|----------|
 | **PostgreSQL** | 업무 테이블 (정보계) + 시스템 로그 | 실제 업무 데이터, 불완전 코드값 |
-| **ElasticSearch** | 테이블/컬럼 메타, 코드 메타, 용어사전 | 부실한 메타 설명, 코드 정의 누락, **대량 테이블 메타** |
+| **MongoDB** | 테이블/컬럼 메타, 코드 메타, 용어사전 (2026-04 ES→MongoDB 통합) | 부실한 메타 설명, 코드 정의 누락, **대량 테이블 메타** |
 | **Qdrant** | 업무 매뉴얼, 자연어↔SQL 이력 벡터 | 실무 패턴, 재질문 케이스 |
 
 ---
@@ -254,7 +254,7 @@
 
 ### TYPE-2: 코드값 불일치
 
-ElasticSearch `code_meta` 인덱스에는 공식 정의만 적재하고, PostgreSQL 실제 데이터에는 미정의 코드를 의도적으로 삽입합니다.
+MongoDB `code_meta` 컬렉션(과거 ES `code_meta` 인덱스, 2026-04 이전됨)에는 공식 정의만 적재하고, PostgreSQL 실제 데이터에는 미정의 코드를 의도적으로 삽입합니다.
 
 **요건:**
 - 메타에 없는 코드값이 실제 데이터에 존재
@@ -267,6 +267,8 @@ ElasticSearch `code_meta` 인덱스에는 공식 정의만 적재하고, Postgre
 | 테이블.컬럼 | ES 메타 정의 | PG 실데이터 추가값 | 의도 |
 |------------|------------|-----------------|------|
 | `TB_ADW_CSC101M.CUS_GRD_CD` | `01~05` | **`99`**, `NULL` | 미분류 고객 누락 유도 |
+<!-- 본 표의 "ES 메타 정의" 열은 2026-04 이후 "MongoDB 메타 정의"를 의미한다. -->
+
 | `TB_ADW_DEP201P.ACT_DCD` | `01~04` | **`05`**, **`99`** | 계좌 유형별 집계 시 누락 |
 | `TB_ADW_LNB301M.OVDU_GRD_CD` | `A~E` | **`F`**, **`Z`** | 연체 분석 시 재질문 유도 |
 | `TB_ADW_LNB301M.LN_STCD` | `01~05` | **`0A`** | 숫자+문자 혼재 (레거시) |
@@ -293,7 +295,7 @@ ElasticSearch `code_meta` 인덱스에는 공식 정의만 적재하고, Postgre
 
 ### TYPE-3: 메타 설명 부실
 
-ElasticSearch `table_meta` / `column_meta` 인덱스의 설명 품질을 **4단계로 혼재**시킵니다.
+MongoDB `dpasset_table` / `dpasset_column` 컬렉션(과거 ES `table_meta` / `column_meta` 인덱스, 2026-04 이전됨)의 설명 품질을 **4단계로 혼재**시킵니다.
 
 **품질 분포 목표:** BEST 15% / GOOD 25% / POOR 40% / MISSING 20%
 
@@ -361,12 +363,12 @@ ElasticSearch `table_meta` / `column_meta` 인덱스의 설명 품질을 **4단�
 
 > **총 목표: 570개 이상 테이블 메타**
 > - ★ = PG 실데이터 적재 대상 (핵심 테이블, 약 20~25개) — DDL + 데이터
-> - 나머지 = DDL만 생성 (데이터 없음) + ES 메타(table_meta, column_meta) 등록
-> - 각 테이블은 최소 5~15개 컬럼을 가지며, column_meta에 등록
+> - 나머지 = DDL만 생성 (데이터 없음) + MongoDB 메타(dpasset_table, dpasset_column) 등록 (2026-04 ES→MongoDB 이전)
+> - 각 테이블은 최소 5~15개 컬럼을 가지며, dpasset_column 에 등록
 >
-> **중요: PG ↔ ES 스키마 일관성**
-> - ES `table_meta`/`column_meta`에 등록된 **모든 테이블은 반드시 PG에도 DDL이 존재**해야 한다
-> - 에이전트가 ES 메타를 참조하여 SQL을 생성하면, 해당 SQL이 PG에서 실행 가능해야 하기 때문
+> **중요: PG ↔ MongoDB 메타 스키마 일관성**
+> - MongoDB `dpasset_table`/`dpasset_column`에 등록된 **모든 테이블은 반드시 PG에도 DDL이 존재**해야 한다
+> - 에이전트가 MongoDB 메타를 참조하여 SQL을 생성하면, 해당 SQL이 PG에서 실행 가능해야 하기 때문
 > - 데이터가 없는 테이블은 빈 결과(`0 rows`)를 반환하면 됨 — 테이블 자체가 없어서 에러가 나면 안 됨
 > - `seed_postgres.py`는 DDL 생성(전체 572개) + 데이터 적재(★ 테이블만)를 모두 담당
 
@@ -1077,7 +1079,7 @@ ElasticSearch `table_meta` / `column_meta` 인덱스의 설명 품질을 **4단�
 
 ## 6. 테이블 규모 요약
 
-| 주제영역 | 주제영역코드 | 테이블 수 | PG 데이터(★) | ES 메타만 |
+| 주제영역 | 주제영역코드 | 테이블 수 | PG 데이터(★) | MongoDB 메타만(과거 ES) |
 |----------|-------------|----------|-------------|----------|
 | 공통/시스템 | COM | 27 | 2 | 25 |
 | 고객관리 | CSC, CSP, CUS | 44 | 3 | 41 |
@@ -1096,14 +1098,19 @@ ElasticSearch `table_meta` / `column_meta` 인덱스의 설명 품질을 **4단�
 | PB/자산관리 | WMB, WMR | 23 | 1 | 22 |
 | **합계** | | **572** | **22** | **550** |
 
-> PG 데이터 적재 대상(★)은 약 22개 핵심 테이블이며, 나머지 550개는 **ES 메타(table_meta + column_meta)만 등록**합니다.
+> PG 데이터 적재 대상(★)은 약 22개 핵심 테이블이며, 나머지 550개는 **MongoDB 메타(`dpasset_table` + `dpasset_column`)만 등록**합니다. (2026-04 ES→MongoDB 이전)
 > 이를 통해 에이전트가 570+ 테이블 중 올바른 테이블을 선택해야 하는 실무 복잡도를 재현합니다.
 
 ---
 
-## 7. ElasticSearch 인덱스 명세
+## 7. 메타 인덱스 명세 (2026-04 ES → MongoDB/Qdrant 이전)
 
-| 인덱스 | 주요 필드 | 목표 건수 | 불완전성 |
+> 아래 표의 "인덱스"는 2026-04 이전 ES 인덱스를 가리키는 역사적 용어다.
+> 현재 구현: `table_meta`/`column_meta`/`code_meta`/`term_dict` → **MongoDB**
+> (`dpasset_table`, `dpasset_column`, `standard_code(_value)`, `glossary` 컬렉션).
+> `report_sql` → **Qdrant** `sql_history` 컬렉션(하이브리드 + Reranker).
+
+| 인덱스(과거 ES) | 주요 필드 | 목표 건수 | 불완전성 |
 |--------|---------|----------|---------|
 | `table_meta` | `table_name`, `table_nm_ko`, `table_desc`, `schema`, `domain_cd`, `std_dt_col`, `is_partitioned`, `columns`(nested) | **572+** | `table_desc` BEST/GOOD/POOR/MISSING 혼재 |
 | `column_meta` | `table_name`, `col_name`, `col_nm_ko`, `col_desc`, `data_type`, `pk_yn`, `nullable`, `code_ref` | **5,500+** (평균 10컬럼/테이블) | `col_desc` POOR/MISSING 혼재, `code_ref` 일부 누락 |
@@ -1674,7 +1681,7 @@ IT 용어(테이블명/컬럼명)는 사용하지 않으며, 비즈니스 용어
 4. 고객 식별은 EDPS_CSN 기준 — 주민번호 직접 조회 금지
 5. 모호한 요청 시 SQL 생성 전 재질문
 6. 생성 SQL에 테이블 선택 근거 주석 명시
-7. 500+ 테이블 중 올바른 테이블 선택을 위해 반드시 ES 메타 검색 선행
+7. 500+ 테이블 중 올바른 테이블 선택을 위해 반드시 MongoDB 메타 검색 선행 (2026-04 ES→MongoDB)
 ```
 
 ---
@@ -1748,7 +1755,7 @@ IT 용어(테이블명/컬럼명)는 사용하지 않으며, 비즈니스 용어
 | **연결 설정 방법** | `CFG` 딕셔너리, `.env` 로딩 방식 | `test-data-seeding-reference.py` 상단 |
 | **PG 테이블 구조** | `_pg_ddl()` 함수 | `test-data-seeding-reference.py` |
 | **PG 샘플 데이터 포맷** | `_pg_dml()` 함수 — 각 테이블 INSERT 순서와 컬럼 순서 | `test-data-seeding-reference.py` |
-| **ES 인덱스 매핑** | `_es_index_data()` 제너레이터 | `test-data-seeding-reference.py` |
+| **MongoDB 컬렉션 매핑** (과거 ES) | `_mongo_collection_data()` 제너레이터 | `test-data-seeding-reference.py` |
 | **Qdrant 컬렉션 구조** | `_qdrant_collections()` 함수 | `test-data-seeding-reference.py` |
 | **불완전성 데이터 예시** | 각 함수 내 `# TYPE-2`, `# TYPE-3` 주석 | `test-data-seeding-reference.py` 전체 |
 
@@ -1759,17 +1766,18 @@ IT 용어(테이블명/컬럼명)는 사용하지 않으며, 비즈니스 용어
 - TYPE-1/2/4 불완전성 포함
 - 기존 구현 유지·확장
 
-**2단계 — ES 대량 메타 (seed_elasticsearch.py)**
-- 549개 전체 테이블의 `table_meta` + `column_meta` 등록
+**2단계 — MongoDB 대량 메타 (seed_mongodb.py, 2026-04 seed_elasticsearch.py 대체)**
+- 549개 전체 테이블의 `dpasset_table` + `dpasset_column` 등록
 - 섹션 5의 테이블 카탈로그를 기반으로 자동 생성
 - TYPE-3 품질 분포 (BEST 15% / GOOD 25% / POOR 40% / MISSING 20%) 적용
-- `code_meta`, `report_sql`, `term_dict` 도 함께 적재
+- `standard_code(_value)`, `glossary` 도 함께 적재
+- 과거 보고서 SQL/SQL 이력은 `seed_qdrant.py` + `src.tools.seed_sql_history`로 Qdrant `sql_history`에 적재
 
 ### 확장 시 주의사항
 
 1. **임베딩 모델 일치** — `test-data-seeding-reference.py`의 `EMBEDDING_MODEL` 환경변수와 워크플로우가 사용하는 모델이 반드시 동일해야 합니다
-2. **중복 방지** — PG는 `ON CONFLICT DO NOTHING`, ES/Qdrant는 `upsert` 방식 유지
+2. **중복 방지** — PG는 `ON CONFLICT DO NOTHING`, MongoDB/Qdrant는 `upsert` 방식 유지
 3. **불완전성 보존** — 데이터 증강 시 TYPE-1~4 케이스를 희석하지 않도록 주의
 4. **파티션 범위** — `TB_ADW_TRX701L` 데이터 추가 시 파티션 테이블 범위(`TB_ADW_TRX701L_YYYYMM`) 확인 필요
-5. **메타 일관성** — PG에 DDL이 있는 테이블은 ES 메타의 컬럼 정의와 반드시 일치시킬 것
+5. **메타 일관성** — PG에 DDL이 있는 테이블은 MongoDB 메타의 컬럼 정의와 반드시 일치시킬 것
 6. **도메인 코드** — 각 테이블에 `domain_cd` (COM/CUS/DEP/LON/CRD/FX/TRS/FND/TRX/INS/PEN/DIG/RSK/MKT/FIN/WM) 태깅

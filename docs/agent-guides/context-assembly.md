@@ -1,14 +1,14 @@
 # 컨텍스트 조립 가이드
 
-> 최종 수정: 2026-03-20 (검색 쿼리 전략 모듈 반영)
+> 최종 수정: 2026-03-20 (검색 쿼리 전략 모듈 반영) / 2026-04 ES→MongoDB 이전 반영
 
 ## 참조 소스 및 우선순위
 
-1. **ES 메타 검색** → 관련 테이블 레이아웃, 컬럼 설명, 코드 메타
-2. **ES 보고서 저장소** → 기존 보고서 SQL과 요건 정보
+1. **MongoDB 메타 검색** → 관련 테이블 레이아웃, 컬럼 설명, 코드 메타 (2026-04 ES→MongoDB 이전)
+2. **MongoDB 보고서 저장소** → 기존 보고서 SQL과 요건 정보
 3. **과거 SQL 이력** → 유사 요청에 대한 기존 검증된 SQL (Qdrant sql_history 벡터 검색)
 4. **업무 매뉴얼** → 업무 규정, 계수산출식, 프로세스 (Qdrant biz_manual 벡터 검색)
-5. **코드 메타** → 코드값 매핑 (ES, 전체 로드)
+5. **코드 메타** → 코드값 매핑 (MongoDB, 전체 로드)
 6. **도메인 사전** → 금융 용어 매핑, 비즈니스 규칙 (`finance_terms.py` 150+개)
 
 ## 검색 쿼리 전략 (SearchQueryBuilder)
@@ -25,18 +25,18 @@ preprocessed_input
   ├─ Step 4: 동의어 확장 ("여신"→"대출","론","대여금")
   ├─ Step 5: 유사 테이블 신호어 수집
   └─ Step 6: 소스별 쿼리 특화
-       ├─ ES table_meta:  domain_cd 주입 + 테이블명 부스트 + 시간어 제거
-       ├─ ES report_sql:  시간 표현 제거 + 카테고리 보강
-       ├─ History DB:     핵심 키워드 + 동의어 확장 + 테이블명 (15개 제한)
-       └─ Qdrant manual:  원본 유지 + 도메인 설명 보강 (벡터 의미 강화)
+       ├─ MongoDB table_meta:  domain_cd 주입 + 테이블명 부스트 + 시간어 제거 (2026-04 ES→MongoDB)
+       ├─ MongoDB report_sql:  시간 표현 제거 + 카테고리 보강
+       ├─ History DB:          핵심 키워드 + 동의어 확장 + 테이블명 (15개 제한)
+       └─ Qdrant manual:       원본 유지 + 도메인 설명 보강 (벡터 의미 강화)
 ```
 
 ### 소스별 전략 상세
 
 | 소스 | 검색 메커니즘 | 전략 쿼리 특화 | 이유 |
 | ---- | ------------ | ------------- | ---- |
-| ES table_meta | multi_match + nori | domain_cd 선두 주입, 시간어 제거 | keyword 타입 table_name은 부분검색 불가, domain_cd로 필터링 |
-| ES report_sql | multi_match + nori | 시간 표현 제거, 카테고리 보강 | 보고서는 업무 목적으로 검색되므로 자연어 유지 |
+| MongoDB table_meta | text index + regex | domain_cd 선두 주입, 시간어 제거 | keyword 타입 table_name은 부분검색 불가, domain_cd로 필터링 (2026-04 ES→MongoDB) |
+| MongoDB report_sql | text index | 시간 표현 제거, 카테고리 보강 | 보고서는 업무 목적으로 검색되므로 자연어 유지 |
 | Qdrant sql_history | 벡터 유사도 (cosine) | 원본 자연어 그대로 | description 임베딩과 의미적 유사성 극대화 |
 | Qdrant biz_manual | 벡터 유사도 (cosine) | 도메인 용어 설명 보강 | 업무 질의형 검색에서 도메인 보강이 효과적 |
 
@@ -80,7 +80,7 @@ SQL 생성 실패 시 아래 항목 점검:
 
 | 소스 | 적합도 |
 | ---- | ------ |
-| ES table_meta | 98.9% (89/90) |
+| MongoDB table_meta (과거 ES) | 98.9% (89/90) |
 | Qdrant sql_history | 85.6% (77/90) |
 | Qdrant biz_manual | 88.9% (80/90) |
 | **종합** | **91.1% (246/270)** |

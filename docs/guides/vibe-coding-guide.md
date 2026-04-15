@@ -751,7 +751,7 @@ Claude Code에서 병렬 호출은 **하나의 메시지에 여러 Agent 도구�
 <functional_requirements>
 - 자연어 → SQL 변환 → 실행 → 결과 반환
 - 멀티턴 대화 지원
-- 여러 데이터 소스 참조 (ES, PostgreSQL, Qdrant)
+- 여러 데이터 소스 참조 (MongoDB, PostgreSQL, Qdrant, Neo4j)
 </functional_requirements>
 
 <constraints>
@@ -827,7 +827,7 @@ ADR은 **왜 이 기술/패턴을 선택했는지**를 기록하여 미래의 �
 - 사용자 인터페이스 계층
 - API 서버 계층
 - 비즈니스 로직 계층 (LangGraph 파이프라인)
-- 데이터 소스 계층 (ES, PostgreSQL, Qdrant)"
+- 데이터 소스 계층 (MongoDB, PostgreSQL, Qdrant, Neo4j)"
 ```
 
 ### 7.5 설계 문서 구조 템플릿
@@ -891,9 +891,9 @@ ADR은 **왜 이 기술/패턴을 선택했는지**를 기록하여 미래의 �
 **모듈 단위** (큰 구조 작업):
 ```
 "src/connectors/ 모듈 전체를 구현해줘.
-- elasticsearch.py: ES 클라이언트 래퍼
-- postgresql.py: async SQLAlchemy 세션 관리
-- qdrant.py: Qdrant 벡터 검색 클라이언트
+- mongo_connector.py: MongoDB 클라이언트 래퍼 (메타 단일 소스)
+- postgres_connector.py: async psycopg/asyncpg 세션 관리
+- qdrant_connector.py: Qdrant 벡터 검색 클라이언트 (하이브리드 + Reranker)
 - 모든 커넥터는 공통 인터페이스(BaseConnector) 상속
 - 커넥션 풀링 및 재연결 로직 포함"
 ```

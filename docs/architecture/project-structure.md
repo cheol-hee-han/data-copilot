@@ -102,7 +102,7 @@ src/
 │       ├── mongo_connector.py         # MongoDB — 테이블/컬럼/코드/용어사전 메타 (메타 주 소스)
 │       ├── postgres_connector.py      # PostgreSQL — 정보계(읽기전용) + SQL이력 DB
 │       ├── qdrant_connector.py        # Qdrant — 매뉴얼(Dense) + SQL이력(하이브리드)
-│       ├── elasticsearch_connector.py # ElasticSearch — 보고서 SQL 검색 (레거시/하위호환)
+│       # elasticsearch_connector.py — 제거됨(2026-04) · SQL이력은 Qdrant, 메타는 MongoDB
 │       ├── neo4j_connector.py         # Neo4j — 온톨로지 그래프 (테이블 관계, JOIN 경로)
 │       ├── reranker.py                # BGE-Reranker — Cross-Encoder 재순위
 │       ├── adw_connector.py           # ADW — 폐쇄망 ADW (분석 데이터웨어하우스)
@@ -123,8 +123,8 @@ src/
 ├── tools/                             # 독립 실행 도구·개발 유틸
 │   ├── __init__.py
 │   ├── seed_sql_history.py            # SQL 이력 벡터 시딩
-│   ├── langsmith.py                   # LangSmith 연동 (개발 환경)
 │   └── langgraph_studio.py            # LangGraph Studio 인터페이스 (개발 전용)
+│   # langsmith.py — 제거됨(2026-04) · 트레이싱은 src/utils/tracker/ 자체 구현
 │
 └── utils/                             # 공통 유틸리티
     ├── __init__.py
@@ -204,10 +204,7 @@ resources/
 │
 ├── connectors/                        # 커넥터별 설정
 │   ├── README.md
-│   ├── elasticsearch/                 # ES 쿼리 템플릿 (레거시)
-│   │   ├── table_meta_query.json
-│   │   ├── report_sql_query.json
-│   │   └── code_meta_query.json
+│   # elasticsearch/ — 제거됨(2026-04)
 │   ├── mongo/                         # MongoDB 파이프라인·초기화
 │   │   ├── init_mongodb.js
 │   │   ├── pipeline_table_meta.json
@@ -275,7 +272,7 @@ tests/
 │   │   ├── test_connector_manager.py         # 커넥터 매니저
 │   │   ├── test_evaluation_tracker.py        # 평가 트래커
 │   │   ├── test_evaluator.py                 # 평가 모듈
-│   │   ├── test_langsmith.py                 # LangSmith 트레이싱
+│   │   # test_langsmith.py — 제거됨(2026-04)
 │   │   ├── test_trace.py                     # 추론 추적 로그
 │   │   ├── test_trace_analyzer.py            # 트레이스 분석기
 │   │   ├── test_edge_cases.py                # 전 구간 엣지 보강
@@ -338,7 +335,6 @@ tests/
         ├── test_gemini_api.py         # Gemini API 호환성
         ├── test_infra_connectivity.py # 인프라 연결 확인
         ├── test_input_to_normalization.py
-        ├── test_search_es_schema.py   # ES 검색 품질
         ├── test_search_qdrant_manual.py # Qdrant 매뉴얼 검색 품질
         └── test_search_qdrant_sql_history.py # Qdrant SQL 이력 검색 품질
 ```
@@ -359,9 +355,9 @@ devtools/
 │   └── run_evaluation.py              # 평가 실행 스크립트
 │
 └── scripts/                           # 데이터 시딩·관리 스크립트
-    ├── seed_all.sh                    # 전체 시딩 실행 (PostgreSQL → ES → Qdrant → MongoDB → Neo4j)
+    ├── seed_all.sh                    # 전체 시딩 실행 (PostgreSQL → MongoDB → Qdrant → Neo4j)
     ├── seed_postgres.py               # PostgreSQL 테스트 데이터 시딩
-    ├── seed_elasticsearch.py          # ElasticSearch 메타데이터 시딩
+    # seed_elasticsearch.py — 제거됨(2026-04)
     ├── seed_qdrant.py                 # Qdrant 벡터 데이터 시딩
     ├── seed_mongodb.py                # MongoDB 메타 시딩
     ├── seed_neo4j.py                  # Neo4j 온톨로지 그래프 시딩

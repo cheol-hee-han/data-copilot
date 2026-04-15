@@ -1,8 +1,18 @@
 # 지식 저장소 추가·변경·삭제 개발자 매뉴얼
 
-**작성일:** 2026-03-19
+**작성일:** 2026-03-19 (2026-04 ES/LangSmith 제거 반영)
 **대상 독자:** Data Copilot 개발·운영 담당자
 **목적:** 도메인 지식·보조 정보를 제공하는 저장소가 추가/변경/삭제될 때의 코드 수정 가이드
+
+> **⚠️ 2026-04 구조 변경 반영 필요**
+> - ElasticSearch는 **제거**되었다. 본 문서의 ES 관련 기술 상세(커넥터 코드, `ES_*` 환경변수,
+>   `elasticsearch_connector.py`, `resources/connectors/elasticsearch/`, `devtools/docker/elasticsearch/`,
+>   `seed_elasticsearch.py`)는 **역사적 참조**로만 유효하다.
+> - 테이블/컬럼 메타·코드 메타·용어사전은 **MongoDB**(`mongo_connector.py`), 과거 SQL 이력은
+>   **Qdrant**(`sql_history` 컬렉션, 하이브리드 + Reranker)로 이전되었다.
+> - LangSmith 연동은 제거되었고 관측성은 `src/utils/tracker/`가 담당한다.
+> - "ES" 관련 시나리오(§5-A, §5-C 등)와 `ElasticSearchConnector`/`self.es` 코드 예시는
+>   현재 구현과 일치하지 않으므로 MongoDB/Qdrant 기준으로 읽어야 한다.
 
 ---
 

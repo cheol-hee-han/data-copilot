@@ -15,7 +15,7 @@
 
 ## 0. 폐쇄망 테이블/컬럼 명명규칙
 
-폐쇄망 환경의 실제 명명규칙을 따른다. 모든 테이블 설계·DDL·ES 메타 작성 시 이 규칙을 준수한다.
+폐쇄망 환경의 실제 명명규칙을 따른다. 모든 테이블 설계·DDL·MongoDB 메타 작성 시 이 규칙을 준수한다. (2026-04 ES → MongoDB 이관)
 
 ## 0.1 대상 스키마명: ADWOWN
 
@@ -770,7 +770,7 @@ COMMENT ON TABLE ADWOWN.TB_ADW_<주제영역코드><일련번호><유형> IS '�
 COMMENT ON COLUMN ADWOWN.TB_ADW_<주제영역코드><일련번호><유형>.컬럼명 IS '컬럼 한글 설명';
 ```
 
-### (B) ES 테이블 메타 문서
+### (B) MongoDB 테이블 메타 문서 (2026-04 ES → MongoDB 이관)
 ```python
 {
     "table_name": "TB_ADW_<주제영역코드><일련번호><유형>",
@@ -855,7 +855,7 @@ docs/data-generation-rules/
 
 1. **모든 시드 데이터 생성 시**: 03번(분포)과 04번(시계열)을 참조하여 현실적 분포 적용
 2. **신규 테이블 설계 시**: 02번(유사 테이블)을 참조하여 기존 테이블과의 혼동 포인트 명시
-3. **ES 메타 작성 시**: 01번(메타 불완전성)을 참조하여 일부 설명을 의도적으로 불완전하게 작성
+3. **MongoDB 메타 작성 시**: 01번(메타 불완전성)을 참조하여 일부 설명을 의도적으로 불완전하게 작성
 4. **데이터 품질 이슈 삽입 시**: 05번을 참조하여 경계 케이스·이상치·불일치 데이터 포함
 
 ---
@@ -890,7 +890,7 @@ docs/data-generation-rules/
 scripts/
 ├── init_postgres.sql        — DDL 추가 (기존 파일 확장)
 ├── seed_postgres.py         — 시드 데이터 추가 (기존 파일 확장)
-├── seed_elasticsearch.py    — ES 메타 추가 (기존 파일 확장)
+├── seed_mongodb.py          — MongoDB 메타 추가 (2026-04 ES → MongoDB)
 └── seed_qdrant.py           — 매뉴얼 추가 (기존 파일 확장)
 ```
 
