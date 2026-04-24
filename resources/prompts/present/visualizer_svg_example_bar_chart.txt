@@ -1,0 +1,178 @@
+────────────────────────────────
+## 예제 1: bar_chart (세로 막대 — 소수 카테고리)
+────────────────────────────────
+
+데이터:
+컬럼: [부서명, 실적금액]
+행: [("강남지점", 4520), ("서초지점", 3180), ("송파지점", 2850)]
+
+계산 과정 (모델 내부 참조):
+  y_max = 4520 × 1.15 ≈ 5200 → 올림 → 5000
+  plot: x=[90,760], y=[60,420], width=670, height=360
+  막대 3개: bar_width=130, gap=52, total=3×130+2×52=494
+  중앙 정렬: start_x = 90 + (670-494)/2 = 178
+  강남: x=178, cx=243, py=420-(4520/5000)×360=95, h=325
+  서초: x=360, cx=425, py=420-(3180/5000)×360=191, h=229
+  송파: x=542, cx=607, py=420-(2850/5000)×360=215, h=205
+  레이블: 막대 3개 + "강남지점"(4글자) → 7개 미만 & 5글자 미만이므로 회전 불요, text-anchor=middle
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">부서별 실적 비교</text>
+
+  <!-- Y축 그리드 + 레이블 -->
+  <line x1="90" y1="420" x2="760" y2="420" stroke="#d1d5db" stroke-width="1"/>
+  <text x="80" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">0</text>
+
+  <line x1="90" y1="348" x2="760" y2="348" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="352" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">1,000</text>
+
+  <line x1="90" y1="276" x2="760" y2="276" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="280" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">2,000</text>
+
+  <line x1="90" y1="204" x2="760" y2="204" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="208" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">3,000</text>
+
+  <line x1="90" y1="132" x2="760" y2="132" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="136" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">4,000</text>
+
+  <line x1="90" y1="60" x2="760" y2="60" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="64" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">5,000</text>
+
+  <!-- 축선 -->
+  <line x1="90" y1="60" x2="90" y2="420" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- 막대: 강남지점 -->
+  <rect x="178" y="95" width="130" height="325" fill="#1a56db" rx="4"/>
+  <text x="243" y="83" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">4,520</text>
+  <text x="243" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">강남지점</text>
+
+  <!-- 막대: 서초지점 -->
+  <rect x="360" y="191" width="130" height="229" fill="#f59e0b" rx="4"/>
+  <text x="425" y="179" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">3,180</text>
+  <text x="425" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">서초지점</text>
+
+  <!-- 막대: 송파지점 -->
+  <rect x="542" y="215" width="130" height="205" fill="#10b981" rx="4"/>
+  <text x="607" y="203" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">2,850</text>
+  <text x="607" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">송파지점</text>
+</svg>
+
+
+────────────────────────────────
+## 예제 2: bar_chart (세로 막대 — 다수 카테고리 + 레이블 회전)
+────────────────────────────────
+
+데이터:
+컬럼: [지점명, 신규계좌건수]
+행: [("강남지점",45),("서초지점",38),("송파지점",32),("강동지점",28),("마포지점",25),("영등포지점",22),("종로지점",18),("용산지점",14)]
+
+계산 과정 (모델 내부 참조):
+  y_max = 45 × 1.15 ≈ 52 → 올림 → 50
+  plot: x=[90,760], y=[60,420], width=670, height=360
+  막대 8개: bar_width=60, gap=24, total=8×60+7×24=648
+  중앙 정렬: start_x = 90 + (670-648)/2 = 101
+  레이블: 막대 8개(≥7) + "영등포지점"(5글자) 존재 → rotate(-45) 필수 적용
+  막대 위치: x1=101(cx=131), x2=185(cx=215), x3=269(cx=299), x4=353(cx=383),
+            x5=437(cx=467), x6=521(cx=551), x7=605(cx=635), x8=689(cx=719)
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">지점별 신규계좌 건수</text>
+
+  <!-- Y축 그리드 + 레이블 -->
+  <line x1="90" y1="420" x2="760" y2="420" stroke="#d1d5db" stroke-width="1"/>
+  <text x="80" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">0</text>
+
+  <line x1="90" y1="348" x2="760" y2="348" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="352" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">10</text>
+
+  <line x1="90" y1="276" x2="760" y2="276" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="280" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">20</text>
+
+  <line x1="90" y1="204" x2="760" y2="204" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="208" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">30</text>
+
+  <line x1="90" y1="132" x2="760" y2="132" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="136" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">40</text>
+
+  <line x1="90" y1="60" x2="760" y2="60" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="64" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">50</text>
+
+  <!-- 축선 -->
+  <line x1="90" y1="60" x2="90" y2="420" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- 막대: 강남지점 (45) -->
+  <rect x="101" y="96" width="60" height="324" fill="#1a56db" rx="4"/>
+  <text x="131" y="84" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">45</text>
+  <text x="131" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,131,448)">강남지점</text>
+
+  <!-- 막대: 서초지점 (38) -->
+  <rect x="185" y="147" width="60" height="273" fill="#f59e0b" rx="4"/>
+  <text x="215" y="135" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">38</text>
+  <text x="215" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,215,448)">서초지점</text>
+
+  <!-- 막대: 송파지점 (32) -->
+  <rect x="269" y="190" width="60" height="230" fill="#10b981" rx="4"/>
+  <text x="299" y="178" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">32</text>
+  <text x="299" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,299,448)">송파지점</text>
+
+  <!-- 막대: 강동지점 (28) -->
+  <rect x="353" y="219" width="60" height="201" fill="#ef4444" rx="4"/>
+  <text x="383" y="207" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">28</text>
+  <text x="383" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,383,448)">강동지점</text>
+
+  <!-- 막대: 마포지점 (25) -->
+  <rect x="437" y="240" width="60" height="180" fill="#8b5cf6" rx="4"/>
+  <text x="467" y="228" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">25</text>
+  <text x="467" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,467,448)">마포지점</text>
+
+  <!-- 막대: 영등포지점 (22) -->
+  <rect x="521" y="262" width="60" height="158" fill="#ec4899" rx="4"/>
+  <text x="551" y="250" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">22</text>
+  <text x="551" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,551,448)">영등포지점</text>
+
+  <!-- 막대: 종로지점 (18) -->
+  <rect x="605" y="291" width="60" height="129" fill="#1a56db" rx="4"/>
+  <text x="635" y="279" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">18</text>
+  <text x="635" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,635,448)">종로지점</text>
+
+  <!-- 막대: 용산지점 (14) -->
+  <rect x="689" y="319" width="60" height="101" fill="#f59e0b" rx="4"/>
+  <text x="719" y="307" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">14</text>
+  <text x="719" y="448" text-anchor="end" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-45,719,448)">용산지점</text>
+</svg>

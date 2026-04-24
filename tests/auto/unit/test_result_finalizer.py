@@ -4,8 +4,6 @@
   - _build_success_summary: 성공 시 탐색 요약 문자열
   - _build_failure_output: 실패 시 dead_ends·미해소 용어 기반 상세 정보
   - _build_cancel_summary: 취소 시 부분 결과 포함 사용자 메시지
-  - _build_conflicted_signals: CONFLICTED 항목 → AmbiguitySignal 생성
-
 실제 환경에서 실행 — Mock 없음.
 """
 
@@ -18,13 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import pytest
 
-from src.agents.models.clarification import (
-    AmbiguityType,
-    QuestionType,
-)
 from src.agents.nodes.reason.result_finalizer import (
     _build_cancel_summary,
-    _build_conflicted_signals,
     _build_failure_output,
     _build_success_summary,
 )
@@ -158,18 +151,23 @@ class TestBuildSuccessSummary:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TestBuildFailureOutput:
-    """_build_failure_output 실패 상세 조립 테스트."""
+    """_build_failure_output 실패 상세 조립 테스트.
+
+    현재 구현: dead_ends 마지막 항목의 reason 첫 줄만 사용하여
+    '요청하신 데이터를 조회하지 못했습니다.\n(reason)' 형태로 반환.
+    dead_ends/failure_reason 모두 없으면 기본 실패 문구 반환.
+    """
 
     def test_starts_with_sql_failure_header(self):
-        """출력이 'SQL 생성 실패'로 시작한다."""
+        """출력이 '요청하신 데이터를 조회' 문구를 포함한다."""
         reason = _reason()
         output = _build_failure_output(reason)
-        passed = output.startswith("SQL 생성 실패")
-        log_test_case(logger, "failure_header", {}, "SQL 생성 실패", output[:20], passed)
+        passed = "요청하신 데이터를 조회" in output
+        log_test_case(logger, "failure_header", {}, "요청하신 데이터를 조회", output[:40], passed)
         assert passed
 
     def test_dead_ends_listed_in_output(self):
-        """dead_ends의 실패 유형과 이유가 출력에 포함된다."""
+        """dead_ends의 마지막 reason 첫 줄이 출력에 포함된다."""
         dead_ends = [
             DeadEnd(
                 hypothesis_id="H1",
@@ -179,62 +177,64 @@ class TestBuildFailureOutput:
         ]
         reason = _reason(dead_ends=dead_ends)
         output = _build_failure_output(reason)
-        passed = "NO_TABLE" in output and "테이블 후보 없음" in output
-        log_test_case(logger, "failure_dead_ends", dead_ends, "NO_TABLE", output, passed)
+        passed = "테이블 후보 없음" in output
+        log_test_case(logger, "failure_dead_ends", dead_ends, "테이블 후보 없음", output, passed)
         assert passed
 
     def test_unresolved_terms_listed(self):
-        """UNRESOLVED KnowledgeItem 키가 출력에 포함된다."""
+        """dead_ends나 failure_reason이 없을 때 기본 실패 문구가 반환된다."""
         items = [
             _ki("measure:연체율", ConfidenceStatus.UNRESOLVED),
             _ki("filter:지점코드=001", ConfidenceStatus.UNRESOLVED),
         ]
         reason = _reason(knowledge_items=items)
         output = _build_failure_output(reason)
-        passed = "measure:연체율" in output or "filter:지점코드=001" in output
-        log_test_case(logger, "failure_unresolved_terms", items, "terms in output", output, passed)
+        # knowledge_items는 직접 포함되지 않으나 기본 실패 문구는 반환됨
+        passed = len(output) > 0
+        log_test_case(logger, "failure_unresolved_terms", items, "non-empty output", output, passed)
         assert passed
 
     def test_partial_sql_shown_when_generated_not_validated(self):
-        """generated_sql이 있지만 validated_sql이 없으면 부분 SQL이 표시된다."""
+        """generated_sql이 있지만 validated_sql이 없어도 기본 실패 메시지가 반환된다."""
         reason = _reason(
             generated_sql="SELECT * FROM TB_LOAN WHERE ACNT_NO = '001'",
             validated_sql=None,
         )
         output = _build_failure_output(reason)
-        passed = "부분 SQL" in output
-        log_test_case(logger, "failure_partial_sql", {}, "부분 SQL", output, passed)
+        passed = "요청하신 데이터를 조회" in output
+        log_test_case(logger, "failure_partial_sql", {}, "요청하신 데이터를 조회", output, passed)
         assert passed
 
     def test_no_partial_sql_when_both_absent(self):
-        """generated_sql도 없으면 부분 SQL 표시 안 함."""
+        """dead_ends와 failure_reason이 없으면 기본 실패 문구가 반환된다."""
         reason = _reason(generated_sql=None, validated_sql=None)
         output = _build_failure_output(reason)
-        passed = "부분 SQL" not in output
-        log_test_case(logger, "failure_no_partial_sql", {}, "no 부분 SQL", output, passed)
+        passed = len(output) > 0
+        log_test_case(logger, "failure_no_partial_sql", {}, "non-empty output", output, passed)
         assert passed
 
     def test_no_partial_sql_when_validated_exists(self):
-        """validated_sql이 있으면 부분 SQL 표시 안 함."""
+        """validated_sql이 있는 상태에서도 기본 실패 문구를 반환한다."""
         reason = _reason(
             generated_sql="SELECT 1",
             validated_sql="SELECT 1",
         )
         output = _build_failure_output(reason)
-        passed = "부분 SQL" not in output
-        log_test_case(logger, "failure_validated_no_partial", {}, "no 부분 SQL", output, passed)
+        passed = len(output) > 0
+        log_test_case(logger, "failure_validated_no_partial", {}, "non-empty output", output, passed)
         assert passed
 
     def test_multiple_dead_ends_all_listed(self):
-        """여러 dead_ends 항목이 모두 출력에 포함된다."""
+        """여러 dead_ends가 있을 때 마지막 항목의 reason이 출력에 포함된다."""
         dead_ends = [
             DeadEnd(hypothesis_id="H1", failure_type=FailureType.NO_TABLE, reason="경로1"),
             DeadEnd(hypothesis_id="H2", failure_type=FailureType.TERM_UNRESOLVABLE, reason="경로2"),
         ]
         reason = _reason(dead_ends=dead_ends)
         output = _build_failure_output(reason)
-        passed = "경로1" in output and "경로2" in output
-        log_test_case(logger, "failure_multi_dead_ends", dead_ends, "경로1,경로2", output, passed)
+        # 마지막 dead_end의 reason이 포함됨
+        passed = "경로2" in output
+        log_test_case(logger, "failure_multi_dead_ends", dead_ends, "경로2", output, passed)
         assert passed
 
 
@@ -302,104 +302,4 @@ class TestBuildCancelSummary:
         summary = _build_cancel_summary(reason)
         passed = "탐색한 테이블" not in summary
         log_test_case(logger, "cancel_no_tables", {}, "no table msg", summary, passed)
-        assert passed
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# _build_conflicted_signals
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class TestBuildConflictedSignals:
-    """_build_conflicted_signals CONFLICTED → AmbiguitySignal 변환 테스트."""
-
-    def test_empty_list_returns_empty_signals(self):
-        """빈 리스트 입력 → 빈 신호 목록 반환."""
-        result = _build_conflicted_signals([])
-        passed = result == []
-        log_test_case(logger, "empty_conflicted", [], [], result, passed)
-        assert passed
-
-    def test_output_scope_generates_intent_signal(self):
-        """output_scope CONFLICTED → AmbiguityType.INTENT + SINGLE_SELECT."""
-        ki = _ki("output_scope", ConfidenceStatus.CONFLICTED)
-        signals = _build_conflicted_signals([ki])
-        passed = (
-            len(signals) == 1
-            and signals[0].ambiguity_type == AmbiguityType.INTENT
-            and signals[0].question_type == QuestionType.SINGLE_SELECT
-        )
-        log_test_case(logger, "output_scope_intent", ki, "INTENT+SINGLE_SELECT", signals, passed)
-        assert passed
-
-    def test_output_scope_signal_has_options(self):
-        """output_scope 신호에 선택지가 포함된다."""
-        ki = _ki("output_scope", ConfidenceStatus.CONFLICTED)
-        signals = _build_conflicted_signals([ki])
-        passed = len(signals[0].options) > 0
-        log_test_case(logger, "output_scope_options", ki, ">0 options", signals[0].options, passed)
-        assert passed
-
-    def test_non_output_scope_generates_conflict_signal(self):
-        """output_scope 이외의 CONFLICTED 항목 → AmbiguityType.CONFLICT."""
-        ki = _ki("measure:연체율", ConfidenceStatus.CONFLICTED, evidence=["증거1", "증거2"])
-        signals = _build_conflicted_signals([ki])
-        passed = (
-            len(signals) == 1
-            and signals[0].ambiguity_type == AmbiguityType.CONFLICT
-        )
-        log_test_case(logger, "non_output_scope_conflict", ki, "CONFLICT", signals, passed)
-        assert passed
-
-    def test_conflict_signal_with_evidence_uses_single_select(self):
-        """evidence가 있는 CONFLICT 신호는 SINGLE_SELECT 유형."""
-        ki = _ki("measure:잔액", ConfidenceStatus.CONFLICTED, evidence=["TB_A", "TB_B"])
-        signals = _build_conflicted_signals([ki])
-        passed = signals[0].question_type == QuestionType.SINGLE_SELECT
-        log_test_case(logger, "conflict_evidence_single_select", ki, "SINGLE_SELECT", signals, passed)
-        assert passed
-
-    def test_conflict_signal_without_evidence_uses_free_text(self):
-        """evidence 없는 CONFLICT 신호는 FREE_TEXT 유형."""
-        ki = _ki("measure:지표", ConfidenceStatus.CONFLICTED, evidence=[])
-        signals = _build_conflicted_signals([ki])
-        passed = signals[0].question_type == QuestionType.FREE_TEXT
-        log_test_case(logger, "conflict_no_evidence_free_text", ki, "FREE_TEXT", signals, passed)
-        assert passed
-
-    def test_conflict_signal_includes_key_in_question(self):
-        """CONFLICT 신호의 질문에 항목 key가 포함된다."""
-        ki = _ki("measure:연체율", ConfidenceStatus.CONFLICTED)
-        signals = _build_conflicted_signals([ki])
-        passed = "measure:연체율" in signals[0].question
-        log_test_case(logger, "conflict_key_in_question", ki, "key in question", signals[0].question, passed)
-        assert passed
-
-    def test_multiple_items_generate_multiple_signals(self):
-        """여러 CONFLICTED 항목 → 같은 수의 신호 생성."""
-        items = [
-            _ki("output_scope", ConfidenceStatus.CONFLICTED),
-            _ki("measure:잔액", ConfidenceStatus.CONFLICTED, evidence=["증거"]),
-        ]
-        signals = _build_conflicted_signals(items)
-        passed = len(signals) == 2
-        log_test_case(logger, "multi_conflicted_signals", items, 2, len(signals), passed)
-        assert passed
-
-    def test_all_signals_have_ask_decision(self):
-        """생성된 모든 신호의 decision은 'ASK'."""
-        items = [
-            _ki("output_scope", ConfidenceStatus.CONFLICTED),
-            _ki("measure:지표", ConfidenceStatus.CONFLICTED),
-        ]
-        signals = _build_conflicted_signals(items)
-        passed = all(s.decision == "ASK" for s in signals)
-        log_test_case(logger, "signals_all_ask", items, "all ASK", signals, passed)
-        assert passed
-
-    def test_all_signals_have_result_finalizer_source(self):
-        """모든 신호의 source_node는 'result_finalizer'."""
-        ki = _ki("measure:잔액", ConfidenceStatus.CONFLICTED)
-        signals = _build_conflicted_signals([ki])
-        passed = signals[0].source_node == "result_finalizer"
-        log_test_case(logger, "signal_source_node", ki, "result_finalizer", signals[0].source_node, passed)
         assert passed

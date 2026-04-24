@@ -21,8 +21,8 @@ session_id는 영숫자/하이픈/밑줄만 허용하여 경로 순회 및 주�
 
 기동 예시::
 
-    # 개발 (hot-reload)uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-    
+    # 개발 (hot-reload, src/resources 만 감시)
+    uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src --reload-dir resources
 
     # 운영
     uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
@@ -50,6 +50,7 @@ from src.agents.graph.pipeline import get_compiled_app
 from src.agents.graph.runner import run_pipeline
 from src.agents.models.user_messages import ERR_GENERIC, format_error
 from src.config import settings
+from src.models.enums import FinalStatus
 from src.connectors.manager import get_connector_manager
 from src.routers.sessions import router as sessions_router
 from src.services.message_store import get_conversation_history
@@ -86,18 +87,13 @@ class QueryRequest(BaseModel):
     )
 
 
-# 필수 인프라 커넥터 — 실패 시 서버 기동 중단.
-# 업무 DB 커넥터는 ConnectorManager._db_connectors 에 등록된 것 전부가
-# 필수이며, lifespan 내부에서 동적으로 확장된다.
-_REQUIRED_INFRA: set[str] = {"mongodb", "qdrant", "postgres"}
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     """서버 시작/종료 시 리소스 관리.
 
     try/finally로 기동 실패 시에도 리소스 정리를 보장한다.
-    필수 커넥터 연결 실패 시 서버 기동을 중단한다.
+    connect_all()에서 실접속 검증을 수행하며,
+    필수 인프라 커넥터 실패 시 예외를 전파하여 기동을 중단한다.
     """
     setup_logging()
     manager = get_connector_manager()
@@ -105,34 +101,10 @@ async def lifespan(app: FastAPI) -> Any:
     _redis = None  # CancelStore/ActiveRunStore 공유 Redis 클라이언트
 
     try:
+        # connect_all()이 실접속 검증 + 실패 처리를 수행한다.
+        # 필수 인프라 실패 → RuntimeError 전파 → 기동 중단.
+        # 업무 DB 실패 → 해당 커넥터 제외 후 계속.
         await manager.connect_all()
-
-        # 기동 시 실제 연결 검증 — lazy 초기화 커넥터의 연결 실패를 조기 감지.
-        # health_check_all()에 커넥터별 타임아웃(5초)이 적용되어 hang하지 않는다.
-        statuses = await manager.health_check_all()
-        required_db: set[str] = set(manager._db_connectors.keys())
-        missing_infra = [
-            n for n in _REQUIRED_INFRA if not statuses.get(n, False)
-        ]
-        missing_db = [
-            n for n in required_db if not statuses.get(n, False)
-        ]
-        if missing_infra or missing_db:
-            logger.error(
-                "필수 커넥터 연결 실패 — 서버 기동 중단",
-                missing_infra=missing_infra,
-                missing_db=missing_db,
-            )
-            raise RuntimeError(
-                f"필수 커넥터 연결 실패: "
-                f"infra={missing_infra}, db={missing_db}",
-            )
-        for name, ok in statuses.items():
-            if not ok and name not in _REQUIRED_INFRA and name not in required_db:
-                logger.warning(
-                    "선택 커넥터 연결 실패 (degraded 모드)",
-                    connector=name,
-                )
 
         # Checkpointer 초기화 + 그래프 컴파일 (DI, async context manager)
         # create_checkpointer는 (checkpointer, pool) 튜플을 yield한다.
@@ -187,11 +159,19 @@ async def lifespan(app: FastAPI) -> Any:
                 set_cancel_store(MemoryCancelStore())
                 set_active_run_store(MemoryActiveRunStore())
 
-            logger.info("서버 시작 완료", connectors=statuses)
+            logger.info(
+                "서버 시작 완료",
+                db_connectors=sorted(manager._db_connectors.keys()),
+            )
             yield
 
     finally:
         # 기동 실패/정상 종료 모두에서 리소스 정리 보장
+        try:
+            from src.utils.llm.client import close_llm_client
+            await close_llm_client()
+        except Exception:
+            logger.warning("LLM 클라이언트 종료 실패", exc_info=True)
         if _redis is not None:
             await _redis.close()
         await manager.disconnect_all()
@@ -282,11 +262,17 @@ async def global_exception_handler(
     """미처리 예외에 대한 안전망.
 
     사용자에게 내부 정보를 노출하지 않는다 (code-style.md 규칙 준수).
+    로그에는 error_type + 스택트레이스를 남기되 응답은 일반화된 메시지만 반환.
     """
-    logger.error("처리되지 않은 예외", path=request.url.path, error=str(exc))
+    logger.error(
+        "처리되지 않은 예외",
+        path=request.url.path,
+        error_type=type(exc).__name__,
+        exc_info=True,
+    )
     return JSONResponse(
         status_code=500,
-        content={"error": "내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."},
+        content={"error": format_error(ERR_GENERIC)},
     )
 
 
@@ -311,6 +297,16 @@ async def root() -> Any:
     if html_path.exists():
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
     return HTMLResponse(content=_get_embedded_html())
+
+
+_favicon_path = Path(__file__).parent.parent / "static" / "favicon.ico"
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Any:
+    """브라우저 자동 요청 favicon 404 방지."""
+    from fastapi.responses import FileResponse
+    return FileResponse(_favicon_path, media_type="image/x-icon")
 
 
 @app.get("/health")
@@ -352,7 +348,9 @@ async def readiness() -> Any:
     """
     manager = get_connector_manager()
     statuses = await manager.health_check_all()
-    required = _REQUIRED_INFRA | set(manager._db_connectors.keys())
+    required = {key for _, key in manager._REQUIRED_INFRA} | set(
+        manager._db_connectors.keys(),
+    )
     all_required_ok = all(statuses.get(k, False) for k in required)
     return JSONResponse(
         status_code=200 if all_required_ok else 503,
@@ -393,12 +391,32 @@ async def _handle_slash_command(
     return False
 
 
+def _should_stream(client_streaming: bool, user_text: str) -> bool:
+    """이 턴에 토큰 스트리밍 경로를 사용할지 판정한다.
+
+    현재 기준:
+      - 서버 마스터 킬스위치(STREAMING_DISABLED) 우선 적용
+      - 클라이언트 envelope 가 streaming=True 로 명시
+      - 슬래시 명령어·빈 입력 제외
+    (추후 인텐트/모델별 차등이 필요하면 이 함수에 규칙 추가)
+    """
+    if settings.streaming_disabled:
+        return False
+    if not client_streaming:
+        return False
+    stripped = (user_text or "").strip()
+    if not stripped or stripped.startswith("/"):
+        return False
+    return True
+
+
 async def _run_ws_pipeline(
     data: str,
     session_id: str,
     websocket: WebSocket,
     client_ip: str | None = None,
     user_agent: str | None = None,
+    streaming_enabled: bool = False,
 ) -> None:
     """WebSocket 메시지에 대해 파이프라인을 실행하고 응답을 전송한다.
 
@@ -436,6 +454,7 @@ async def _run_ws_pipeline(
         await _safe_send(msg)
 
     conversation_history: list[dict[str, str]] = []
+    turn_snapshots: list = []
     try:
         pool = get_connector_manager().checkpointer_pool
         if pool:
@@ -445,6 +464,31 @@ async def _run_ws_pipeline(
     except Exception:
         logger.warning("DB 대화이력 조회 실패", exc_info=True)
 
+    # ── 세션 재접속 시 TurnSnapshot 복원 (베스트 에포트) ──
+    # 대화 이력이 있으면 기존 세션 재접속으로 판단하여 스냅샷을 복원한다.
+    # LangGraph checkpointer가 최신 상태를 보존하고 있으면 initial_turn_snapshots는
+    # 그대로 덮어쓰이지 않는다 (checkpointer 상태 우선). 복원 실패해도 빈 리스트로
+    # 신규 세션과 동일하게 진행한다.
+    if conversation_history:
+        try:
+            from src.services.turn_snapshot_store import restore_from_db
+
+            pool = get_connector_manager().checkpointer_pool
+            if pool:
+                turn_snapshots = await restore_from_db(pool, session_id)
+                if turn_snapshots:
+                    logger.info(
+                        "세션 재접속 — turn_snapshot 복원 완료",
+                        session_id=session_id,
+                        snapshot_count=len(turn_snapshots),
+                    )
+        except Exception:
+            logger.warning(
+                "turn_snapshot 복원 실패 — 빈 리스트로 진행",
+                session_id=session_id,
+                exc_info=True,
+            )
+
     pipeline_result = await run_pipeline(
         data,
         session_id,
@@ -452,6 +496,8 @@ async def _run_ws_pipeline(
         client_ip=client_ip,
         user_agent=user_agent,
         on_event=on_event,
+        streaming_enabled=streaming_enabled,
+        initial_turn_snapshots=turn_snapshots,
     )
 
     masked_response = mask_pii(pipeline_result.response)
@@ -474,7 +520,7 @@ async def _run_ws_pipeline(
         if not await _safe_send(viz_msg):
             return
 
-    # 스트리밍 응답 전송 (start → chunk → end)
+    # 스트리밍 응답 전송 (start → result_data → chunk → end)
     # stream.start 전송 실패 시 stream.end도 불필요 — 프론트엔드가 스트림 시작을 모름
     if not await _safe_send({
         "type": "stream",
@@ -483,31 +529,56 @@ async def _run_ws_pipeline(
     }):
         return
 
+    # result_data 즉시 전송: 텍스트 스트리밍 전에 테이블을 먼저 표시하여
+    # 사용자 체감 응답속도를 3~5초 단축한다.
+    _has_result_data = False
+    if pipeline_result.result_data:
+        _has_result_data = True
+        await _safe_send({
+            "type": "result_data",
+            "data": pipeline_result.result_data,
+        })
+
     # stream.start 전송 후에는 stream.end를 반드시 전송하여
     # 프론트엔드의 setBusy(false) 호출을 보장한다.
+    # streaming_delivered=True 이면 analyzer 가 llm_delta.chunk 로 이미
+    # 토큰을 전달했으므로 단일 stream.chunk 재전송은 중복이다 — 생략.
     try:
-        await _safe_send({
-            "type": "stream",
-            "action": "chunk",
-            "text": masked_response,
-        })
+        if not pipeline_result.streaming_delivered:
+            await _safe_send({
+                "type": "stream",
+                "action": "chunk",
+                "text": masked_response,
+            })
     finally:
         # 통찰(insight) — runner에서 State 접근 시점에 구성됨
         # message_uuid/user_message_uuid는 UI가 좋아요·다운로드 기록 API 호출에 사용한다.
+        if pipeline_result.cancelled:
+            _status = FinalStatus.CANCELLED
+        elif pipeline_result.awaiting_clarification:
+            _status = FinalStatus.AWAITING_CLARIFICATION
+        elif pipeline_result.error:
+            _status = FinalStatus.FAILURE
+        else:
+            _status = FinalStatus.SUCCESS
+
         end_msg: dict[str, Any] = {
             "type": "stream",
             "action": "end",
-            "status": (
-                "cancelled" if pipeline_result.cancelled
-                else "success"
-            ),
+            "status": _status.value,
             "insight": pipeline_result.insight,
             "message_uuid": pipeline_result.message_uuid,
             "user_message_uuid": pipeline_result.user_message_uuid,
             "trace_files": pipeline_result.trace_files or [],
         }
-        if pipeline_result.result_data:
-            end_msg["result_data"] = pipeline_result.result_data
+        if pipeline_result.clarification_request:
+            end_msg["clarification_request"] = (
+                pipeline_result.clarification_request
+            )
+        # result_data는 stream.start 직후에 별도 메시지로 이미 전송됨.
+        # 프론트엔드 hasMetadata 판정용으로 플래그만 포함한다.
+        if _has_result_data:
+            end_msg["has_result_data"] = True
         if pipeline_result.process_summary:
             end_msg["process_summary"] = (
                 pipeline_result.process_summary
@@ -576,15 +647,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> Any:
 
             # JSON 프로토콜 파싱 (하위호환: plain text fallback)
             user_text = raw
+            client_streaming = False
             try:
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
                     user_text = parsed.get("text", raw)
-                    # Phase 2/3 확장 필드 (현재 미사용, 향후 활용)
-                    # user_model = parsed.get("model")
-                    # user_thinking = parsed.get("thinking_mode")
-                    # is_regen = parsed.get("action") == "regen"
-                    # original_message_uuid = parsed.get("original_message_uuid")
+                    # 클라이언트 스트리밍 토글 — Phase 3 도입 (analyzer/SVG 토큰 delta)
+                    client_streaming = bool(parsed.get("streaming", False))
             except (json.JSONDecodeError, ValueError):
                 pass  # plain text fallback
 
@@ -612,6 +681,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> Any:
                         websocket.client.host if websocket.client else None
                     ),
                     user_agent=websocket.headers.get("user-agent"),
+                    streaming_enabled=_should_stream(
+                        client_streaming, user_text,
+                    ),
                 )
             except WebSocketDisconnect:
                 raise
@@ -694,9 +766,17 @@ async def query_endpoint(http_request: Request, request: QueryRequest) -> Any:
 
         masked_response = mask_pii(pipeline_result.response)
 
+        if pipeline_result.cancelled:
+            _api_status = "cancelled"
+        elif pipeline_result.error:
+            _api_status = "failure"
+        else:
+            _api_status = "success"
+
         result_body: dict[str, Any] = {
             "session_id": session_id,
             "response": masked_response,
+            "status": _api_status,
         }
         if pipeline_result.result_data:
             result_body["result_data"] = (

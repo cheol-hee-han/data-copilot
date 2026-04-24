@@ -54,7 +54,6 @@ class LLMCallRecord(BaseModel):
 
     node: str
     prompt_summary: str = ""  # 프롬프트 요약 (전체 저장은 토큰 낭비)
-    prompt_variables: dict[str, str] = Field(default_factory=dict)
     prompt_tokens: int = 0
     response_text: str = ""
     response_tokens: int = 0

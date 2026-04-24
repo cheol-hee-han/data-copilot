@@ -7,12 +7,12 @@ Data Copilot 운영에 필요한 스키마·컬렉션·인덱스만 생성하는
 
 ## 실행 순서 (권장)
 
-1. `.env` 가 `/opt/data-copilot/` 에 배치되어 있을 것
+1. `.env` 가 `/opt/bdp/data-copilot/` 에 배치되어 있을 것
    (혹은 현재 셸에서 환경변수가 export 되어 있을 것)
 2. 각 DB 에 대해 아래 순서로 실행:
 
 ```bash
-cd /opt/data-copilot
+cd /opt/bdp/data-copilot
 
 # PostgreSQL (이력·체크포인트 테이블)
 bash deploy/db-init/postgres/init.sh
@@ -33,7 +33,7 @@ bash deploy/db-init/qdrant/init.sh
 | Qdrant     | `QDRANT_HOST`, `QDRANT_PORT` (기본 6333), `EMBEDDING_DIM` (기본 1024) |
 
 `.env` 로드는 각 스크립트가 자체적으로 처리하지 않으므로 필요 시
-`set -a; source /opt/data-copilot/.env; set +a` 로 수동 export 후 실행합니다.
+`set -a; source /opt/bdp/data-copilot/.env; set +a` 로 수동 export 후 실행합니다.
 
 ## 주의
 

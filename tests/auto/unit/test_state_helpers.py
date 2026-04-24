@@ -161,11 +161,16 @@ class TestTableMetaFromMeta:
         assert result.db_source == "ADW"
 
     def test_db_source_bdp_parsed(self):
-        """TB_BDP_* 형태 테이블명 → db_source='BDP'."""
+        """TB_BDP_* 형태 테이블명 — BDP 가 target_db_schema_map 에 없으면 db_source=''.
+
+        parse_db_source 는 target_db_schema_map 기준으로 코드를 인식한다.
+        BDP/CRP 는 현재 map 에서 주석처리(미활성) 상태이므로 '' 를 반환한다.
+        BDP 가 map 에 활성화될 경우 == "BDP" 로 변경해야 한다.
+        """
         meta = {"name": "TB_BDP_LCT001L"}
         result = TableMeta.from_meta(meta)
         assert result is not None
-        assert result.db_source == "BDP"
+        assert result.db_source == ""
 
     def test_db_source_unknown_empty(self):
         """알 수 없는 시스템코드 → db_source 빈 문자열."""

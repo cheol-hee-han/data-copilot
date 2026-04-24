@@ -200,7 +200,7 @@ class TestGenerateChartFromResult:
         ) == ""
 
     def test_numeric_only_uses_index_labels(self):
-        """문자열 컬럼이 없으면 항목1, 항목2... 레이블 사용."""
+        """문자열 컬럼이 없으면(label_col 감지 불가) 빈 문자열 반환."""
         result = SQLResult(
             columns=["금액"],
             rows=[{"금액": 100}, {"금액": 200}, {"금액": 300}],
@@ -209,7 +209,8 @@ class TestGenerateChartFromResult:
         svg = generate_chart_from_result(
             result, VisualizationType.BAR_CHART, "숫자만",
         )
-        assert "항목1" in svg
+        # 레이블 컬럼이 없으면 차트 생성 불가 → 빈 문자열 반환
+        assert svg == ""
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ pydantic-settings 기반으로 .env 파일 및 환경 변수에서
 모듈 수준 싱글턴 settings 를 export 하여 전역에서 참조한다.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, model_validator
 from pydantic_settings import BaseSettings
 
@@ -55,6 +57,16 @@ class Settings(BaseSettings):
     openai_referer: str = "https://data-copilot.local"
     openai_title: str = "Data Copilot"
 
+    # ── IBK Custom LLM Gateway (폐쇄망 내부 LLM 관리툴) ──
+    # 요청: POST {base_url}/gpt/api/{thread_id}, body={"token","extra":{placeholder: prompt}}
+    # 응답: {"question","answer","status","threadId","updatedAt"}
+    # 시스템 프롬프트는 관리툴에 단일 placeholder 로 등록, 코드는 system+messages 를
+    # 조립한 단일 문자열을 extra[placeholder] 에 통째로 전달한다 (passthrough).
+    ibk_base_url: str = ""                  # 예: http://dibkpgt.ibk.co.kr:35001
+    ibk_token: str = ""                      # 관리툴 발급 단일 인증 토큰
+    ibk_placeholder_name: str = "prompt"     # 관리툴 프롬프트의 placeholder 변수명
+    ibk_default_timeout: float = 60.0        # IBK 게이트웨이 기본 타임아웃 (초)
+
     # 개발/테스트용 DB (읽기 전용, 폐쇄망 전환 시 제거)
     # 폐쇄망에서는 Sybase IQ/Impala/Oracle 로 대체된다.
     test_db_host: str = "localhost"
@@ -76,6 +88,8 @@ class Settings(BaseSettings):
     checkpointer_pool_min: int = 2
     checkpointer_pool_max: int = 10
     checkpointer_thread_ttl_days: int = 30  # 0=무제한
+    # Postgres search_path (스키마 우선순위). Sybase IQ/Impala 전환 시 공백 가능
+    checkpointer_search_path: str = "bdptbl,public"
 
     # Qdrant
     qdrant_host: str = "localhost"
@@ -89,6 +103,8 @@ class Settings(BaseSettings):
     qdrant_max_prefetch: int = 100  # exclude_ids 누적 시 prefetch 상한
     # search_manual exclude_ids 누적 시 limit 상한
     qdrant_manual_max_limit: int = 30
+    # 임베딩 계산용 ThreadPoolExecutor 워커 수 (CPU/GPU 코어 고려)
+    qdrant_embed_workers: int = 2
 
     # MongoDB (테이블 메타 + 코드 메타 + 비즈 메타)
     mongo_host: str = "localhost"
@@ -116,6 +132,7 @@ class Settings(BaseSettings):
     neo4j_pool_size: int = 10
     neo4j_request_timeout: int = 10    # Cypher 실행 타임아웃 (초)
     neo4j_cache_ttl: int = 300         # 온톨로지 캐시 TTL (초)
+    neo4j_cache_max_entries: int = 512  # LRU 캐시 상한 (메모리 누수 방지)
     neo4j_max_path_hops: int = 4       # JOIN 경로 최대 홉 수
     neo4j_batch_size: int = 500        # 시딩 배치 크기
 
@@ -134,6 +151,8 @@ class Settings(BaseSettings):
     # 워커 kill -9 등으로 unregister 가 실행되지 못한 엔트리의 자동 만료 시간.
     # 파이프라인 최대 실행시간보다 길게 잡는다.
     active_run_ttl_seconds: int = 1800
+    # 세션당 브로드캐스트 대기 메시지 버퍼 상한 (OOM/메모리 폭주 방지)
+    message_store_pending_max: int = 50
 
     # ── 임베딩 모델 (BGE-M3, Dense + Sparse 하이브리드) ──
     embedding_model: str = "BAAI/bge-m3"
@@ -271,15 +290,22 @@ class Settings(BaseSettings):
 
     # ── Recovery Agent ──
     max_conflicted_bounces: int = 2         # CONFLICTED 왕복 가드
+    max_ask_user_rounds: int = 2            # recovery_agent ask_user 최대 횟수
 
     # ── LLM 호출 ──
     llm_transport_max_retry: int = 5    # SDK 레벨 전송 재시도 (429/500/503/네트워크)
+
+    # ── LLM 서킷브레이커 (외부 API 연속 실패 시 fast-fail) ──
+    llm_cb_enabled: bool = True                  # False 로 내리면 CB 투명 통과
+    llm_cb_fail_threshold: int = 5               # 연속 실패 임계 (이상이면 OPEN)
+    llm_cb_reset_timeout_sec: float = 30.0       # OPEN → HALF_OPEN 대기 시간(초)
+
     llm_parse_max_retry: int = 2        # 포맷 불일치 시 최대 재시도 횟수
-    llm_default_max_tokens: int = 1000  # LLM 기본 max_tokens
+    llm_default_max_tokens: int = 3000  # LLM 기본 max_tokens
     llm_default_timeout: float = 15.0   # LLM 기본 타임아웃 (초)
     llm_long_timeout: float = 30.0      # SQL생성/분석/포맷팅 등 긴 작업 타임아웃 (초)
     llm_context_timeout: float = 60.0   # 컨텍스트 수집 전체 타임아웃 (초)
-    llm_format_max_tokens: int = 2000   # 포맷팅/분석 응답 max_tokens
+    llm_format_max_tokens: int = 3000   # 포맷팅/분석 응답 max_tokens
     llm_svg_max_tokens: int = 4000      # SVG 생성 max_tokens
 
     # ── 질의 정규화 ──
@@ -292,9 +318,11 @@ class Settings(BaseSettings):
 
     # ── LLM 보조 파라미터 ──
     llm_concurrency_limit: int = 3      # 동시 LLM 호출 제한 (테이블 보강 등)
-    min_rows_for_visualization: int = 3  # 시각화 판단 최소 행 수
+    min_rows_for_visualization: int = 1  # 시각화 판단 최소 행 수 (info_card 지원)
     format_max_rows: int = 50           # 포맷팅 프롬프트에 포함할 최대 행 수
     analysis_max_rows: int = 100        # 분석/시각화 프롬프트에 포함할 최대 행 수
+    # 분석 응답 포맷: "markdown"(4섹션 스트리밍용) | "json"(레거시)
+    analyzer_output_format: Literal["markdown", "json"] = "markdown"
     ui_result_max_rows: int = 500       # stream.end result_data에 포함할 최대 행 수
 
     # Evaluation Tracker (자체 트래킹, 폐쇄망 호환)
@@ -310,6 +338,10 @@ class Settings(BaseSettings):
     # PII 마스킹 (False: 로그/트레이스/응답에서 비활성화)
     pii_masking_enabled: bool = True
     max_query_rows: int = 10000
+
+    # 스트리밍 마스터 킬스위치 — True 시 클라이언트 streaming 플래그 무시하고 강제 OFF.
+    # 폐쇄망 LLM(Solar Pro 2 등) 스트리밍 불안정 시 운영 측에서 즉시 차단 가능.
+    streaming_disabled: bool = False
 
     # ── 3순위: SVG 차트 레이아웃 (프론트엔드에서 조절하는 게 맞아 변경 빈도 낮음) ──
     chart_width: int = 600

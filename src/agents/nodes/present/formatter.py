@@ -9,7 +9,7 @@ SQL 실행 결과(sql_result)를 rule-based 로직으로 IT 비전문 사용자�
 구조화 dict로 State에 저장하여 stream.end JSON으로 프론트엔드에 전송한다.
 
 핵심 함수:
-    - format_response_node: state.sql_result, state.reason 등을 읽어
+    - formatter_node: state.sql_result, state.reason 등을 읽어
       rule-based 포맷팅을 수행하고 state에 기록
 
 위임 구조:
@@ -73,7 +73,35 @@ def _build_result_data(
     }
 
 
-async def format_response_node(
+def _render_formatted_text(
+    state: PipelineState,
+    rows: list[dict[str, Any]],
+    column_formats: dict[str, str],
+) -> str:
+    """analysis_result 가 있으면 마크다운 보고서를, 없으면 요약 1줄을 반환."""
+    analysis = state.analysis_result
+    has_analysis = bool(
+        analysis and (
+            analysis.initial_reading
+            or analysis.insights
+            or analysis.action_items
+        )
+    )
+    if has_analysis:
+        text = build_analysis_report(analysis)
+    elif analysis and analysis.summary:
+        text = analysis.summary
+    else:
+        text = build_summary_line(
+            state.sql_result.columns, rows, column_formats,
+        )
+    return text or (
+        "SQL 작성을 완료하였으나, 실제 조회 시 결과가 0건입니다.\n"
+        "실행된 SQL의 필터 조건 또는 사용 테이블의 데이터 존재여부 확인이 필요합니다."
+    )
+
+
+async def formatter_node(
     state: PipelineState,
 ) -> dict:
     """결과를 사용자 친화적 형태로 포맷팅한다."""
@@ -89,48 +117,17 @@ async def format_response_node(
         }
 
     try:
-        # ── 1. 컬럼 타입 판별 ──
         column_formats = detect_column_formats(
             state.reason.validated_sql or "",
         )
-
-        # ── 2. 코드값 변환 (fallback) ──
         rows = apply_code_mappings(
             state.sql_result.rows,
             state.reason.explored_codes,
             state.reason.validated_sql or "",
         )
-
-        # ── 3. 핵심 수치 요약 (텍스트만) ──
-        analysis = state.analysis_result
-        has_analysis = bool(
-            analysis and (
-                analysis.initial_reading
-                or analysis.insights
-                or analysis.action_items
-            )
-        )
-        if has_analysis:
-            formatted = build_analysis_report(analysis)
-        elif analysis and analysis.summary:
-            formatted = analysis.summary
-        else:
-            formatted = build_summary_line(
-                state.sql_result.columns,
-                rows,
-                column_formats,
-            )
-
-        formatted = formatted or (
-            "SQL 작성을 완료하였으나, 실제 조회 시 결과가 0건입니다.\n"
-            "실행된 SQL의 필터 조건 또는 사용 테이블의 데이터 존재여부 확인이 필요합니다."
-        )
-
-        # ── 4. result_data 조립 (구조화 테이블 데이터) ──
+        formatted = _render_formatted_text(state, rows, column_formats)
         result_data = _build_result_data(
-            state.sql_result.columns,
-            rows,
-            column_formats,
+            state.sql_result.columns, rows, column_formats,
         )
 
     except Exception as e:
@@ -157,12 +154,13 @@ async def format_response_node(
     logger.info(
         "결과 포맷팅 완료",
         response_length=len(formatted),
+        streaming_delivered=state.streaming_delivered,
     )
 
     # ── 트래킹 ──
     try:
         await dispatch_tracking_event(REASONING_STEP, {
-            "node": "format_response",
+            "node": "formatter",
             "phase": "present",
             "step_type": "rule_based",
             "round": 0,
@@ -189,13 +187,14 @@ async def format_response_node(
     except Exception as e:
         logger.warning("포맷팅 트래킹 이벤트 전송 실패", error=str(e))
 
+    trace_note = (
+        "보고서 형태로 결과 정리 완료"
+        + (" (스트리밍 완료 후 최종본 합성)" if state.streaming_delivered else "")
+    )
     return {
         "formatted_response": formatted,
         "result_data": result_data,
         "process_summary": process_summary,
         "status": QueryStatus.FORMATTED,
-        "trace_log": add_trace(
-            state, "포맷팅",
-            "보고서 형태로 결과 정리 완료",
-        ),
+        "trace_log": add_trace(state, "포맷팅", trace_note),
     }

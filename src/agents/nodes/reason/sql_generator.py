@@ -51,18 +51,26 @@ from src.agents.state.state import (
     TableMeta,
 )
 from src.connectors.manager import get_connector_manager
+from src.agents.utils.handoff import (
+    normalize_handoff_note,
+    normalize_previous_sql,
+)
 from src.agents.nodes.system_prompts import (
     SQL_GENERATOR_FIX_SECTION,
     get_sql_generator_system,
 )
 from src.config import settings
+from src.agents.nodes.thinking_modes import LLMNode
 from src.utils.llm import llm_call_with_parse_retry
 from src.utils.llm.response import extract_json
 from src.utils.llm.prompt import render_prompt
 from src.utils.logger import get_logger
 from src.utils.sqlglot_analyzer import get_real_tables
 from src.utils.timezone import today_kst
-from src.utils.tracker import record_prompt_variables
+from src.utils.tracker import (
+    LLMInteraction,
+    build_llm_reasoning_payload,
+)
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
     REASONING_STEP,
@@ -241,12 +249,14 @@ async def sql_generator_node(state: PipelineState) -> dict:
         reason, state.preprocessed_input, dialect, state,
     )
 
+    raw_text = ""
     try:
-        result = await _call_llm_for_sql(
+        raw_text, result = await _call_llm_for_sql(
             prompt, user_message,
         )
     except Exception as e:
         logger.error("SQL 생성 LLM 호출 오류", error=str(e))
+        raw_text = f"(LLM 호출 오류: {type(e).__name__})"
         result = {
             "status": "fail",
             "sql": "",
@@ -288,8 +298,6 @@ async def sql_generator_node(state: PipelineState) -> dict:
             reasons=result.get("failure_reasons", []),
         )
 
-    await record_prompt_variables(prompt_vars)
-
     # ── reasoning flow 디스패치 ──
     _routing: dict[str, Any] = {
         "next_node": "sql_validator",
@@ -304,37 +312,36 @@ async def sql_generator_node(state: PipelineState) -> dict:
         _routing["is_retry"] = True
         _routing["retry_count"] = attempt - 1
 
-    await dispatch_tracking_event(REASONING_STEP, {
-        "node": "sql_generator",
-        "phase": "reason",
-        "step_type": "llm_decision",
-        "round": reason.loop_guard.replan_count,
-        "hypothesis_id": (
-            reason.current_hypothesis.hypothesis_id
-            if reason.current_hypothesis else ""
+    parsed_summary = {
+        "status": result["status"],
+        "sql_preview": (result.get("sql") or "")[:200],
+        "explanation": result.get("explanation", ""),
+        "assumptions": result.get("assumptions", []),
+        "failure_reasons": result.get("failure_reasons", []),
+    }
+    interaction = LLMInteraction(
+        prompt_variables=prompt_vars,
+        raw_response=raw_text,
+    )
+    await dispatch_tracking_event(
+        REASONING_STEP,
+        build_llm_reasoning_payload(
+            node="sql_generator",
+            phase="reason",
+            round=reason.loop_guard.replan_count,
+            hypothesis_id=(
+                reason.current_hypothesis.hypothesis_id
+                if reason.current_hypothesis else ""
+            ),
+            interaction=interaction,
+            routing=_routing,
+            parsed_summary=parsed_summary,
+            extra_inputs={
+                "user_message": user_message,
+                "attempt": attempt,
+            },
         ),
-        "inputs": {
-            "tables": table_names,
-            "confirmed_terms": [
-                f"{ki.knowledge_id}: {ki.key} ({ki.status.value})"
-                for ki in reason.knowledge_items
-                if ki.status.value in ("CONFIRMED", "PROBABLE")
-            ],
-            "dead_ends": [
-                f"`{de.failure_type.value}` {de.reason}"
-                for de in reason.dead_ends
-            ],
-            "failure_reason": reason.failure_reason,
-            "attempt": attempt,
-        },
-        "output": {
-            "status": result["status"],
-            "sql": (result.get("sql") or "")[:200],
-            "explanation": result.get("explanation", ""),
-            "assumptions": result.get("assumptions", []),
-        },
-        "routing": _routing,
-    })
+    )
 
     return {"reason": reason}
 
@@ -429,6 +436,10 @@ def _build_agentic_prompt(
     expected_cols = decomp.get("output_hint", {}).get("expected_columns", [])
     expected_cols_text = ", ".join(expected_cols) if expected_cols else "(없음)"
 
+    # CONTINUE 오케스트레이터 handoff_note (opt-in 단일 패턴, §설계 §4·§7)
+    # 있으면 우선 반영(REGENERATE 경로는 반드시 전달), 없으면 "(없음)" 치환.
+    handoff_note_text = normalize_handoff_note(state.handoff_note)
+
     replacements = {
         "{current_date}": today_kst().isoformat(),
         "{original_query}": original_query or "",
@@ -440,6 +451,13 @@ def _build_agentic_prompt(
         "{reference_sqls}": ref_text,
         "{dead_ends}": dead_text,
         "{clarification_context}": clarification_text or "(없음)",
+        "{handoff_note}": handoff_note_text,
+        "{previous_sql}": normalize_previous_sql(
+            reason.previous_turn_sql,
+        ),
+        "{previous_sql_explanation}": normalize_previous_sql(
+            reason.previous_turn_sql_explanation,
+        ),
     }
     prompt, variables = render_prompt(prompt, replacements)
 
@@ -571,17 +589,21 @@ def _parse_sql_response(raw: str) -> dict:
 async def _call_llm_for_sql(
     prompt: str,
     query: str,
-) -> dict:
-    """LLM을 호출하여 SQL 생성 결과를 반환한다."""
-    _, result = await llm_call_with_parse_retry(
+) -> tuple[str, dict]:
+    """LLM을 호출하여 SQL 생성 결과를 반환한다.
+
+    Returns:
+        (raw_text, result): LLM 원본 응답 문자열과 파싱된 dict.
+    """
+    raw_text, result = await llm_call_with_parse_retry(
         system=prompt,
         messages=[{"role": "user", "content": query}],
         parse_fn=_parse_sql_response,
         max_tokens=settings.llm_format_max_tokens,
         timeout=settings.llm_long_timeout,
-        node_name="agentic_SQL생성",
+        node_name=LLMNode.SQL_GENERATOR,
     )
-    return result
+    return raw_text, result
 
 
 def _clean_sql_response(raw: str) -> str:

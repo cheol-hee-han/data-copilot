@@ -149,6 +149,7 @@ class TestContextDict:
             alt_name = "여신기본"
             description = ""
             selection_status = SelectionStatus.SELECTED
+            selection_reason = ""
         state.reason.explored_tables = [FakeTable()]
 
         result = _build_context_dict(state)
@@ -252,9 +253,9 @@ class TestValidationDict:
     def test_with_checks_fallback(self):
         state = _make_state()
         state.reason.validation_checks = {
-            "check1": {"pass": True},
-            "check2": {"pass": True},
-            "check3": {"pass": False},
+            "check1": {"verdict": "PASS"},
+            "check2": {"verdict": "PASS"},
+            "check3": {"verdict": "FAIL"},
         }
         result = _build_validation_dict(state)
         assert "3개 항목 중 2개 통과" in result["summary"]
@@ -315,3 +316,79 @@ class TestBuildProcessSummary:
         assert "context" in result
         assert "ai_decisions" in result
         assert "validation" in result
+
+
+# ══════════════════════════════════════════════════════════════
+# Path F' §3.5: hydration 전용 언더스코어 필드
+# ══════════════════════════════════════════════════════════════
+
+class TestPathFHydrationFields:
+    """`_raw` / `_knowledge_items` / `_query_decomposition` 보존 테스트."""
+
+    def test_interpretation_raw_is_preserved(self):
+        """normalized_query 가 있으면 interpretation._raw 에 원본 dict 가 저장된다."""
+        from src.agents.models.normalization import (
+            IntentSlot, NormalizedQuery, NormIntentType,
+        )
+        nq = NormalizedQuery(
+            original_query="지점별 대출잔액",
+            rewritten_query="지점별 대출잔액 합계",
+            intent=IntentSlot(primary=NormIntentType.AGGREGATE),
+        )
+        state = _make_state(normalized_query=nq)
+        result = _build_interpretation_dict(state)
+        assert "_raw" in result
+        assert result["_raw"]["original_query"] == "지점별 대출잔액"
+        assert result["_raw"]["rewritten_query"] == "지점별 대출잔액 합계"
+
+    def test_interpretation_no_raw_when_no_nq(self):
+        """normalized_query 가 없으면 interpretation 은 빈 dict."""
+        state = _make_state(normalized_query=None)
+        result = _build_interpretation_dict(state)
+        assert result == {}
+
+    def test_context_knowledge_items_preserved(self):
+        """knowledge_items 전량이 context._knowledge_items 에 저장된다."""
+        from src.agents.state.state import KnowledgeItem
+        state = _make_state()
+        state.reason.knowledge_items = [
+            KnowledgeItem(
+                id="K1",
+                key="대출잔액",
+                status="CONFIRMED",
+            ),
+            KnowledgeItem(
+                id="K2",
+                key="지점",
+                status="PROBABLE",
+            ),
+        ]
+        result = _build_context_dict(state)
+        assert "_knowledge_items" in result
+        assert len(result["_knowledge_items"]) == 2
+        assert result["_knowledge_items"][0]["id"] == "K1"
+
+    def test_context_no_knowledge_items_key_when_empty(self):
+        """knowledge_items 가 비어있으면 _knowledge_items 키도 없다."""
+        state = _make_state()
+        result = _build_context_dict(state)
+        assert "_knowledge_items" not in result
+
+    def test_root_query_decomposition_preserved(self):
+        """query_decomposition 이 있으면 최상위 `_query_decomposition` 에 복사된다."""
+        state = _make_state()
+        state.reason.query_decomposition = {
+            "group_by": ["지점"],
+            "measures": [{"term": "대출잔액"}],
+        }
+        result = build_process_summary(state)
+        assert result is not None
+        assert "_query_decomposition" in result
+        assert result["_query_decomposition"]["group_by"] == ["지점"]
+
+    def test_root_no_query_decomposition_when_empty(self):
+        """query_decomposition 이 비어있으면 `_query_decomposition` 키 없음."""
+        state = _make_state()
+        result = build_process_summary(state)
+        assert result is not None
+        assert "_query_decomposition" not in result

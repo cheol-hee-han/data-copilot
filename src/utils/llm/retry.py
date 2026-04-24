@@ -22,14 +22,24 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, TypeVar
+import asyncio
+from collections.abc import Awaitable
+from typing import Any, Callable, Literal, TypeVar
 
+from src.agents.nodes.thinking_modes import get_thinking_mode
 from src.config import settings
 from src.utils.llm.client import get_llm_client
 from src.utils.logger import get_logger
 from src.utils.tracker import (
     get_current_node,
     set_current_node,
+)
+from src.utils.tracker.dispatch import (
+    LLM_DELTA_CHUNK,
+    LLM_DELTA_END,
+    LLM_DELTA_RESET,
+    LLM_DELTA_START,
+    dispatch_tracking_event,
 )
 from src.utils.truncate import truncate_log
 
@@ -55,6 +65,8 @@ async def llm_call_with_parse_retry(
     timeout: float | None = None,
     max_retries: int | None = None,
     node_name: str = "",
+    temperature: float | None = None,
+    thinking: str | None = None,
 ) -> tuple[str, T]:
     """LLM 호출 + 파싱을 재시도하는 통합 유틸리티.
 
@@ -67,6 +79,9 @@ async def llm_call_with_parse_retry(
         timeout: LLM 호출 타임아웃 (초).
         max_retries: 최대 재시도 횟수. None 이면 settings.llm_parse_max_retry 사용.
         node_name: 로깅용 노드 이름.
+        temperature: 샘플링 temperature. None 이면 어댑터/서버 기본값.
+        thinking: thinking 모드 명시값 ("off"/"auto"/"low"/"medium"/"high").
+            None 이면 node_name 기반 NODE_THINKING_MODES lookup 으로 폴백.
 
     Returns:
         (raw_text, parsed_result) 튜플.
@@ -89,8 +104,12 @@ async def llm_call_with_parse_retry(
     current_messages = list(messages)
     last_text = ""
 
-    # 세부 노드명이 있으면 contextvars에 임시 설정
+    # thinking 미지정 시 node_name(LLM 호출 단위) 기준으로 확정.
+    # node_name 이 없으면 콜백핸들러가 설정한 그래프 노드명으로 폴백.
     _prev_node = get_current_node()
+    if thinking is None:
+        thinking = get_thinking_mode(node_name or _prev_node)
+
     if node_name:
         set_current_node(node_name)
 
@@ -104,6 +123,8 @@ async def llm_call_with_parse_retry(
             timeout=timeout,
             system=system,
             messages=current_messages,
+            temperature=temperature,
+            thinking=thinking,
         )
         _llm_elapsed = (_time.perf_counter() - _llm_start) * 1000
 
@@ -169,6 +190,211 @@ async def llm_call_with_parse_retry(
         f"[{node_name}] {max_retries + 1}회 시도 후에도 포맷 파싱 실패",
         last_response=last_text,
     )
+
+
+async def _emit_delta(
+    event: str, *, turn_id: str, part_id: str,
+    **extra: Any,
+) -> None:
+    payload: dict[str, Any] = {
+        "turn_id": turn_id, "part_id": part_id,
+    }
+    payload.update(extra)
+    await dispatch_tracking_event(event, payload)
+
+
+async def _stream_accumulate_once(
+    *,
+    system: str,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    timeout: float,
+    temperature: float | None,
+    thinking: str | None,
+    turn_id: str,
+    part_id: str,
+    is_cancelled: Callable[[], Awaitable[bool]] | None,
+) -> str:
+    """한 번의 스트리밍으로 텍스트를 누적하고 delta.chunk 를 뿌린다.
+
+    취소 감지 시 asyncio.CancelledError 를 raise. 네트워크 등 예외는 그대로 전파.
+    thinking kind 이벤트는 사용자에게 전송하지 않는다 (내부 추론은 숨김).
+    """
+    client = get_llm_client()
+    accumulated: list[str] = []
+    async for ev in client.messages.stream(
+        model=settings.llm_model,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        system=system,
+        messages=messages,
+        temperature=temperature,
+        thinking=thinking,
+    ):
+        if is_cancelled and await is_cancelled():
+            raise asyncio.CancelledError()
+        if ev.kind != "text" or not ev.text:
+            continue
+        accumulated.append(ev.text)
+        await _emit_delta(
+            LLM_DELTA_CHUNK,
+            turn_id=turn_id, part_id=part_id,
+            text=ev.text,
+        )
+    return "".join(accumulated)
+
+
+async def _stream_parse_with_retries(
+    *,
+    parse_fn: Callable[[str], T],
+    messages: list[dict[str, str]],
+    max_retries: int,
+    node_name: str,
+    turn_id: str,
+    part_id: str,
+    stream_kwargs: dict[str, Any],
+) -> tuple[str, T]:
+    """스트리밍→누적→파싱 시도를 최대 ``max_retries+1`` 회 반복.
+
+    최종 실패 시 end{error_code="PARSE_FAIL"} 방출 후 ParseError raise.
+    """
+    current_messages = messages
+    last_text = ""
+    for attempt in range(1 + max_retries):
+        if attempt > 0:
+            await _emit_delta(
+                LLM_DELTA_RESET,
+                turn_id=turn_id, part_id=part_id,
+                reason="parse_error",
+            )
+        last_text = await _stream_accumulate_once(
+            messages=current_messages, **stream_kwargs,
+        )
+        try:
+            return last_text, parse_fn(last_text)
+        except ValueError as e:
+            logger.warning(
+                "스트리밍 응답 파싱 실패",
+                node=node_name,
+                attempt=attempt + 1,
+                error=str(e),
+                response_preview=truncate_log(last_text),
+            )
+            if attempt < max_retries:
+                current_messages = _append_correction(
+                    current_messages, last_text, str(e),
+                )
+    await _emit_delta(
+        LLM_DELTA_END,
+        turn_id=turn_id, part_id=part_id,
+        error=True, error_code="PARSE_FAIL",
+    )
+    raise ParseError(
+        f"[{node_name}] 스트리밍 {max_retries + 1}회 시도 후 파싱 실패",
+        last_response=last_text,
+    )
+
+
+async def llm_stream_with_parse_retry(
+    *,
+    system: str,
+    messages: list[dict[str, str]],
+    parse_fn: Callable[[str], T],
+    turn_id: str,
+    part_id: str,
+    part_type: Literal["analysis", "svg"],
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+    max_retries: int | None = None,
+    node_name: str = "",
+    temperature: float | None = None,
+    thinking: str | None = None,
+    is_cancelled: Callable[[], Awaitable[bool]] | None = None,
+) -> tuple[str, T]:
+    """스트리밍 LLM 호출 + 파싱 재시도 통합 유틸리티.
+
+    델타 이벤트 시퀀스::
+
+        start → chunk* → (parse 실패 시 reset → chunk*)* → end
+
+    Returns:
+        (raw_text, parsed) 튜플. 호출자는 성공 복귀 시
+        ``streaming_delivered=True`` 로 상태를 기록한다.
+
+    Raises:
+        ParseError: 최대 재시도 후에도 파싱 실패 (end{error=True} 방출).
+        asyncio.CancelledError: 취소 요청 감지 (end{cancelled=True} 방출).
+        Exception: 네트워크 등 외부 오류 (end{error=True} 방출).
+    """
+    if max_tokens is None:
+        max_tokens = settings.llm_default_max_tokens
+    if timeout is None:
+        timeout = settings.llm_default_timeout
+    if max_retries is None:
+        max_retries = settings.llm_parse_max_retry
+
+    # thinking 미지정 시 node_name(LLM 호출 단위) 기준으로 확정
+    _prev_node = get_current_node()
+    if thinking is None:
+        thinking = get_thinking_mode(node_name or _prev_node)
+
+    if node_name:
+        set_current_node(node_name)
+
+    await _emit_delta(
+        LLM_DELTA_START,
+        turn_id=turn_id, part_id=part_id,
+        part_type=part_type,
+    )
+
+    stream_kwargs = {
+        "system": system,
+        "max_tokens": max_tokens,
+        "timeout": timeout,
+        "temperature": temperature,
+        "thinking": thinking,
+        "turn_id": turn_id,
+        "part_id": part_id,
+        "is_cancelled": is_cancelled,
+    }
+    try:
+        last_text, parsed = await _stream_parse_with_retries(
+            parse_fn=parse_fn,
+            messages=list(messages),
+            max_retries=max_retries,
+            node_name=node_name,
+            turn_id=turn_id,
+            part_id=part_id,
+            stream_kwargs=stream_kwargs,
+        )
+        await _emit_delta(
+            LLM_DELTA_END,
+            turn_id=turn_id, part_id=part_id,
+        )
+        return last_text, parsed
+    except asyncio.CancelledError:
+        await _emit_delta(
+            LLM_DELTA_END,
+            turn_id=turn_id, part_id=part_id,
+            cancelled=True,
+        )
+        raise
+    except ParseError:
+        raise
+    except Exception as e:
+        await _emit_delta(
+            LLM_DELTA_END,
+            turn_id=turn_id, part_id=part_id,
+            error=True, error_code="STREAM_ERROR",
+        )
+        logger.error(
+            "스트리밍 LLM 호출 오류",
+            node=node_name, error=str(e),
+        )
+        raise
+    finally:
+        if node_name:
+            set_current_node(_prev_node)
 
 
 def _build_correction_msg(

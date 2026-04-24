@@ -3,6 +3,9 @@
 ## 사용자 요청:
 {user_input}
 
+## 사용자 연속 처리 지시:
+{handoff_note}
+
 ## 조회 데이터:
 {query_result}
 

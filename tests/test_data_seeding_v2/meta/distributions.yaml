@@ -1,0 +1,542 @@
+# ============================================================
+# 컬럼 값 분포 추론 규칙
+# ============================================================
+# 용도: distributions.json 생성 시 각 컬럼에 대한 값 분포·범위를 자동 추론
+# 적용 순서: specific_overrides → audit_columns → fk_columns
+#           → enum_columns → column_patterns (주제영역 맥락 포함) → type_defaults
+#          (첫 매칭에서 중단)
+# 산출 타입 (generator_type):
+#   - audit_base_ymd: 시딩 배치일 (일관 값)
+#   - audit_job_ts: 시딩 실행시각 (micro-batch)
+#   - fk: FK 참조로 생성 (catalog의 fk 활용)
+#   - sequence: 순차 증가
+#   - uuid: 랜덤 UUID
+#   - enum_weighted: enum 값 가중치
+#   - date_range: 날짜 범위 내 분포
+#   - ym_range: 년월 CHAR(6) 범위
+#   - timestamp: 타임스탬프
+#   - amount_lognormal: 금액 로그정규
+#   - amount_uniform: 금액 균등
+#   - rate_normal: 비율 정규분포 (0~1 또는 0~100)
+#   - count_poisson: 카운트 포아송
+#   - korean_name: 한국인 이름
+#   - korean_address: 한국 주소
+#   - phone_number: 전화번호
+#   - biz_no: 사업자번호
+#   - currency_weighted: 통화코드 가중치
+#   - country_weighted: 국가코드 가중치
+#   - flag_yn: Y/N 플래그
+#   - text_lorem: 일반 텍스트
+#   - free_text: 자유입력 (faker)
+# ============================================================
+
+version: 1
+last_updated: 2026-04-22
+
+# ────────────────────────────────────────────
+# 시딩 전역 기본값
+# ────────────────────────────────────────────
+seeding_defaults:
+  base_date: '20261221'        # 시딩 배치일 (고정)
+  data_period_start: '20200101'
+  data_period_end: '20261220'
+  korean_locale: true
+  null_ratio_default: 0.1      # nullable 컬럼 기본 NULL 비율
+
+# ────────────────────────────────────────────
+# Tier 0: 감사 컬럼 (최우선 매칭)
+# ────────────────────────────────────────────
+audit_columns:
+  - column: ETCL_BASE_YMD
+    generator: audit_base_ymd
+    description: "모든 테이블에 동일한 시딩 배치일"
+
+  - column: ETCL_JOB_TS
+    generator: audit_job_ts
+    description: "시딩 실행시각 (마이크로 배치로 분산)"
+
+# ────────────────────────────────────────────
+# Tier 1: 전역 컬럼 이름 매칭 (정확한 컬럼명)
+# ────────────────────────────────────────────
+global_name_rules:
+  # 고객번호
+  - columns: [CSN]
+    generator: sequence
+    start: 1000001
+    virtual_reserved: [1, 1000000]
+    description: "1~100만은 가상 고객, 100만+1부터 실고객"
+
+  # 주요 식별자
+  - columns: [ACN]
+    generator: structured_id
+    pattern: "PPP{3_digit}N{13_digit}C{4_digit}"
+    description: "20자리 계좌번호: 상품그룹3 + 난수13 + 체크섬4"
+
+  - columns: [BRCD, MNGM_BRCD]
+    generator: fk
+    fallback: {generator: sequence, length: 7, prefix: '100', pad: '0'}
+
+  - columns: [PDN]
+    generator: fk
+    fallback: {generator: sequence, length: 10, prefix: 'PFP'}
+
+  - columns: [LON_NO]
+    generator: structured_id
+    pattern: "LN{6_ym}{10_sequential}"
+
+  # 연도/년월
+  - columns: [FY]
+    generator: ym_range
+    format: YYYY
+    range_years: [2020, 2026]
+    distribution: weighted_recent
+
+  - columns: [BASE_YM, RPT_YM]
+    generator: ym_range
+    format: YYYYMM
+
+  - columns: [BASE_YMD, RPT_YMD]
+    generator: date_range
+    distribution: weighted_recent
+
+# ────────────────────────────────────────────
+# Tier 2: 접미사 패턴 (글로벌, 주제영역 차등 없음)
+# ────────────────────────────────────────────
+suffix_patterns:
+  # ── 날짜/시간 ──
+  - suffix: _YMD
+    generator: date_range
+    format: YYYYMMDD
+    type_hint: [CHAR]
+    length: 8
+    distribution: weighted_recent
+    null_ratio: 0.05
+
+  - suffix: _TS
+    generator: timestamp
+    type_hint: [TIMESTAMP]
+    distribution: weighted_recent
+
+  - suffix: _YM
+    generator: ym_range
+    format: YYYYMM
+    type_hint: [CHAR]
+    length: 6
+    distribution: weighted_recent
+
+  - suffix: _YQ  # 년분기 (YYYYQ)
+    generator: yq_range
+    format: YYYYQ
+    length: 5
+
+  - suffix: _MM
+    generator: integer_range
+    min: 1
+    max: 12
+
+  # ── 플래그 ──
+  - suffix: _YN
+    generator: flag_yn
+    type_hint: [CHAR]
+    length: 1
+    y_ratio: 0.3     # 기본 30% Y (컨텍스트별 오버라이드)
+
+  # ── 코드 (enum은 별도 처리) ──
+  - suffix: _TCD
+    generator: enum_weighted
+    type_hint: [CHAR]
+    length: 2
+    description: "유형코드, catalog의 enum 값 기반"
+
+  - suffix: _SCD
+    generator: enum_weighted
+    type_hint: [CHAR]
+    length: 2
+    description: "상태코드"
+
+  - suffix: _GRD
+    generator: enum_weighted
+    description: "등급 코드"
+
+  - suffix: _LV
+    generator: enum_weighted
+    description: "레벨 코드"
+
+  - suffix: _CD
+    generator: enum_weighted
+    description: "일반 코드. enum이 없으면 랜덤 char"
+
+  # ── 금액 (주제영역별 차등은 domain_context에서 처리) ──
+  - suffix: _AMT
+    generator: amount_lognormal
+    type_hint: [NUMERIC]
+    min: 0
+    default_mean: 1000000
+    default_std: 2000000
+    null_ratio: 0.1
+    domain_scale:
+      LNB: 50000000      # 여신 평균 5천만원
+      LNH: 300000000     # 주담대 3억
+      LNJ: 200000000     # 전세 2억
+      LNC: 15000000      # 신용대출 1500만원
+      LNK: 500000000     # 기업여신 5억
+      LNW: 100000000     # 정책자금 1억
+      LNO: 5000000       # 연체관리 500만원
+      FXR: 100000000     # 외화대출 1억원
+      DPG: 5000000       # 수신 500만원
+      DPF: 30000000      # 정기예금 3천만원
+      DPD: 2000000       # 정기적금 200만원
+      DPB: 8000000       # 요구불 800만원
+      DPN: 100000000     # 신탁 1억
+      DPY: 10000000      # 외화예금 1천만원
+      CLN: 200000        # 카드 매출 건당 20만원
+      SLE: 100000        # 카드 매출 10만원
+      FXC: 3000000       # 외환거래 300만원
+      FXD: 5000000000    # FX 딜링 50억 (nominal)
+      DRV: 10000000000   # 파생 100억 nominal
+      RPC: 50000000      # 퇴직연금 5천만원
+      RPD: 30000000
+      RPI: 200000000     # DB 2억
+      TRS: 100000000     # 신탁 1억
+      FND: 10000000      # 펀드 1천만원
+      INV: 500000000     # 투자자산 5억
+      FNA: 1000000000    # 회계 10억
+      FNB: 500000000     # 예산 5억
+      FNS: 10000000      # 세무 1천만원
+      MKT: 50000         # 마케팅 건당 5만원
+      CMG: 100000        # 고객관계 10만원
+      NBA: 100000
+      EBB: 500000        # 이체 50만원
+      EBM: 500000
+      EBO: 500000
+      EBS: 500000
+      EBA: 0             # API는 0에 가까움
+      RSK: 100000000     # 리스크 1억
+      RPT: 1000000
+      AML: 10000000      # AML 거래 1천만원
+      MVP: 100000000     # 마트 집계
+      MVN: 200000000
+      MVC: 10000000
+      MVF: 50000000
+      MVB: 100000000
+      MRC: 10000000
+      MRP: 50000000
+      MRO: 30000000
+      MRR: 500000000
+
+  - suffix: _BAL
+    generator: amount_lognormal
+    type_hint: [NUMERIC]
+    min: 0
+    default_mean: 3000000
+    default_std: 5000000
+    null_ratio: 0.05
+    # 주제영역별 스케일은 _AMT와 유사
+
+  - suffix: _FEE
+    generator: amount_lognormal
+    min: 0
+    default_mean: 10000
+    default_std: 20000
+
+  - suffix: _VAL  # 평가금액
+    generator: amount_lognormal
+    default_mean: 100000000
+    default_std: 200000000
+
+  - suffix: _LIM
+    generator: amount_lognormal
+    default_mean: 50000000
+    default_std: 100000000
+
+  # ── 비율/이자율 ──
+  - suffix: _RATE
+    generator: rate_normal
+    unit: decimal
+    min: 0.001
+    max: 0.20
+    default_mean: 0.04
+    default_std: 0.015
+    description: "이자율 등 (0.xx 소수 형식)"
+
+  - suffix: _RTO
+    generator: rate_normal
+    unit: percent
+    min: 0
+    max: 100
+    default_mean: 50
+    default_std: 20
+    description: "비율 (0~100%)"
+
+  - suffix: _SCR
+    generator: integer_range
+    min: 0
+    max: 1000
+    default_mean: 500
+    default_std: 150
+    description: "점수 (신용점수 등)"
+
+  # ── 카운트 ──
+  - suffix: _CNT
+    generator: count_poisson
+    lambda: 3
+    min: 0
+    max: 1000
+
+  # ── 이름/설명 (텍스트) ──
+  - suffix: _NM
+    generator: korean_name
+    length_max: 50
+
+  - suffix: _DESC
+    generator: text_lorem
+    sentences: 1
+
+  - suffix: _RSN
+    generator: text_lorem
+    sentences: 1
+
+  # ── 일반 식별자 ──
+  - suffix: _NO
+    generator: structured_id
+    pattern: "{suffix_prefix}{16_random}"
+    length_max: 22
+
+  - suffix: _ID
+    generator: structured_id
+    pattern: "{suffix_prefix}{12_random}"
+
+  # ── 버전 ──
+  - suffix: _VER
+    generator: enum_weighted
+    values: ["v1.0", "v1.1", "v2.0", "v2.1", "v3.0"]
+    weights: [0.1, 0.1, 0.3, 0.3, 0.2]
+
+  # ── 통화 ──
+  - suffix: _CCY
+    generator: currency_weighted
+    type_hint: [CHAR]
+    length: 3
+    values: ["KRW", "USD", "EUR", "JPY", "CNY", "GBP", "AUD", "HKD"]
+    weights: [0.65, 0.18, 0.05, 0.06, 0.04, 0.01, 0.005, 0.005]
+
+# ────────────────────────────────────────────
+# Tier 3: 접두사 패턴
+# ────────────────────────────────────────────
+prefix_patterns:
+  # 총계/평균/합계 (_AMT/BAL와 병용되는 경우 접미사 우선)
+  - prefix: TOT_
+    generator: amount_lognormal
+    description: "합계값 (해당 컬럼이 금액류면)"
+
+  - prefix: AVG_
+    generator: rate_normal
+    unit: percent
+    description: "평균값 (비율 기반)"
+
+  # 기준일자
+  - prefix: BASE_
+    # _YMD/_YM과 결합 → suffix 규칙에서 처리
+    # _MM/_YQ 등도 마찬가지
+    passthrough: true
+
+# ────────────────────────────────────────────
+# Tier 4: 타입 기반 fallback
+# ────────────────────────────────────────────
+type_defaults:
+  DATE:
+    generator: date_range
+    distribution: weighted_recent
+
+  TIMESTAMP:
+    generator: timestamp
+    distribution: weighted_recent
+
+  'NUMERIC_18,2':
+    generator: amount_lognormal
+    default_mean: 1000000
+    default_std: 1000000
+
+  'NUMERIC_5,2':
+    generator: rate_normal
+    unit: percent
+
+  'NUMERIC_10,6':
+    generator: rate_normal
+    unit: decimal
+
+  'NUMERIC_10':
+    generator: integer_range
+    min: 1
+    max: 999999999
+
+  BIGINT:
+    generator: count_poisson
+    lambda: 1000
+    max: 10000000
+
+  INT:
+    generator: count_poisson
+    lambda: 10
+
+  CHAR_1:
+    generator: enum_weighted
+    fallback_values: ["Y", "N"]
+
+  CHAR_2:
+    generator: enum_weighted
+    fallback_values: ["01", "02", "03"]
+
+  CHAR_3:
+    generator: country_weighted
+    values: ["KOR", "USA", "JPN", "CHN", "DEU", "GBR"]
+    weights: [0.70, 0.12, 0.06, 0.05, 0.04, 0.03]
+
+  CHAR_8:
+    # CHAR(8) + _YMD 아닌 경우 → 수동 정의 또는 랜덤
+    generator: random_char
+    charset: "ALPHANUM"
+
+  CHAR_20:
+    # 계좌번호/대출번호 등 → 특수 규칙 없으면 랜덤
+    generator: random_char
+    charset: "NUMERIC"
+
+  VARCHAR:
+    generator: text_lorem
+    sentences: 1
+
+# ────────────────────────────────────────────
+# Tier 5: 특수 오버라이드 (테이블별 특정 컬럼)
+# ────────────────────────────────────────────
+specific_overrides:
+  # 고객 기본
+  CSC001M:
+    CSN:
+      generator: sequence
+      start: 1000001
+    BRTH_YMD:
+      generator: date_range
+      range: ['19400101', '20201231']
+      distribution: weighted_normal
+      peak_date: '19800101'
+    NM:
+      generator: korean_name
+    GEN_CD:
+      generator: enum_weighted
+      values: ['M', 'F']
+      weights: [0.51, 0.49]
+
+  # 고객 연락처
+  CSC006M:
+    HP_NO:
+      generator: phone_number
+      pattern: "010-XXXX-XXXX"
+
+  # 법인/개인사업자
+  CSC002M:
+    BIZ_NO:
+      generator: biz_no
+      pattern: "XXX-XX-XXXXX"
+
+  # 대출
+  LNB001M:
+    LN_AMT:
+      generator: amount_lognormal
+      min: 500000
+      max: 5000000000
+      default_mean: 80000000
+      default_std: 200000000
+    APLY_RATE:
+      generator: rate_normal
+      min: 0.02
+      max: 0.12
+      default_mean: 0.045
+      default_std: 0.015
+
+  LNH001M:  # 주담대
+    LN_AMT:
+      generator: amount_lognormal
+      min: 50000000
+      max: 3000000000
+      default_mean: 300000000
+      default_std: 200000000
+
+  # 카드 매출
+  SLE001L:
+    TRN_AMT:
+      generator: amount_lognormal
+      min: 1000
+      max: 10000000
+      default_mean: 50000
+      default_std: 80000
+
+  # 계좌
+  DPG001M:
+    ACN:
+      generator: structured_id
+      pattern: "PPPNNNNNNNNNNNNNCCCC"
+    NEW_YMD:
+      generator: date_range
+      range: ['20100101', '20261220']
+      distribution: weighted_recent
+
+  # 환율
+  FXC002M:
+    BASE_RATE:
+      generator: rate_normal
+      min: 1100
+      max: 1450
+      default_mean: 1350
+      default_std: 30
+      unit: absolute
+      description: "USD/KRW 환율"
+
+  # 부점
+  CMI001M:
+    BRCD:
+      generator: sequence
+      start: 1000
+      length: 7
+      pad: '0'
+    BRCH_NM:
+      generator: korean_branch_name
+
+  # 직원
+  CMI007M:
+    EMN:
+      generator: sequence
+      start: 100001
+      length: 10
+      pad: '0'
+    NM:
+      generator: korean_name
+
+# ────────────────────────────────────────────
+# V2 품질 결함 주입 규칙
+# ────────────────────────────────────────────
+quality_defects:
+  - category: missing_fk_sample
+    description: "일부 FK 참조에 존재하지 않는 값 삽입 (0.5% 의도적 오류)"
+    ratio: 0.005
+    applies_to_generators: [fk]
+
+  - category: code_value_mismatch
+    description: "코드값 enum 외 값 의도적 주입 (0.3%)"
+    ratio: 0.003
+    applies_to_generators: [enum_weighted]
+
+  - category: date_outlier
+    description: "날짜 범위 벗어난 값 (0.2%, 예: 19990101)"
+    ratio: 0.002
+    applies_to_generators: [date_range]
+
+  - category: numeric_outlier
+    description: "극단값 금액 (0.1%, 예: 음수, 최대값)"
+    ratio: 0.001
+    applies_to_generators: [amount_lognormal]
+
+  - category: duplicate_rows
+    description: "일부 테이블에 의도적 중복 행 (0.2%)"
+    ratio: 0.002
+    tables: [CSC006M, DPG022L, EBS001L]

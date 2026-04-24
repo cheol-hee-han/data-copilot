@@ -186,7 +186,7 @@ class TestErrorTurnAuditFields:
 
         async def mock_save_message(pool, **kwargs):
             save_message_calls.append(kwargs)
-            return "mock-turn-id"
+            return ("mock-uuid", len(save_message_calls))
 
         # run_pipeline이 에러를 발생시키는 시나리오를 시뮬레이션
         # runner.py의 에러 경로 로직만 직접 테스트

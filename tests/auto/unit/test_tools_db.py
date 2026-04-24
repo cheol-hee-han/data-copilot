@@ -54,8 +54,12 @@ class TestGetSampleRows:
     """get_sample_rows 회귀 테스트."""
 
     @pytest.mark.asyncio
-    async def test_exception_returns_empty(self, monkeypatch):
-        """execute_query 예외 시 빈 리스트를 반환한다."""
+    async def test_exception_propagates(self, monkeypatch):
+        """execute_query 예외는 호출자로 전파된다.
+
+        get_sample_rows는 예외를 catch하지 않고 전파한다.
+        복구는 상위(_run_step / context_explorer)에서 처리한다.
+        """
         mock_mgr = _make_mock_mgr([])
         mock_mgr.get_query_db.return_value.execute_query = (
             AsyncMock(side_effect=RuntimeError("timeout"))
@@ -65,8 +69,8 @@ class TestGetSampleRows:
             ".get_connector_manager",
             lambda: mock_mgr,
         )
-        result = await get_sample_rows("SAMPLE_TABLE")
-        assert result == []
+        with pytest.raises(RuntimeError, match="timeout"):
+            await get_sample_rows("SAMPLE_TABLE")
 
     @pytest.mark.asyncio
     async def test_invalid_ident_returns_empty(self):
@@ -154,8 +158,8 @@ class TestGetColumnValues:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_exception_returns_empty(self, monkeypatch):
-        """execute_query 예외 시 빈 리스트를 반환한다."""
+    async def test_exception_propagates(self, monkeypatch):
+        """execute_query 예외는 호출자로 전파된다."""
         mock_mgr = _make_mock_mgr([])
         mock_mgr.get_query_db.return_value.execute_query = (
             AsyncMock(side_effect=RuntimeError("timeout"))
@@ -165,12 +169,12 @@ class TestGetColumnValues:
             ".get_connector_manager",
             lambda: mock_mgr,
         )
-        result = await get_column_values(
-            table_name="LOAN_TABLE",
-            column_name="LN_DCD",
-            keyword="0",
-        )
-        assert result == []
+        with pytest.raises(RuntimeError, match="timeout"):
+            await get_column_values(
+                table_name="LOAN_TABLE",
+                column_name="LN_DCD",
+                keyword="0",
+            )
 
     @pytest.mark.asyncio
     async def test_invalid_table_returns_empty(self):
@@ -253,8 +257,8 @@ class TestGetColumnProfile:
         assert result == {}
 
     @pytest.mark.asyncio
-    async def test_exception_returns_empty(self, monkeypatch):
-        """execute_query 예외 시 빈 dict를 반환한다."""
+    async def test_exception_propagates(self, monkeypatch):
+        """execute_query 예외는 호출자로 전파된다."""
         mock_mgr = _make_mock_mgr([])
         mock_mgr.get_query_db.return_value.execute_query = (
             AsyncMock(side_effect=RuntimeError("timeout"))
@@ -264,11 +268,11 @@ class TestGetColumnProfile:
             ".get_connector_manager",
             lambda: mock_mgr,
         )
-        result = await get_column_profile(
-            table_name="ACCT_TABLE",
-            column_name="STAT_CD",
-        )
-        assert result == {}
+        with pytest.raises(RuntimeError, match="timeout"):
+            await get_column_profile(
+                table_name="ACCT_TABLE",
+                column_name="STAT_CD",
+            )
 
     @pytest.mark.asyncio
     async def test_invalid_table_returns_empty(self):
@@ -333,8 +337,8 @@ class TestGetDateDistribution:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_exception_returns_empty(self, monkeypatch):
-        """execute_query 예외 시 빈 리스트를 반환한다."""
+    async def test_exception_propagates(self, monkeypatch):
+        """execute_query 예외는 호출자로 전파된다."""
         mock_mgr = _make_mock_mgr([])
         mock_mgr.get_query_db.return_value.execute_query = (
             AsyncMock(side_effect=RuntimeError("timeout"))
@@ -344,11 +348,11 @@ class TestGetDateDistribution:
             ".get_connector_manager",
             lambda: mock_mgr,
         )
-        result = await get_date_distribution(
-            table_name="BAL_TABLE",
-            date_column="BAL_DT",
-        )
-        assert result == []
+        with pytest.raises(RuntimeError, match="timeout"):
+            await get_date_distribution(
+                table_name="BAL_TABLE",
+                date_column="BAL_DT",
+            )
 
     @pytest.mark.asyncio
     async def test_invalid_table_returns_empty(self):

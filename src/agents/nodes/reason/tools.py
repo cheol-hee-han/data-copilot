@@ -106,16 +106,11 @@ def _extract_page(parts: list[str]) -> tuple[list[str], int]:
 
 
 async def _safe_search(
-    tool_name: str,
     coro: Awaitable[list[dict]],
 ) -> list[dict]:
-    """검색 도구 공통 래퍼 — 예외 시 빈 리스트 반환."""
-    try:
-        results = await coro
-        return results if isinstance(results, list) else []
-    except Exception as e:
-        logger.warning(f"{tool_name} 실패", error=str(e))
-        return []
+    """검색 도구 공통 래퍼 — 예외는 상위(_run_step)로 전파하여 텔레메트리에 정확히 기록."""
+    results = await coro
+    return results if isinstance(results, list) else []
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -130,7 +125,6 @@ async def lookup_table_meta(table_name: str) -> list[dict]:
     """
     mgr = get_connector_manager()
     return await _safe_search(
-        "lookup_table_meta",
         mgr.mongo.search_table_meta(
             table_name, table_names=[table_name],
         ),
@@ -147,7 +141,6 @@ async def search_table_meta(
     """
     mgr = get_connector_manager()
     return await _safe_search(
-        "search_table_meta",
         mgr.mongo.search_table_meta(keywords, page=page),
     )
 
@@ -160,7 +153,6 @@ async def search_use_cases(
     """유사 SQL 활용사례 벡터 검색 + Reranker 재순위."""
     mgr = get_connector_manager()
     return await _safe_search(
-        "search_use_cases",
         mgr.qdrant.search_sql_history(
             query, exclude_ids=exclude_ids,
         ),
@@ -173,7 +165,6 @@ async def lookup_code_meta(
     """코드값 목록 조회 (MongoDB). 컬럼명 지정 조회."""
     mgr = get_connector_manager()
     return await _safe_search(
-        "lookup_code_meta",
         mgr.mongo.search_code_meta(column_name, page=page),
     )
 
@@ -186,7 +177,6 @@ async def search_manual(
     """업무 매뉴얼 검색 (Qdrant biz_manual 컬렉션)."""
     mgr = get_connector_manager()
     return await _safe_search(
-        "search_manual",
         mgr.qdrant.search_manual(
             query, exclude_ids=exclude_ids,
         ),
@@ -199,7 +189,6 @@ async def search_biz_terms(
     """비즈니스 용어사전 검색 (MongoDB biz_term 컬렉션)."""
     mgr = get_connector_manager()
     return await _safe_search(
-        "search_biz_terms",
         mgr.mongo.search_biz_terms(term, page=page),
     )
 
@@ -242,15 +231,8 @@ async def get_sample_rows(
     else:
         sql = f"SELECT * FROM {qualified} LIMIT {limit}"
 
-    try:
-        result = await db.execute_query(sql)
-        return result if isinstance(result, list) else []
-    except Exception as e:
-        logger.warning(
-            "get_sample_rows 실패",
-            table=table_name, error=str(e),
-        )
-        return []
+    result = await db.execute_query(sql)
+    return result if isinstance(result, list) else []
 
 
 async def get_column_values(
@@ -319,21 +301,13 @@ async def get_column_values(
             f"ORDER BY {column_name} "
             f"LIMIT {limit} OFFSET {offset}"
         )
-    try:
-        result = await db.execute_query(sql)
-        if isinstance(result, list):
-            return [
-                str(row.get(column_name, ""))
-                for row in result
-            ]
-        return []
-    except Exception as e:
-        logger.warning(
-            "get_column_values 실패",
-            table=table_name, column=column_name,
-            keyword=keyword, error=str(e),
-        )
-        return []
+    result = await db.execute_query(sql)
+    if isinstance(result, list):
+        return [
+            str(row.get(column_name, ""))
+            for row in result
+        ]
+    return []
 
 
 async def get_column_profile(
@@ -372,33 +346,25 @@ async def get_column_profile(
         f"MAX({column_name}) AS max_val "
         f"FROM {qualified}"
     )
-    try:
-        result = await db.execute_query(sql)
-        if isinstance(result, list) and result:
-            row = result[0]
-            total = int(row.get("total_rows", 0))
-            non_null = int(row.get("non_null_count", 0))
-            return {
-                "total_rows": total,
-                "non_null_count": non_null,
-                "null_count": total - non_null,
-                "null_rate": round(
-                    (total - non_null) / total, 3,
-                ) if total > 0 else 0.0,
-                "distinct_count": int(
-                    row.get("distinct_count", 0),
-                ),
-                "min_val": str(row.get("min_val", "")),
-                "max_val": str(row.get("max_val", "")),
-            }
-        return {}
-    except Exception as e:
-        logger.warning(
-            "get_column_profile 실패",
-            table=table_name, column=column_name,
-            error=str(e),
-        )
-        return {}
+    result = await db.execute_query(sql)
+    if isinstance(result, list) and result:
+        row = result[0]
+        total = int(row.get("total_rows", 0))
+        non_null = int(row.get("non_null_count", 0))
+        return {
+            "total_rows": total,
+            "non_null_count": non_null,
+            "null_count": total - non_null,
+            "null_rate": round(
+                (total - non_null) / total, 3,
+            ) if total > 0 else 0.0,
+            "distinct_count": int(
+                row.get("distinct_count", 0),
+            ),
+            "min_val": str(row.get("min_val", "")),
+            "max_val": str(row.get("max_val", "")),
+        }
+    return {}
 
 
 async def get_date_distribution(
@@ -439,21 +405,13 @@ async def get_date_distribution(
             f"SELECT DISTINCT {date_column} FROM {qualified} "
             f"ORDER BY {date_column} LIMIT {limit}"
         )
-    try:
-        result = await db.execute_query(sql)
-        if isinstance(result, list):
-            return [
-                str(row.get(date_column, ""))
-                for row in result
-            ]
-        return []
-    except Exception as e:
-        logger.warning(
-            "get_date_distribution 실패",
-            table=table_name, column=date_column,
-            error=str(e),
-        )
-        return []
+    result = await db.execute_query(sql)
+    if isinstance(result, list):
+        return [
+            str(row.get(date_column, ""))
+            for row in result
+        ]
+    return []
 
 
 def _is_month_end(date_str: str) -> bool:

@@ -402,7 +402,7 @@ class TestDataAnalysis:
 
     @pytest.mark.asyncio
     async def test_F01_analysis_intent(self):
-        """분석 질의 → analyze_data 노드 진입."""
+        """분석 질의 → analyzer 노드 진입."""
         t0 = time.perf_counter()
         result = await _run_with_rate_limit_retry(
             "지점별 여신 잔액 비교 분석해줘",

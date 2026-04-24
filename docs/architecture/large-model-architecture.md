@@ -1,7 +1,7 @@
 # Large-Model Pipeline Architecture — 재설계 제안서
 
-> **Version 1.3** (2026-04-13)
-> 추론 가능한 중대형 오픈소스 모델(Solar Pro 2 70B, Qwen3.5 397B, GPT OSS 120B)을
+> **Version 1.4** (2026-04-20)
+> 추론 가능한 중대형 오픈소스 모델(Qwen3.5 397B 단일 타겟)을
 > 전제로, 현재 파이프라인의 구조적 문제를 해소하는 재설계안.
 >
 >
@@ -13,8 +13,22 @@
 > | 1.1 | 2026-04-01 | 노드 리네임 반영: `context_explorer` → `context_retriever` + `context_interpreter`, `confidence_evaluator` → `readiness_gate`, `recovery_planner` → `recovery_agent`, `table_verifier` 삭제, `clarify` → `clarification_handler`. LLM 호출 맵 갱신. |
 > | 1.2 | 2026-04-02 | `planner` → `reasoning_preparer` 리네임 반영 (규칙 기반, LLM 호출 없음). Reason 계층 LLM 호출 수 조정 (5~9회 → 4~8회). |
 > | 1.3 | 2026-04-13 | 구현 상태 표기 추가 — TO-BE 설계(research 노드 통합, present 통합, state 간소화)는 미구현. 현재 코드는 AS-IS 구조(8노드 Reason, 개별 Present) 유지. |
+> | 1.4 | 2026-04-20 | **v2.4 코드 정합성 갱신** — Present 노드 분리 명칭(sql_executor/analyzer/visualizer/formatter) 반영, CONTINUE 4-Way 라우터(continue_orchestrator) 추가 시 LLM 호출 1회 추가, save_turn_snapshot/turn_reset 종료·진입 훅, target_db_resolver(rule) 통합 흐름 반영. 폐쇄망 타겟을 Qwen3.5 397B 단일로 단순화. |
 >
-> **구현 상태:** 이 문서는 **미래 재설계 제안서**이다. TO-BE 설계(Reason 통합 research 노드, Present 통합 노드, State 간소화)는 **아직 구현되지 않았으며**, 현재 코드베이스는 AS-IS 구조(8노드 Reason 계층, 개별 Present 노드)를 유지한다. Interpret 계층 통합(intent_classifier 단일화)만 반영 완료.
+> **구현 상태:** 이 문서는 **미래 재설계 제안서**이다. TO-BE 설계(Reason 통합 research 노드, Present 통합 노드, State 간소화)는 **아직 구현되지 않았으며**, 현재 코드베이스는 AS-IS 구조(19개 노드: Interpret 4 + CONTINUE 라우터 1 + Reason 8 + Present 6 + 종료 훅 1)를 유지한다. v2.4에서 Present 노드를 sql_executor/analyzer/visualizer/formatter/simple_responder로 명확히 분리하고, 멀티턴 처리를 위한 continue_orchestrator·turn_reset·save_turn_snapshot 훅을 추가하였다. Interpret 계층 통합(intent_classifier 단일화)은 반영 완료.
+
+---
+
+## 목차
+
+- [1. 현재 설계의 핵심 문제](#1-현재-설계의-핵심-문제) — AS-IS 8~14+회 LLM 호출 진단·문제 분석
+- [2. 재설계 원칙](#2-재설계-원칙) — P1~P5 (Full Context, SSoT, Trust Reasoning, Separate I/O, Incremental)
+- [3. 재설계 — Interpret 계층](#3-재설계--interpret-계층) — AS-IS 4호출 → TO-BE 2호출 + v2.4 continue_orchestrator
+- [4. 재설계 — Reason 계층](#4-재설계--reason-계층) — AS-IS 5~9호출 8노드 → TO-BE 3~5호출 5노드
+- [5. 재설계 — Present 계층](#5-재설계--present-계층) — AS-IS 4호출 4노드 → TO-BE 1~2호출 (v2.4: sql_executor/analyzer/visualizer/formatter 분리 운영)
+- [6. 재설계 — State 구조](#6-재설계--state-구조) — PipelineState/ReasoningState 간소화 방향
+- [7. 마이그레이션 전략](#7-마이그레이션-전략) — 점진적 전환 로드맵
+- [8. 미해결 이슈 / 비판적 검토](#8-미해결-이슈--비판적-검토) — 트레이드오프·우려사항
 
 ---
 
@@ -119,16 +133,23 @@ query_normalizer의 Phase 2(교차 검증)도 Phase 1이 충분히 정확하면 
 
 ## 3. 재설계 — Interpret 계층
 
-### 3.1 AS-IS: 4개 LLM 호출
+### 3.1 AS-IS: 4~5개 LLM 호출 (v2.4 기준)
 
 ```text
-intent_classifier (LLM①) → normalizer_P1 (LLM②) → normalizer_P2 (LLM③, 선택)
-  → clarification_handler (LLM④, 조건부)
+turn_reset (rule, LLM 없음)
+  → intent_classifier (LLM①) → query_normalizer P1 (LLM②) → query_normalizer P2 (LLM③, 선택)
+  → continue_orchestrator (LLM④, intent=CONTINUE 시만) — REDISPLAY/ANALYZE/REGENERATE/REFINE 라우팅 + handoff_note
+  → clarification_handler (interrupt 패턴, LLM 미호출 — 사용자 응답 대기)
 ```
 
 각 호출이 **이전 호출의 출력 1개만** 받는 직렬 구조.
 intent_classifier는 `conversation_history` + `sanitized_input`을 함께 보지만,
 normalizer는 `sanitized_input`만 본다.
+
+> **v2.4 추가 노드**:
+> - `turn_reset` — 매 턴 시작 시 reason/route/handoff_note/result_data 등을 초기화하고 conversation_history·turn_snapshots만 보존하는 SSoT (`PipelineState.turn_reset_updates()`).
+> - `continue_orchestrator` — intent_classifier가 CONTINUE 판정 시 직전 턴 snapshot을 보고 4-Way(REDISPLAY/ANALYZE/REGENERATE/REFINE) 라우팅 결정 + handoff_note 생성. REGENERATE는 route-agnostic 전량 hydration, REFINE은 hydration 스킵(오염 방지).
+> - `clarification_handler` — interrupt 패턴(LLM 미호출, 사용자 응답 대기 후 resolved_signals 누적).
 
 ### 3.2 TO-BE: 2개 LLM 호출
 
@@ -456,20 +477,33 @@ TO-BE에서는 research에 `dead_ends`를 전달하여 같은 실수를 피하�
 
 ## 5. 재설계 — Present 계층
 
-### 5.1 AS-IS: 4개 LLM 호출
+### 5.1 AS-IS: 4개 LLM 호출 (v2.4 명칭 기준)
 
 ```text
-execute_sql (rule) → analyzer (LLM⑪) → viz_judgment (LLM⑫)
-  → viz_svg (LLM⑬) → formatter (LLM⑭)
+sql_executor (rule) → analyzer (LLM⑪, 통계·인사이트) → visualizer (LLM⑫⑬, 차트 판단 + SVG)
+  → formatter (LLM⑭, 보고서 포맷팅)
+  └ simple_responder (LLM, 비-DATA intent 분기)
+  └ error_end (LLM, 실패 종료)
 ```
+
+> **v2.4 분리 명칭**: 기존 `execute_sql` → `sql_executor`, `analyze_data` → `analyzer`,
+> `viz_judgment + viz_svg`는 단일 `visualizer` 노드로 통합되어 `judgment(LLM)` 단계에서 차트 유형을 결정하고
+> `svg_base + user` 프롬프트로 SVG를 직접 생성한다 (실패 시 `chart_generator` 템플릿 폴백).
+> `format_response`는 `formatter`로 명확화. `simple_responder`(CASUAL_TALK·HELP·SYSTEM 응답)와
+> `error_end`(실패 자연어 종료)가 추가되어 Present 계층은 6개 노드로 분기 처리.
 
 ### 5.2 TO-BE: 1~2개 LLM 호출
 
 ```text
-execute_sql (rule, 변경 없음)
+sql_executor (rule, 변경 없음)
   → present (LLM①) — 분석 + 시각화 판단 + 포맷팅 통합
   → render_chart (rule) — 템플릿 기반 차트 생성
 ```
+
+> **v2.4 부분 진전**: `visualizer`가 `viz_judgment + viz_svg` 통합을 달성하여 Present LLM 호출을
+> 4회 → 3회로 줄였다. `analyzer`와 `formatter`의 통합은 여전히 미구현(분석/포맷 분리 유지).
+> CONTINUE 라우팅에서 REDISPLAY/ANALYZE 경로가 sql_executor를 우회하도록 hydration이 적용되어
+> 멀티턴 후속 요청의 LLM 호출이 줄어든다 (REDISPLAY=visualizer 1회, ANALYZE=analyzer+visualizer 2회).
 
 #### `present` 노드 — 통합 표현
 

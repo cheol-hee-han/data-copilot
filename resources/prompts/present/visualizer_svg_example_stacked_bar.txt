@@ -1,0 +1,136 @@
+────────────────────────────────
+## 예제 5: stacked_bar (누적 막대 — 시계열 구성비)
+────────────────────────────────
+
+데이터:
+컬럼: [연도, 예금, 대출, 유가증권, 기타]
+행: [("2020",450,520,180,50), ("2021",480,560,200,60), ("2022",510,610,220,60), ("2023",530,640,250,80), ("2024",570,690,280,90)]
+(단위: 조원)
+
+계산 과정 (모델 내부 참조):
+  연도별 합계: 2020=1,200 / 2021=1,300 / 2022=1,400 / 2023=1,500 / 2024=1,630
+  y_max = 1630 × 1.15 ≈ 1875 → 올림 → 2000
+  plot: x=[90,760], y=[60,420], width=670, height=360
+  막대 5개: bar_width=80, gap=53.5, total=5×80+4×53.5=614
+  중앙 정렬: start_x = 90 + (670-614)/2 = 118
+  x좌표: x1=118(cx=158), x2=251.5(cx=291.5), x3=385(cx=425), x4=518.5(cx=558.5), x5=652(cx=692)
+  Y그리드 5개: 0→y=420, 500→y=330, 1000→y=240, 1500→y=150, 2000→y=60
+
+  세그먼트 높이 = (값/2000)×360, 누적은 아래(예금)부터 위로 쌓음
+  2020 누적합 216 → 시작 y=204
+    예금 81  : y=339, h=81  (420-81=339)
+    대출 94  : y=245, h=94
+    유가증권 32: y=213, h=32
+    기타 9   : y=204, h=9
+  2021 누적합 234 → 시작 y=186
+    예금 86  : y=334, h=86
+    대출 101 : y=233, h=101
+    유가증권 36: y=197, h=36
+    기타 11  : y=186, h=11
+  2022 누적합 253 → 시작 y=167
+    예금 92  : y=328, h=92
+    대출 110 : y=218, h=110
+    유가증권 40: y=178, h=40
+    기타 11  : y=167, h=11
+  2023 누적합 269 → 시작 y=151
+    예금 95  : y=325, h=95
+    대출 115 : y=210, h=115
+    유가증권 45: y=165, h=45
+    기타 14  : y=151, h=14
+  2024 누적합 293 → 시작 y=127
+    예금 103 : y=317, h=103
+    대출 124 : y=193, h=124
+    유가증권 50: y=143, h=50
+    기타 16  : y=127, h=16
+
+  합계 라벨은 막대 상단(시작 y - 12) 위치에 표시
+  범례: 4개 항목 좌상단 또는 하단에 가로 정렬
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">연도별 자산 포트폴리오 변화 (조원)</text>
+
+  <!-- Y축 그리드 + 레이블 -->
+  <line x1="90" y1="420" x2="760" y2="420" stroke="#d1d5db" stroke-width="1"/>
+  <text x="80" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">0</text>
+
+  <line x1="90" y1="330" x2="760" y2="330" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="334" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">500</text>
+
+  <line x1="90" y1="240" x2="760" y2="240" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="244" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">1,000</text>
+
+  <line x1="90" y1="150" x2="760" y2="150" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="154" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">1,500</text>
+
+  <line x1="90" y1="60" x2="760" y2="60" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="64" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">2,000</text>
+
+  <!-- 축선 -->
+  <line x1="90" y1="60" x2="90" y2="420" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- 2020 누적 막대 -->
+  <rect x="118" y="339" width="80" height="81" fill="#1a56db" rx="4"/>
+  <rect x="118" y="245" width="80" height="94" fill="#f59e0b" rx="4"/>
+  <rect x="118" y="213" width="80" height="32" fill="#10b981" rx="4"/>
+  <rect x="118" y="204" width="80" height="9" fill="#ef4444" rx="4"/>
+  <text x="158" y="192" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">1,200</text>
+  <text x="158" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">2020</text>
+
+  <!-- 2021 누적 막대 -->
+  <rect x="251.5" y="334" width="80" height="86" fill="#1a56db" rx="4"/>
+  <rect x="251.5" y="233" width="80" height="101" fill="#f59e0b" rx="4"/>
+  <rect x="251.5" y="197" width="80" height="36" fill="#10b981" rx="4"/>
+  <rect x="251.5" y="186" width="80" height="11" fill="#ef4444" rx="4"/>
+  <text x="291.5" y="174" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">1,300</text>
+  <text x="291.5" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">2021</text>
+
+  <!-- 2022 누적 막대 -->
+  <rect x="385" y="328" width="80" height="92" fill="#1a56db" rx="4"/>
+  <rect x="385" y="218" width="80" height="110" fill="#f59e0b" rx="4"/>
+  <rect x="385" y="178" width="80" height="40" fill="#10b981" rx="4"/>
+  <rect x="385" y="167" width="80" height="11" fill="#ef4444" rx="4"/>
+  <text x="425" y="155" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">1,400</text>
+  <text x="425" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">2022</text>
+
+  <!-- 2023 누적 막대 -->
+  <rect x="518.5" y="325" width="80" height="95" fill="#1a56db" rx="4"/>
+  <rect x="518.5" y="210" width="80" height="115" fill="#f59e0b" rx="4"/>
+  <rect x="518.5" y="165" width="80" height="45" fill="#10b981" rx="4"/>
+  <rect x="518.5" y="151" width="80" height="14" fill="#ef4444" rx="4"/>
+  <text x="558.5" y="139" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">1,500</text>
+  <text x="558.5" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">2023</text>
+
+  <!-- 2024 누적 막대 -->
+  <rect x="652" y="317" width="80" height="103" fill="#1a56db" rx="4"/>
+  <rect x="652" y="193" width="80" height="124" fill="#f59e0b" rx="4"/>
+  <rect x="652" y="143" width="80" height="50" fill="#10b981" rx="4"/>
+  <rect x="652" y="127" width="80" height="16" fill="#ef4444" rx="4"/>
+  <text x="692" y="115" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">1,630</text>
+  <text x="692" y="450" text-anchor="middle" font-size="16"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">2024</text>
+
+  <!-- 범례 (하단) -->
+  <rect x="180" y="475" width="14" height="14" fill="#1a56db" rx="2"/>
+  <text x="200" y="487" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">예금</text>
+
+  <rect x="270" y="475" width="14" height="14" fill="#f59e0b" rx="2"/>
+  <text x="290" y="487" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">대출</text>
+
+  <rect x="360" y="475" width="14" height="14" fill="#10b981" rx="2"/>
+  <text x="380" y="487" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">유가증권</text>
+
+  <rect x="475" y="475" width="14" height="14" fill="#ef4444" rx="2"/>
+  <text x="495" y="487" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">기타</text>
+</svg>

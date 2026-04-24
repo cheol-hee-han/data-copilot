@@ -23,44 +23,73 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-# ── 공유 모델 re-export (기존 import 경로 호환) ──
-# PEP 484 explicit re-export 패턴(`X as X`): mypy strict가 아닌 경우에도 의도를 명시.
-from src.models.enums import (
-    ConfidenceStatus as ConfidenceStatus,
-    FailureType as FailureType,
-    FinalStatus as FinalStatus,
-    HypothesisStatus as HypothesisStatus,
-    IntentType as IntentType,
-    Phase as Phase,
-    QueryStatus as QueryStatus,
-    SelectionStatus as SelectionStatus,
-    StepStatus as StepStatus,
-    TargetDbStatus as TargetDbStatus,
-    VisualizationType as VisualizationType,
-)
-from src.models.result import (
-    AnalysisResult as AnalysisResult,
-    SQLResult as SQLResult,
-    VisualizationData as VisualizationData,
-)
-from src.models.trace import (
-    TraceEntry as TraceEntry,
-    add_trace as add_trace,
-)
 from src.agents.models.clarification import AmbiguitySignal
 from src.agents.models.normalization import NormalizedQuery
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 루프 제어 상수 (config.py 설정값 참조)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 from src.config import settings as _settings
+
+# ── 공유 모델 re-export (기존 import 경로 호환) ──
+# PEP 484 explicit re-export 패턴(`X as X`): mypy strict가 아닌 경우에도 의도를 명시.
+from src.models.enums import (
+    ConfidenceStatus as ConfidenceStatus,
+)
+from src.models.enums import (
+    ContinueRoute as ContinueRoute,
+)
+from src.models.enums import (
+    FailureType as FailureType,
+)
+from src.models.enums import (
+    FinalStatus as FinalStatus,
+)
+from src.models.enums import (
+    HypothesisStatus as HypothesisStatus,
+)
+from src.models.enums import (
+    IntentType as IntentType,
+)
+from src.models.enums import (
+    Phase as Phase,
+)
+from src.models.enums import (
+    QueryStatus as QueryStatus,
+)
+from src.models.enums import (
+    SelectionStatus as SelectionStatus,
+)
+from src.models.enums import (
+    StepStatus as StepStatus,
+)
+from src.models.enums import (
+    TargetDbStatus as TargetDbStatus,
+)
+from src.models.enums import (
+    VisualizationType as VisualizationType,
+)
+from src.models.result import (
+    AnalysisResult as AnalysisResult,
+)
+from src.models.result import (
+    SQLResult as SQLResult,
+)
+from src.models.result import (
+    VisualizationData as VisualizationData,
+)
+from src.models.trace import (
+    TraceEntry as TraceEntry,
+)
+from src.models.trace import (
+    add_trace as add_trace,
+)
 
 MAX_TOOL_CALLS = _settings.max_tool_calls
 MAX_REPLANS = _settings.max_replans
 MAX_GENERATES = _settings.max_generates
 MAX_LOCAL_FIXES = _settings.max_local_fixes
+MAX_ASK_USER_ROUNDS = _settings.max_ask_user_rounds
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -68,17 +97,26 @@ MAX_LOCAL_FIXES = _settings.max_local_fixes
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class KnowledgeItem(BaseModel):
-    """탐색 과정에서 축적되는 개별 지식 단위."""
+    """탐색 과정에서 축적되는 개별 지식 단위.
 
-    key: str
+    id와 key의 역할 분리:
+      - id: 불변 식별자 (K1, K2 …). LLM 응답의 knowledge_updates가 참조하는 대상.
+      - key: display label ("{role}:{term}"). "무엇을 해소하나" 설명용.
+      - value: 탐색 결과 해소된 SQL 표현/코드값.
+
+    seed 이후 id·key·is_critical은 불변. LLM은 id로만 기존 항목을 갱신하며
+    신규 생성 불가 (context_interpreter._build_knowledge_update 가드).
+    """
+
+    # 불변 식별자 (reasoning_preparer 에서 "K1", "K2" 등으로 채번)
+    id: str = ""
+    key: str = ""
     value: str = ""
     confidence: float = 0.0
     status: ConfidenceStatus = ConfidenceStatus.UNRESOLVED
     source: str = ""
     evidence: list[str] = Field(default_factory=list)
     is_critical: bool = True
-    # reasoning_preparer에서 "K1", "K2" 등으로 채번
-    knowledge_id: str = ""
 
     def promote(
         self, new_status: ConfidenceStatus, value: str,
@@ -341,6 +379,7 @@ class DeadEnd(BaseModel):
     failure_type: FailureType = FailureType.NO_KNOWLEDGE
     reason: str = ""
     lessons_learned: str = ""
+    related_knowledge_ids: list[str] = Field(default_factory=list)
 
 
 class TargetDbDecision(BaseModel):
@@ -371,7 +410,7 @@ class TargetDbDecision(BaseModel):
 class LoopGuard(BaseModel):
     """다층 루프 제어 카운터.
 
-    에이전틱 추론 루프가 무한 반복에 빠지지 않도록 4가지 차원의 카운터를 관리한다.
+    에이전틱 추론 루프가 무한 반복에 빠지지 않도록 5가지 차원의 카운터를 관리한다.
     각 카운터가 config.py에 정의된 상한(MAX_TOOL_CALLS 등)에 도달하면
     should_terminate()가 True를 반환하여 루프를 강제 종료시킨다.
     """
@@ -380,6 +419,7 @@ class LoopGuard(BaseModel):
     replan_count: int = 0
     generate_attempts: int = 0
     local_fix_count: int = 0
+    ask_user_count: int = 0
 
     def increment_tool_calls(self) -> None:
         """도구 호출 횟수를 1 증가시킨다."""
@@ -396,6 +436,10 @@ class LoopGuard(BaseModel):
     def increment_local_fix(self) -> None:
         """로컬 수정 횟수를 1 증가시킨다."""
         self.local_fix_count += 1
+
+    def increment_ask_user(self) -> None:
+        """사용자 명확화 질문 횟수를 1 증가시킨다."""
+        self.ask_user_count += 1
 
     def should_escalate_to_structural(self) -> bool:
         """로컬 수정 한도 초과 시 구조적 재계획으로 전환해야 하는지 판정한다."""
@@ -583,6 +627,13 @@ class ReasoningState(BaseModel):
     # SQL generator가 LLM 응답에서 추출한 SQL 1줄 요약 설명
     sql_explanation: str = ""
 
+    # ── 직전 턴 참고 SQL (CONTINUE hydration 전용 read-only 채널) ──
+    # W: continue_orchestrator (hydration only)  R: GEN/RCV ({previous_sql} 주입)
+    # 설계: §14.3.6 — 현재 턴 결과(generated_sql/sql_explanation)와 직교 분리.
+    # sql_generator/sql_validator/recovery_agent 는 이 필드를 쓰지 않음.
+    previous_turn_sql: str = ""
+    previous_turn_sql_explanation: str = ""
+
     # ── SQL 생성 가정 (재시도 시 덮어쓰기, 최종 성공 시 resolved_signals로 전환) ──
     # W: GEN  R: FIN
     pending_assumptions: list[str] = Field(
@@ -591,7 +642,7 @@ class ReasoningState(BaseModel):
 
     # ── SQL 검증 상세 (Layer2b PASS 시 체크 항목별 판정 사유) ──
     # W: VAL(PASS)  R: insight_builder
-    # 구조: {"check_name": {"pass": bool, "detail": str}}
+    # 구조: {"check_name": {"verdict": "PASS"|"FAIL", "detail": str}}
     validation_checks: dict[str, Any] = Field(
         default_factory=dict,
     )
@@ -657,7 +708,7 @@ class ReasoningState(BaseModel):
         if not items:
             return "(사용 가능한 지식 항목 없음)"
         return "\n".join(
-            f"- {ki.key}: {ki.value} ({ki.source}) — "
+            f"- ({ki.id}) {ki.key}: {ki.value} ({ki.source}) — "
             f"{'확정' if ki.status == ConfidenceStatus.CONFIRMED else '추정'}"
             for ki in items
         )
@@ -726,7 +777,7 @@ class PipelineState(BaseModel):
     W/R 표기: W=기록, R=참조 하는 노드/계층.
     약어: PRE=preprocess, CTX=intent_classifier,
           NRM=normalize_query, CLR=clarify, EXE=execute_sql,
-          ANL=analyze_data, FMT=format_response
+          ANLZ=analyzer, VIZ=visualizer, FMT=format_response
     """
 
     # ── 공통 ──
@@ -747,8 +798,7 @@ class PipelineState(BaseModel):
     # ── Interpret 계층 ──
     # W: runner (sanitize 후)  R: CTX/NRM/reason 계층 전체
     preprocessed_input: str = ""
-    # W: intent_classifier (DATA_ANALYSIS 시 rewriter 입력 보관,
-    #    CONTINUE 시 맥락 해소 후 질의)
+    # W: query_normalizer (DATA_ANALYSIS 시 extraction_query_rewriter 입력 보관)
     # R: analyzer (시각화/분석 지시 참조)
     analysis_query: str = ""
     # W: CTX  R: pipeline 라우팅/NRM
@@ -759,6 +809,10 @@ class PipelineState(BaseModel):
     query_category: str = ""
     # W: CTX  R: 하류 노드 (CONTINUE 시 맥락 힌트)
     is_continuation: bool = False
+    # W: CTX  R: pipeline 라우팅
+    # 본 서비스는 명세 추출이 주 업무이므로 analyzer는 opt-in.
+    # 명시 분석 요청("분석/비교/추이/원인/평가")이 있을 때만 intent_classifier가 True로 세팅.
+    needs_analyzer: bool = False
     # W: CTX  R: 하류 노드 (CONTINUE 시 대화 맥락 반영 질문 해석)
     continue_context: str = ""
     # W: NRM  R: reason 계층 (reasoning_preparer 시드)
@@ -781,15 +835,15 @@ class PipelineState(BaseModel):
     )
 
     # ── Present 계층 ──
-    # W: EXE  R: ANL/FMT/runner
+    # W: EXE  R: ANLZ/VIZ/FMT/runner
     sql_result: SQLResult = Field(
         default_factory=SQLResult,
     )
-    # W: ANL  R: FMT/runner
+    # W: ANLZ  R: FMT/runner
     analysis_result: AnalysisResult = Field(
         default_factory=AnalysisResult,
     )
-    # W: ANL  R: runner
+    # W: VIZ  R: FMT/runner
     visualization: VisualizationData = Field(
         default_factory=VisualizationData,
     )
@@ -799,6 +853,12 @@ class PipelineState(BaseModel):
     result_data: dict[str, Any] | None = None
     # W: FMT  R: runner (stream.end 전송, 턴 metadata 저장)
     process_summary: dict[str, Any] | None = None
+
+    # ── 스트리밍 (analyzer/SVG 토큰 delta) ──
+    # W: runner (턴 시작 시 클라이언트 선호도 반영)  R: ANLZ/VIZ
+    streaming_enabled: bool = False
+    # W: ANLZ (스트리밍 성공 시 True)  R: FMT (중복 전송 판단), runner (트레이스)
+    streaming_delivered: bool = False
 
     # ── 상태 관리 ──
     # W: 각 노드 (에러 시)  R: pipeline 라우팅
@@ -812,6 +872,40 @@ class PipelineState(BaseModel):
         default_factory=list,
     )
 
+    # ── Multi-Turn CONTINUE Orchestrator ──
+    # 세션 지속 (turn_reset 대상 아님): 무제한 누적 스냅샷.
+    # save_turn_snapshot 노드가 format_response 직후 append.
+    # W: save_turn_snapshot
+    # R: continue_orchestrator (참조 턴 결정), 하류 노드 (공통 헬퍼로 대표 스냅샷 조회)
+    # 실제 타입: list[TurnSnapshot]. snapshot.py ↔ state.py 순환 임포트 방지를 위해
+    # Any로 선언하고 런타임 타입은 save_turn_snapshot/continue_orchestrator에서 보장한다.
+    # TODO: TableMeta/CodeMeta를 src/agents/models/meta.py로 분리하여 forward ref 복원.
+    turn_snapshots: list[Any] = Field(default_factory=list)
+    # 참조 턴 T 라벨 목록: intent_classifier 산출물을 그대로 전파 (단일 진실 공급원).
+    # turn_reset 대상 — 새 턴 시작 시 빈 리스트로 초기화.
+    # 중간 복사본(reference_snapshot)은 두지 않는다. 하류 노드는
+    # primary_reference_snapshot(state, history) 헬퍼로 turn_snapshots에서 직접 조회한다.
+    # W: intent_classifier / continue_orchestrator  R: 하류 노드 (공통 헬퍼 경유)
+    reference_turns: list[str] = Field(default_factory=list)
+    # CONTINUE 라우팅 카테고리: REDISPLAY/ANALYZE/REGENERATE/REFINE (설계 §3.2.3, 4-way Path F').
+    # 모두 하류 노드 — 상류 회귀 없음 (판정 불가 시 error_end).
+    # turn_reset 대상.
+    # W: continue_orchestrator  R: pipeline 라우팅
+    #   (Path F' §11.5: save_turn_snapshot 의 REDISPLAY skip 은 폐기됨.
+    #    REDISPLAY 경로도 visualization 갱신분을 보존하기 위해 저장한다.)
+    route: ContinueRoute | None = None
+    # 오케스트레이터가 작성한 자연어 지시 (하류 노드 프롬프트에 {handoff_note}로 주입).
+    # 라우트별 필수 섹션 구조가 강제됨 (orchestrator 시스템 프롬프트 참조).
+    # turn_reset 대상.
+    # W: continue_orchestrator  R: sql_generator / sql_validator / analyzer / visualizer
+    handoff_note: str = ""
+    # 현재 턴 user 메시지의 checkpoint_dc_messages.seq.
+    # runner.py가 insert_message 직후 채번된 seq를 전파 (Phase 2 구현).
+    # save_turn_snapshot이 TurnSnapshot.user_message_seq 매핑 키로 사용.
+    # turn_reset 대상.
+    # W: runner  R: save_turn_snapshot
+    current_user_message_seq: int | None = None
+
     # ── 턴 경계 리셋 헬퍼 ──
 
     @classmethod
@@ -824,12 +918,14 @@ class PipelineState(BaseModel):
         공급원이다. 본 리스트에 없는 필드가 새로 추가되면 리셋 여부를
         반드시 판단해야 한다.
 
-        포함 — 턴 스코프 19개 필드 (resolved_signals 포함).
+        포함 — 턴 스코프 필드 (interpret/reason/present/상태/CONTINUE).
+        본 dict가 단일 진실 공급원. 필드 추가 시 여기 포함 여부를 판단.
 
-        제외 — 세션 지속 6개 필드
-        (session_id/conversation_history/user_input/original_query/
-        preprocessed_input/turn_id)는 runner의 initial_state가 담당하며,
-        여기서 건드리지 않는다.
+        제외 — 세션 지속 필드:
+        - (session_id/conversation_history/user_input/original_query/
+          preprocessed_input/turn_id): runner의 initial_state가 담당.
+        - turn_snapshots: Multi-Turn CONTINUE 맥락 보존 — 세션 전체 지속,
+          무제한 누적. 새 스냅샷 추가는 save_turn_snapshot 노드가 담당.
         """
         return {
             # interpret 계층 산출물
@@ -838,6 +934,7 @@ class PipelineState(BaseModel):
             "intent_confidence": 0.0,
             "query_category": "",
             "is_continuation": False,
+            "needs_analyzer": False,
             "continue_context": "",
             "normalized_query": None,
             "pending_signals": [],
@@ -851,8 +948,20 @@ class PipelineState(BaseModel):
             "formatted_response": "",
             "result_data": None,
             "process_summary": None,
+            # 스트리밍 — streaming_enabled 는 세션 선호도가 아니라 "이 턴"의
+            # 클라이언트 토글을 반영하므로 매 턴 runner가 재설정. delivered는
+            # 현재 턴의 analyzer 수행 결과이므로 반드시 턴 경계에서 초기화.
+            "streaming_enabled": False,
+            "streaming_delivered": False,
             # 상태/로그
             "status": QueryStatus.PENDING,
             "error_message": "",
             "trace_log": [],
+            # CONTINUE Orchestrator — 턴 스코프 (참조 턴·라우팅·지시·seq 초기화)
+            # turn_snapshots 는 세션 지속이므로 이 목록에 없음.
+            "reference_turns": [],
+            "route": None,
+            "handoff_note": "",
+            "current_user_message_seq": None,
         }
+

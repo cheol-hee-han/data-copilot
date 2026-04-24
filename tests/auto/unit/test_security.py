@@ -21,11 +21,24 @@
     - 테스트 대상 소스: src/utils/security.py
 """
 
+import pytest
+
 from src.utils.security import (
     detect_prompt_injection,
     mask_pii,
     check_sql_safety_quick,
 )
+
+
+@pytest.fixture(autouse=True)
+def _force_pii_masking(monkeypatch):
+    """PII 마스킹을 강제 활성화한다.
+
+    .env의 PII_MASKING_ENABLED=false 설정과 무관하게
+    mask_pii / check_pii_columns 가 실제 동작하도록 보장한다.
+    """
+    import src.config as _cfg
+    monkeypatch.setattr(_cfg.settings, "pii_masking_enabled", True)
 
 
 def test_mask_pii_phone():

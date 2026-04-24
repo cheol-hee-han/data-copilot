@@ -1,0 +1,11 @@
+## A. 해석 (intent_classifier 산출 — 판정 단서)
+
+{interpretation_block}
+
+## B. 관련 턴 블록 (reference_turns 필터 적용, 오래된 → 최근)
+
+{reference_turns_block}
+
+## C. 현재 발화
+
+{current_utterance}

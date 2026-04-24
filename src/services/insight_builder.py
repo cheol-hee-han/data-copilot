@@ -233,10 +233,12 @@ def _extract_sql(reason: Any) -> str:
     """검증된 SQL 또는 생성된 SQL을 추출한다."""
     if not reason:
         return ""
-    return str(
+    sql = (
         _get_attr_or_key(reason, "validated_sql", "")
         or _get_attr_or_key(reason, "generated_sql", "")
+        or ""
     )
+    return str(sql) if sql else ""
 
 
 def _table_name(ct: Any) -> str:
@@ -322,7 +324,7 @@ def _build_step_timings(trace_log: list[Any]) -> list[dict[str, Any]]:
         "preprocess": "입력 전처리",
         "resolve_history": "대화 이력 분석",
         "classify_intent": "질문 의도 분석",
-        "normalize_query": "질문 정규화",
+        "query_normalizer": "질문 정규화",
         "reasoning_preparer": "탐색 준비",
         "context_explorer": "데이터 탐색",
         "context_retriever": "데이터 수집",
@@ -333,9 +335,10 @@ def _build_step_timings(trace_log: list[Any]) -> list[dict[str, Any]]:
         "sql_validator": "SQL 검증",
         "recovery_planner": "대안 탐색",
         "result_finalizer": "결과 확정",
-        "execute_sql": "데이터 조회",
-        "analyze_data": "결과 분석",
-        "format_response": "보고서 작성",
+        "sql_executor": "데이터 조회",
+        "analyzer": "결과 분석",
+        "visualizer": "시각화 생성",
+        "formatter": "보고서 작성",
     }
 
     steps: list[dict[str, Any]] = []
@@ -531,7 +534,7 @@ def _build_validation_detail(reason: Any) -> list[dict[str, Any]]:
         items.append({
             "label": label_map.get(key, key),
             "detail": detail,
-            "pass": value.get("pass", True),
+            "pass": value.get("verdict") != "FAIL",
         })
 
     # 검증 총평 추가
@@ -1044,7 +1047,7 @@ def _build_journey_validation(
     }
 
     all_pass = all(
-        v.get("pass", True)
+        v.get("verdict") != "FAIL"
         for v in checks.values()
         if isinstance(v, dict)
     )
@@ -1053,7 +1056,7 @@ def _build_journey_validation(
     for key, value in checks.items():
         if not isinstance(value, dict):
             continue
-        passed = value.get("pass", True)
+        passed = value.get("verdict") != "FAIL"
         # 실패 시 실패 항목만, 성공 시 전체
         if not all_pass and passed:
             continue

@@ -1,0 +1,107 @@
+────────────────────────────────
+## 예제 12: matrix_chart (2x2 매트릭스, 사분면 차트)
+────────────────────────────────
+
+데이터:
+유형: 2x2 사분면 매트릭스 (RFM 기반 고객 세분화)
+축:
+  X축 = 거래 빈도 (낮음 ↔ 높음)
+  Y축 = 자산 규모 (낮음 ↔ 높음)
+사분면별 고객 그룹:
+  Q1 (자산高+빈도高, 우상): "VIP 핵심고객" 비중 12%, 8,400명
+  Q2 (자산高+빈도低, 좌상): "잠자는 우량고객" 비중 18%, 12,600명
+  Q3 (자산低+빈도低, 좌하): "휴면 고객" 비중 45%, 31,500명
+  Q4 (자산低+빈도高, 우하): "활성 일반고객" 비중 25%, 17,500명
+
+계산 과정 (모델 내부 참조):
+  매트릭스 영역: x=180~700, y=80~400 (520×320)
+  4사분면 각 260×160:
+    Q2 (좌상): x=180~440, y=80~240,  cx=310, cy=160
+    Q1 (우상): x=440~700, y=80~240,  cx=570, cy=160
+    Q3 (좌하): x=180~440, y=240~400, cx=310, cy=320
+    Q4 (우하): x=440~700, y=240~400, cx=570, cy=320
+  사분면 색상: 비즈니스 가치 기준
+    Q1 (VIP): 진한 파랑 #1a56db (강조)
+    Q2 (잠자는 우량): 노랑 #f59e0b (액션 필요)
+    Q3 (휴면): 회색 #6b7280 (저우선)
+    Q4 (활성 일반): 녹색 #10b981 (유지)
+  분할선: 가로(y=240, x=180→700), 세로(x=440, y=80→400)
+  축 라벨:
+    X축 "거래 빈도" 중앙 (440, 460)
+    X축 양 끝: "낮음"(310,425), "높음"(570,425)
+    Y축 "자산 규모" 회전(115, 240)
+    Y축 양 끝: "높음"(155,165), "낮음"(155,325)
+  사분면 내부:
+    그룹명 (cx, cy-25): 17px bold
+    비중 % (cx, cy+5): 28px bold
+    인원수 (cx, cy+30): 14px
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">RFM 기반 고객 세분화 매트릭스</text>
+
+  <!-- ===== 4사분면 배경 ===== -->
+  <!-- Q2: 잠자는 우량고객 (좌상, 노랑) -->
+  <rect x="180" y="80" width="260" height="160" rx="4" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <!-- Q1: VIP 핵심고객 (우상, 파랑/강조) -->
+  <rect x="440" y="80" width="260" height="160" rx="4" fill="#dbeafe" stroke="#1a56db" stroke-width="2"/>
+  <!-- Q3: 휴면 고객 (좌하, 회색) -->
+  <rect x="180" y="240" width="260" height="160" rx="4" fill="#f3f4f6" stroke="#6b7280" stroke-width="1.5"/>
+  <!-- Q4: 활성 일반고객 (우하, 녹색) -->
+  <rect x="440" y="240" width="260" height="160" rx="4" fill="#d1fae5" stroke="#10b981" stroke-width="1.5"/>
+
+  <!-- ===== 사분면 분할선 (강조) ===== -->
+  <line x1="180" y1="240" x2="700" y2="240" stroke="#1f2937" stroke-width="1.5"/>
+  <line x1="440" y1="80" x2="440" y2="400" stroke="#1f2937" stroke-width="1.5"/>
+
+  <!-- ===== Q2: 잠자는 우량고객 (좌상) ===== -->
+  <text x="310" y="135" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">잠자는 우량고객</text>
+  <text x="310" y="180" text-anchor="middle" font-size="32" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">18%</text>
+  <text x="310" y="210" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">12,600명</text>
+
+  <!-- ===== Q1: VIP 핵심고객 (우상, 강조) ===== -->
+  <text x="570" y="135" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">VIP 핵심고객 ★</text>
+  <text x="570" y="180" text-anchor="middle" font-size="32" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">12%</text>
+  <text x="570" y="210" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">8,400명</text>
+
+  <!-- ===== Q3: 휴면 고객 (좌하) ===== -->
+  <text x="310" y="295" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">휴면 고객</text>
+  <text x="310" y="340" text-anchor="middle" font-size="32" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">45%</text>
+  <text x="310" y="370" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">31,500명</text>
+
+  <!-- ===== Q4: 활성 일반고객 (우하) ===== -->
+  <text x="570" y="295" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">활성 일반고객</text>
+  <text x="570" y="340" text-anchor="middle" font-size="32" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">25%</text>
+  <text x="570" y="370" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">17,500명</text>
+
+  <!-- ===== X축 (거래 빈도) ===== -->
+  <text x="310" y="425" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">낮음</text>
+  <text x="570" y="425" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">높음</text>
+  <text x="440" y="460" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">→ 거래 빈도</text>
+
+  <!-- ===== Y축 (자산 규모) ===== -->
+  <text x="155" y="165" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">높음</text>
+  <text x="155" y="325" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">낮음</text>
+  <text x="115" y="240" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937"
+        transform="rotate(-90,115,240)">↑ 자산 규모</text>
+</svg>

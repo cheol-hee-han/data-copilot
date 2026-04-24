@@ -38,10 +38,10 @@
 ### ❌ 안 된 것
 
 - **Torch CPU whl 반입 실빌드 미검증** — `deploy/offline-bundle/build.sh` 스크립트는 작성되었으나 Linux 빌드 머신에서 실제 dry-run으로 whl 수집 성공 여부 미확인
-- **gunicorn 위치 재검토** — `prod` extras에 있으나 폐쇄망에서는 필수이므로 main deps 승격 또는 설치 가이드 명시 필요
 
-### ✅ 해결됨 (2026-04-14)
+### ✅ 해결됨 (2026-04-14 / 2026-04-15)
 
+- ~~**gunicorn 위치 재검토**~~ → **main deps 승격** (2026-04-15). `sys_platform != "win32"` 마커로 Windows 개발환경은 skip, Linux 반입 시 `uv sync` 자동 설치. 런북 §6-2에 설치 확인 절차 명시
 - ~~**langsmith main deps 포함**~~ → pyproject/src/tests 전반에서 완전 제거
 - ~~**Torch CPU whl 반입 전략 미확정**~~ → `deploy/offline-bundle/build.sh`에서 torch CPU index + HF 모델 다운로드 통합 (실빌드 검증은 블로커 3)
 
@@ -78,8 +78,10 @@
 - src/agents/nodes/ 모듈 docstring·함수 docstring 완비
 
 ### ❌ 안 된 것
-- **embedding-search-integration.md(v1.2)** — 일부 MiniLM 384-dim 기준 분석이 남아 현재 BGE-M3 구현과 정렬 재확인 필요
 - **git M 대량 변경 미커밋**(섹션 2 중복)
+
+### ✅ 해결됨 (2026-04-15)
+- ~~**embedding-search-integration.md MiniLM 잔존**~~ → v1.4 로 갱신, BGE-M3 1024-dim + Sparse Named Vectors 현 구현 기준 전면 재서술
 
 ### ✅ 해결됨 (2026-04-14)
 - ~~**ES 레거시 잔존**~~ → `seed_elasticsearch.py`, `resources/connectors/elasticsearch/`,
@@ -174,7 +176,7 @@ deploy/
 
 1. embedding-search-integration.md를 BGE-M3 기준으로 재작성
 2. 요청 큐 드레인 명시적 구현 (SIGTERM 수신 시 신규 요청 거부)
-3. `static/embedded.html` vanilla JS 구조에 대한 유지보수 가이드(vendor JS 업데이트 절차 포함)
+3. ~~`static/embedded.html` vanilla JS 구조에 대한 유지보수 가이드(vendor JS 업데이트 절차 포함)~~ → **완료** (2026-04-15): [frontend-vendor-js-guide.md](frontend-vendor-js-guide.md)
 
 ---
 

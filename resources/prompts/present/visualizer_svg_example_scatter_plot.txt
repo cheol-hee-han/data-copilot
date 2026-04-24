@@ -1,0 +1,97 @@
+────────────────────────────────
+## 예제 7: scatter_plot (산점도 — 두 연속형 수치 상관)
+────────────────────────────────
+
+데이터:
+컬럼: [자산규모(백만원), 월거래빈도]
+행: [(50,8),(80,12),(120,15),(150,18),(200,22),(250,25),(320,30),(400,35),(500,42),(620,48),(750,55),(900,62)]
+
+계산 과정 (모델 내부 참조):
+  x_max = 900 × 1.15 ≈ 1035 → 올림 → 1000 (편의상 1000으로 두되 900은 그래프 우측 근접)
+  y_max = 62 × 1.15 ≈ 71 → 올림 → 80
+  plot: x=[90,760], y=[60,420], width=670, height=360
+  좌표 변환: px = 90 + (asset/1000)×670, py = 420 - (freq/80)×360
+
+  X축 그리드 (0,200,400,600,800,1000): px=90,224,358,492,626,760
+  Y축 그리드 (0,20,40,60,80): py=420,330,240,150,60
+
+  점 좌표:
+    (50,8)   → px=123.5, py=384
+    (80,12)  → px=143.6, py=366
+    (120,15) → px=170.4, py=352.5
+    (150,18) → px=190.5, py=339
+    (200,22) → px=224,   py=321
+    (250,25) → px=257.5, py=307.5
+    (320,30) → px=304.4, py=285
+    (400,35) → px=358,   py=262.5
+    (500,42) → px=425,   py=231
+    (620,48) → px=505.4, py=204
+    (750,55) → px=592.5, py=172.5
+    (900,62) → px=693,   py=141
+
+  점 표현: circle r=6, fill=#1a56db, fill-opacity=0.7, stroke=#1a56db, stroke-width=1.5
+  축 레이블: X축은 그리드 아래 y=448, Y축은 좌측 x=80
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">고객 자산규모와 거래빈도 상관관계</text>
+
+  <!-- Y축 그리드 + 레이블 -->
+  <line x1="90" y1="420" x2="760" y2="420" stroke="#d1d5db" stroke-width="1"/>
+  <text x="80" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">0</text>
+
+  <line x1="90" y1="330" x2="760" y2="330" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="334" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">20</text>
+
+  <line x1="90" y1="240" x2="760" y2="240" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="244" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">40</text>
+
+  <line x1="90" y1="150" x2="760" y2="150" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="154" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">60</text>
+
+  <line x1="90" y1="60" x2="760" y2="60" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="64" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">80</text>
+
+  <!-- X축 그리드 (수직선) -->
+  <line x1="90" y1="60" x2="90" y2="420" stroke="#d1d5db" stroke-width="1"/>
+
+  <line x1="224" y1="60" x2="224" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="224" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">200</text>
+
+  <line x1="358" y1="60" x2="358" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="358" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">400</text>
+
+  <line x1="492" y1="60" x2="492" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="492" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">600</text>
+
+  <line x1="626" y1="60" x2="626" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="626" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">800</text>
+
+  <line x1="760" y1="60" x2="760" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="760" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">1,000</text>
+
+  <text x="90" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">0</text>
+
+  <!-- 데이터 점 -->
+  <circle cx="123.5" cy="384" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="143.6" cy="366" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="170.4" cy="352.5" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="190.5" cy="339" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="224" cy="321" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="257.5" cy="307.5" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="304.4" cy="285" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="358" cy="262.5" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="425" cy="231" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="505.4" cy="204" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="592.5" cy="172.5" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+  <circle cx="693" cy="141" r="6" fill="#1a56db" fill-opacity="0.7" stroke="#1a56db" stroke-width="1.5"/>
+
+  <!-- 축 제목 -->
+  <text x="425" y="478" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">자산규모 (백만원)</text>
+  <text x="30" y="240" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151"
+        transform="rotate(-90,30,240)">월거래빈도</text>
+</svg>

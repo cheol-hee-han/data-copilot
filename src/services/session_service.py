@@ -88,6 +88,7 @@ async def get_session_detail(
                 process_summary=m.get("process_summary"),
                 result_data_meta=m.get("result_data_meta"),
                 visualization=m.get("visualization"),
+                clarification=m.get("clarification"),
             )
             for m in messages
         ],

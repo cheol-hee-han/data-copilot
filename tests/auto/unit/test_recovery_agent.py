@@ -54,7 +54,7 @@ def _ki(
     **kw,
 ) -> KnowledgeItem:
     return KnowledgeItem(
-        key=key, knowledge_id=kid, status=status, **kw,
+        key=key, id=kid, status=status, **kw,
     )
 
 
@@ -386,60 +386,3 @@ class TestBuildFailureSummary:
         assert "도구 호출" in summary
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ASK_USER 기준 변경 (should_ask_user) — confidence_scorer 서비스
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class TestShouldAskUser:
-    """선 추론 후 표시 정책 — ASK_USER 기준 테스트."""
-
-    def test_simple_conflict_no_ask(self):
-        """단순 용어 모호성 (단일 테이블) → ASK_USER 아님."""
-        from src.services.confidence_scorer import should_ask_user
-        reason = _reason(
-            knowledge_items=[
-                KnowledgeItem(
-                    key="예금신규",
-                    knowledge_id="K1",
-                    status=ConfidenceStatus.CONFLICTED,
-                    is_critical=True,
-                    evidence=["TB_A.DEPOSIT_AMT 또는 건수일 수 있음"],
-                ),
-            ],
-        )
-        assert should_ask_user(reason) is False
-
-    def test_multi_table_conflict_ask(self):
-        """서로 다른 테이블 충돌 → ASK_USER."""
-        from src.services.confidence_scorer import should_ask_user
-        reason = _reason(
-            knowledge_items=[
-                KnowledgeItem(
-                    key="여신잔액",
-                    knowledge_id="K1",
-                    status=ConfidenceStatus.CONFLICTED,
-                    is_critical=True,
-                    evidence=[
-                        "TB_LOAN_BAL 기준 잔액",
-                        "TB_CREDIT_LINE 기준 한도액",
-                    ],
-                ),
-            ],
-        )
-        assert should_ask_user(reason) is True
-
-    def test_non_critical_conflict_no_ask(self):
-        """non-critical 항목 충돌 → ASK_USER 아님."""
-        from src.services.confidence_scorer import should_ask_user
-        reason = _reason(
-            knowledge_items=[
-                KnowledgeItem(
-                    key="x",
-                    knowledge_id="K1",
-                    status=ConfidenceStatus.CONFLICTED,
-                    is_critical=False,
-                    evidence=["TB_A 기준", "TB_B 기준"],
-                ),
-            ],
-        )
-        assert should_ask_user(reason) is False

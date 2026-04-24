@@ -39,6 +39,7 @@ from langgraph.types import Command
 
 from src.agents.graph.pipeline import get_compiled_app
 from src.agents.models.response import PipelineResult
+from src.agents.models.user_messages import ERR_GENERIC
 from src.agents.state.state import PipelineState, QueryStatus
 from src.connectors.manager import get_connector_manager
 from src.models.result import SQLResult, VisualizationData
@@ -70,6 +71,8 @@ async def run_pipeline(
     client_ip: str | None = None,
     user_agent: str | None = None,
     on_event: OnEventCallback | None = None,
+    streaming_enabled: bool = False,
+    initial_turn_snapshots: list[Any] | None = None,
 ) -> PipelineResult:
     """파이프라인을 실행하고 최종 결과를 반환한다.
 
@@ -109,17 +112,22 @@ async def run_pipeline(
 
         # ── 0-1. 유저 메시지 조기 저장 (서버 크래시 시 메시지 유실 방지) ──
         _user_message_saved_early = False
+        _early_user_message_uuid: str | None = None
+        _early_user_message_seq: int | None = None
         try:
             _pool = get_connector_manager().checkpointer_pool
             if _pool is not None:
                 from src.services.message_store import save_message
-                await save_message(
+                _early_result = await save_message(
                     _pool,
                     thread_id=session_id, role="user", content=user_input,
                     client_ip=client_ip, user_agent=user_agent,
                     message_type="normal", request_id=session_id,
                 )
-                _user_message_saved_early = True
+                if _early_result is not None:
+                    _user_message_saved_early = True
+                    _early_user_message_uuid = _early_result[0]
+                    _early_user_message_seq = _early_result[1]
         except Exception:
             logger.warning(
                 "유저 메시지 조기 저장 실패 — 파이프라인 완료 후 재시도",
@@ -171,6 +179,10 @@ async def run_pipeline(
             client_ip=client_ip,
             user_agent=user_agent,
             user_message_saved_early=_user_message_saved_early,
+            early_user_message_uuid=_early_user_message_uuid,
+            early_user_message_seq=_early_user_message_seq,
+            streaming_enabled=streaming_enabled,
+            initial_turn_snapshots=initial_turn_snapshots or [],
         )
     finally:
         await clear_active(session_id, _run_key)
@@ -279,9 +291,14 @@ async def _execute_and_finalize(
     client_ip: str | None,
     user_agent: str | None,
     user_message_saved_early: bool = False,
+    early_user_message_uuid: str | None = None,
+    early_user_message_seq: int | None = None,
+    streaming_enabled: bool = False,
+    initial_turn_snapshots: list[Any] | None = None,
 ) -> PipelineResult:
     """그래프 실행, interrupt/정상 분기, 메시지 저장, 에러 처리."""
     user_message_saved = user_message_saved_early
+    raw_state: dict[str, Any] | None = None
 
     try:
         if is_interrupt_pending:
@@ -304,6 +321,15 @@ async def _execute_and_finalize(
                 session_id=session_id,
                 conversation_history=conversation_history or [],
                 turn_id=str(uuid.uuid4()),
+                streaming_enabled=streaming_enabled,
+                # save_turn_snapshot이 TurnSnapshot.user_message_seq 매핑 키로 사용.
+                # 조기 저장 성공 시 채번된 seq를 전파하고, 실패 시 None 유지.
+                current_user_message_seq=early_user_message_seq,
+                # 세션 재접속 시 복원된 스냅샷 (없으면 빈 리스트).
+                # LangGraph checkpointer가 존재하는 경우 기존 상태를 이어받으므로
+                # 이 값은 checkpointer가 없는 첫 접속 또는 서버 재시작 후 재접속 시에만
+                # 실제로 적용된다. checkpointer 상태 복원이 우선.
+                turn_snapshots=initial_turn_snapshots or [],
             )
 
             raw_state = await app.ainvoke(
@@ -326,10 +352,6 @@ async def _execute_and_finalize(
 
         if clarification_data is not None:
             _record_run_end_safe(handler, raw_state or {}, "")
-            _turn_id = ""
-            if isinstance(raw_state, dict):
-                _turn_id = raw_state.get("turn_id", "")
-            handler.save(turn_id=_turn_id)
             clear_query_context()
 
             question = (
@@ -337,31 +359,40 @@ async def _execute_and_finalize(
                 if isinstance(clarification_data, dict)
                 else ""
             )
+            # ── 메시지 저장 → seq 획득 → trace 저장 ──
+            _user_message_uuid = early_user_message_uuid
+            _assistant_message_uuid = None
+            _trace_seq = 0
             try:
                 from src.services.message_store import save_message
                 _pool = get_connector_manager().checkpointer_pool
                 if _pool is None:
                     raise RuntimeError("pool unavailable")
-                _user_message_uuid = None
                 if not user_message_saved:
-                    _user_message_uuid = await save_message(
+                    _user_saved = await save_message(
                         _pool,
                         thread_id=session_id, role="user", content=user_input,
                         client_ip=client_ip, user_agent=user_agent,
                         message_type="clarification", request_id=session_id,
                     )
+                    if _user_saved:
+                        _user_message_uuid = _user_saved[0]
                     user_message_saved = True
-                _assistant_message_uuid = await save_message(
+                _asst_saved = await save_message(
                     _pool,
                     thread_id=session_id, role="assistant", content=question,
                     client_ip=client_ip, user_agent=user_agent,
                     message_type="clarification", request_id=session_id,
                     status="success",
+                    metadata={"clarification": clarification_data},
                 )
+                if _asst_saved:
+                    _assistant_message_uuid = _asst_saved[0]
+                    _trace_seq = _asst_saved[1]
             except Exception:
                 logger.warning("명확화 메시지 저장 실패", exc_info=True)
-                _user_message_uuid = None
-                _assistant_message_uuid = None
+
+            handler.save(turn_seq=_trace_seq)
 
             clarification_result = PipelineResult(
                 response=question,
@@ -372,10 +403,18 @@ async def _execute_and_finalize(
             clarification_result.message_uuid = _assistant_message_uuid
             return clarification_result
 
-        # ── 정상 완료 결과 구성 ──
-        pipeline_result = _build_result(handler, raw_state)
-
-        # ── 메시지 저장 (실패해도 파이프라인 결과에 영향 없음) ──
+        # ── 메시지 저장 → seq 획득 (실패해도 파이프라인 결과에 영향 없음) ──
+        _user_message_uuid = early_user_message_uuid
+        _assistant_message_uuid = None
+        _trace_seq = 0
+        _response = raw_state.get(
+            "formatted_response", "응답을 생성할 수 없습니다.",
+        ) if isinstance(raw_state, dict) else "응답을 생성할 수 없습니다."
+        _status_val = raw_state.get("status") if isinstance(raw_state, dict) else None
+        _is_cancelled = (
+            _status_val == QueryStatus.CANCELLED
+            or _status_val == QueryStatus.CANCELLED.value
+        )
         try:
             from src.config import settings
             from src.services.message_store import save_message
@@ -383,21 +422,22 @@ async def _execute_and_finalize(
             if _pool is None:
                 raise RuntimeError("pool unavailable")
 
-            _user_message_uuid = None
             if not user_message_saved:
-                _user_message_uuid = await save_message(
+                _user_saved = await save_message(
                     _pool,
                     thread_id=session_id, role="user", content=user_input,
                     client_ip=client_ip, user_agent=user_agent,
                     message_type="normal", request_id=session_id,
                 )
+                if _user_saved:
+                    _user_message_uuid = _user_saved[0]
                 user_message_saved = True
 
-            _reason = raw_state.get("reason")
-            _assistant_message_uuid = await save_message(
+            _reason = raw_state.get("reason") if isinstance(raw_state, dict) else None
+            _asst_saved = await save_message(
                 _pool,
                 thread_id=session_id, role="assistant",
-                content=pipeline_result.response,
+                content=_response,
                 client_ip=client_ip, user_agent=user_agent,
                 message_type="normal",
                 intent=str(raw_state.get("intent", "")),
@@ -407,10 +447,7 @@ async def _execute_and_finalize(
                     else None
                 ),
                 request_id=session_id,
-                status=(
-                    "cancelled" if pipeline_result.cancelled
-                    else "success"
-                ),
+                status="cancelled" if _is_cancelled else "success",
                 exit_node=(
                     handler.trace.node_path[-1]
                     if handler.trace.node_path
@@ -435,90 +472,176 @@ async def _execute_and_finalize(
                     and _reason.target_db
                     else None
                 ),
-                metadata={
-                    "trace_log": (
-                        [e.model_dump() for e in pipeline_result.trace_log]
-                        if pipeline_result.trace_log
-                        else []
-                    ),
-                    "insight": pipeline_result.insight,
-                    "visualization": (
-                        pipeline_result.visualization.model_dump(mode="json")
-                        if pipeline_result.visualization
-                        else None
-                    ),
-                    "sql_result": {
-                        "columns": (
-                            pipeline_result.sql_result.columns
-                            if pipeline_result.sql_result
-                            else []
-                        ),
-                        "row_count": (
-                            pipeline_result.sql_result.row_count
-                            if pipeline_result.sql_result
-                            else 0
-                        ),
-                    },
-                    "trace_files": pipeline_result.trace_files,
-                    "result_data": (
-                        pipeline_result.result_data
-                    ),
-                    "process_summary": (
-                        pipeline_result.process_summary
-                    ),
-                },
+                metadata={},
             )
-
-            pipeline_result.message_uuid = _assistant_message_uuid
-            pipeline_result.user_message_uuid = _user_message_uuid
+            if _asst_saved:
+                _assistant_message_uuid = _asst_saved[0]
+                _trace_seq = _asst_saved[1]
         except Exception:
             logger.warning("메시지 저장 실패 — 파이프라인 결과는 정상 반환", exc_info=True)
 
+        # ── 정상 완료 결과 구성 (trace 저장 포함) ──
+        pipeline_result = _build_result(
+            handler, raw_state, turn_seq=_trace_seq,
+        )
+
+        # ── metadata 보강: trace_files 등은 _build_result 이후에만 확정 ──
+        if _assistant_message_uuid:
+            try:
+                from src.services.message_store import (
+                    update_message_metadata,
+                )
+                _pool = get_connector_manager().checkpointer_pool
+                if _pool:
+                    await update_message_metadata(
+                        _pool,
+                        message_uuid=_assistant_message_uuid,
+                        metadata={
+                            "trace_log": (
+                                [e.model_dump() for e in pipeline_result.trace_log]
+                                if pipeline_result.trace_log
+                                else []
+                            ),
+                            "insight": pipeline_result.insight,
+                            "visualization": (
+                                pipeline_result.visualization.model_dump(mode="json")
+                                if pipeline_result.visualization
+                                else None
+                            ),
+                            "sql_result": {
+                                "columns": (
+                                    pipeline_result.sql_result.columns
+                                    if pipeline_result.sql_result
+                                    else []
+                                ),
+                                "row_count": (
+                                    pipeline_result.sql_result.row_count
+                                    if pipeline_result.sql_result
+                                    else 0
+                                ),
+                            },
+                            "trace_files": pipeline_result.trace_files,
+                            "result_data": pipeline_result.result_data,
+                            "process_summary": pipeline_result.process_summary,
+                        },
+                    )
+            except Exception:
+                logger.debug("메시지 metadata 보강 실패", exc_info=True)
+
+        pipeline_result.message_uuid = _assistant_message_uuid
+        pipeline_result.user_message_uuid = _user_message_uuid
         return pipeline_result
 
     except Exception as e:
-        # ── 에러 트레이스 저장 ──
-        try:
-            handler.end_run(
-                final_status="error",
-                error_message=str(e),
-            )
-            handler.save()
-        except Exception:
-            logger.debug("에러 trace 저장 실패", exc_info=True)
-
-        # ── 에러 메시지 기록 (실패해도 예외 전파) ──
+        # ── 에러 메시지 기록 → seq 획득 → 트레이스 저장 ──
+        _error_trace_seq = 0
+        _error_trace_files: list[dict[str, str]] = []
+        _error_user_uuid: str | None = early_user_message_uuid
+        _error_asst_uuid: str | None = None
         try:
             from src.services.message_store import save_message
             _pool = get_connector_manager().checkpointer_pool
             if _pool is None:
-                raise  # noqa: PLE0704 — pool 없으면 메시지 저장 건너뛰기
+                raise RuntimeError("pool unavailable")
             if not user_message_saved:
-                await save_message(
+                _err_user_saved = await save_message(
                     _pool,
                     thread_id=session_id, role="user", content=user_input,
                     client_ip=client_ip, user_agent=user_agent,
                     message_type="error", request_id=session_id,
                 )
-            await save_message(
+                if _err_user_saved:
+                    _error_user_uuid = _err_user_saved[0]
+            _err_saved = await save_message(
                 _pool,
                 thread_id=session_id, role="assistant",
-                content="처리 중 오류가 발생했습니다.",
+                content=ERR_GENERIC,
                 client_ip=client_ip, user_agent=user_agent,
                 message_type="error", status="failure",
+                request_id=session_id,
                 error_type=type(e).__name__,
                 error_message=str(e),
             )
+            if _err_saved:
+                _error_asst_uuid = _err_saved[0]
+                _error_trace_seq = _err_saved[1]
         except Exception:
             logger.warning("에러 메시지 저장 실패", exc_info=True)
-        raise
+
+        try:
+            handler.end_run(
+                final_status="error",
+                error_message=str(e),
+            )
+            _error_trace_files = handler.save(
+                turn_seq=_error_trace_seq,
+            )
+        except Exception:
+            logger.debug("에러 trace 저장 실패", exc_info=True)
+
+        _error_insight: dict[str, Any] = {}
+        try:
+            if isinstance(raw_state, dict):
+                _error_insight = _build_safe_insight(raw_state)
+        except Exception:
+            logger.debug("에러 경로 insight 생성 실패", exc_info=True)
+
+        _error_summary: dict[str, Any] | None = None
+        try:
+            if isinstance(raw_state, dict):
+                from src.services.process_summary_builder import (
+                    build_process_summary,
+                )
+                _ps = PipelineState(**raw_state)
+                _error_summary = build_process_summary(_ps)
+        except Exception:
+            logger.debug("에러 경로 process_summary 생성 실패", exc_info=True)
+
+        # ── metadata 보강: trace_files 등 ──
+        if _error_asst_uuid:
+            try:
+                from src.services.message_store import (
+                    update_message_metadata,
+                )
+                _pool = get_connector_manager().checkpointer_pool
+                if _pool:
+                    await update_message_metadata(
+                        _pool,
+                        message_uuid=_error_asst_uuid,
+                        metadata={
+                            "trace_files": _error_trace_files,
+                            "insight": _error_insight,
+                            "process_summary": _error_summary,
+                        },
+                    )
+            except Exception:
+                logger.debug("에러 경로 metadata 보강 실패", exc_info=True)
+
+        clear_query_context()
+        return PipelineResult(
+            response=ERR_GENERIC,
+            trace_files=_error_trace_files,
+            insight=_error_insight,
+            process_summary=_error_summary,
+            error=True,
+            message_uuid=_error_asst_uuid,
+            user_message_uuid=_error_user_uuid,
+        )
 
 
 def _build_result(
     handler: DataCopilotCallbackHandler,
     result: dict[str, Any],
+    *,
+    turn_seq: int = 0,
 ) -> PipelineResult:
-    """그래프 실행 결과에서 PipelineResult를 구성한다."""
+    """그래프 실행 결과에서 PipelineResult를 구성한다.
+
+    Args:
+        handler: 트레이스 콜백 핸들러.
+        result: 그래프 실행 결과 dict.
+        turn_seq: DB 메시지 seq (trace 파일명에 사용).
+    """
     response = result.get(
         "formatted_response",
         "응답을 생성할 수 없습니다.",
@@ -531,10 +654,7 @@ def _build_result(
 
     _record_sql_metrics(handler, result)
     _record_run_end(handler, result, response)
-    _turn_id = ""
-    if isinstance(result, dict):
-        _turn_id = result.get("turn_id", "")
-    trace_files = handler.save(turn_id=_turn_id)
+    trace_files = handler.save(turn_seq=turn_seq)
 
     logger.info("파이프라인 실행 완료")
     clear_query_context()
@@ -543,6 +663,10 @@ def _build_result(
     _cancelled = (
         _status == QueryStatus.CANCELLED
         or _status == QueryStatus.CANCELLED.value
+    )
+    _error = (
+        _status == QueryStatus.ERROR
+        or _status == QueryStatus.ERROR.value
     )
 
     return PipelineResult(
@@ -553,6 +677,11 @@ def _build_result(
         sql_result=sql_result,
         trace_files=trace_files,
         cancelled=_cancelled,
+        error=_error,
+        streaming_delivered=bool(
+            result.get("streaming_delivered")
+            if isinstance(result, dict) else False
+        ),
         preprocessed_input=result.get(
             "preprocessed_input", "",
         ),

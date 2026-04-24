@@ -23,7 +23,7 @@ from src.models.enums import HistoryDecision
 _parse_intent_response = None  # import 에러 방지용 placeholder
 from src.services.sql_safety_checker import validate_sql_safety
 from src.agents.nodes.interpret.intent_classifier import intent_classifier_node
-from src.agents.nodes.interpret.query_normalizer import normalize_query_node
+from src.agents.nodes.interpret.query_normalizer import query_normalizer_node
 from src.services.input_sanitizer import sanitize
 
 
@@ -115,7 +115,6 @@ def _make_normalization_mock(
 
 _INTENT_LLM = "src.services.intent_classifier.llm_call_with_parse_retry"
 _NORM_LLM = "src.services.query_normalizer.llm_call_with_parse_retry"
-_NORM_RECORD = "src.services.query_normalizer.record_prompt_variables"
 _DISPATCH = "src.utils.tracker.dispatch.dispatch_tracking_event"
 
 
@@ -314,14 +313,13 @@ class TestNormalizationNode:
                     },
                 ],
             )),
-            patch(_NORM_RECORD, new_callable=AsyncMock),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-            result = await normalize_query_node(state)
+            result = await query_normalizer_node(state)
 
         assert result["status"] == QueryStatus.QUERY_NORMALIZED
         nq = result["normalized_query"]
@@ -389,8 +387,8 @@ class TestNormalizationNode:
         phase1_raw = json.dumps(phase1_data, ensure_ascii=False)
         phase2_raw = json.dumps(phase2_data, ensure_ascii=False)
 
-        # _call_llm_and_parse 내부에서 llm_call_with_parse_retry를 호출하고
-        # parsed(dict)만 반환. mock은 (raw, parsed) 튜플을 반환해야 함.
+        # _call_llm_and_parse 는 llm_call_with_parse_retry 가 반환한
+        # (raw, parsed) 튜플을 그대로 전달한다. mock 은 (raw, parsed) 튜플 반환.
         mock_llm = AsyncMock(side_effect=[
             (phase1_raw, phase1_data),
             (phase2_raw, phase2_data),
@@ -401,14 +399,13 @@ class TestNormalizationNode:
                 "src.services.query_normalizer.settings",
             ) as mock_settings,
             patch(_NORM_LLM, mock_llm),
-            patch(_NORM_RECORD, new_callable=AsyncMock),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
             mock_settings.normalization_phase2_enabled = True
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-            result = await normalize_query_node(state)
+            result = await query_normalizer_node(state)
 
         nq = result["normalized_query"]
         assert nq.intent.primary == "RANK"
@@ -464,14 +461,13 @@ class TestNormalizationNode:
                 "src.services.query_normalizer.settings",
             ) as mock_settings,
             patch(_NORM_LLM, AsyncMock(return_value=(raw, nq_data))),
-            patch(_NORM_RECORD, new_callable=AsyncMock),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-            result = await normalize_query_node(state)
+            result = await query_normalizer_node(state)
 
         nq = result["normalized_query"]
         assert nq.output_hint.format == "SPEC_SHEET"
@@ -496,14 +492,13 @@ class TestNormalizationNode:
                 _NORM_LLM,
                 AsyncMock(side_effect=Exception("LLM 연결 실패")),
             ),
-            patch(_NORM_RECORD, new_callable=AsyncMock),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-            result = await normalize_query_node(state)
+            result = await query_normalizer_node(state)
 
         # 실패해도 파이프라인 계속 진행
         assert result["status"] == QueryStatus.QUERY_NORMALIZED
@@ -562,14 +557,13 @@ class TestFullFlowWithNormalization:
                     },
                 ],
             )),
-            patch(_NORM_RECORD, new_callable=AsyncMock),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-            norm_result = await normalize_query_node(state)
+            norm_result = await query_normalizer_node(state)
         state = state.model_copy(update=norm_result)
         assert state.normalized_query is not None
         assert state.status == QueryStatus.QUERY_NORMALIZED
@@ -602,14 +596,13 @@ class TestFullFlowWithNormalization:
                 "src.services.query_normalizer.settings",
             ) as mock_settings,
             patch(_NORM_LLM, _make_normalization_mock("AGGREGATE")),
-            patch(_NORM_RECORD, new_callable=AsyncMock),
             patch(_DISPATCH, new_callable=AsyncMock),
         ):
             mock_settings.normalization_phase2_enabled = False
             mock_settings.normalization_max_tokens = 3000
             mock_settings.llm_model = "test-model"
             mock_settings.llm_long_timeout = 30.0
-            norm_result = await normalize_query_node(state)
+            norm_result = await query_normalizer_node(state)
         state = state.model_copy(update=norm_result)
 
         # SQL 검증 (서비스 레이어 직접 호출)

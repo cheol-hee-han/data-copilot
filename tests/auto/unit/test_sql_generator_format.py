@@ -22,8 +22,15 @@ import json
 
 import pytest
 
-from src.agents.state.state import ColumnInfo, TableMeta, SelectionStatus
+from src.agents.state.state import (
+    ColumnInfo,
+    PipelineState,
+    ReasoningState,
+    SelectionStatus,
+    TableMeta,
+)
 from src.agents.nodes.reason.sql_generator import (
+    _build_agentic_prompt,
     _format_table_for_sql_prompt,
     _format_table_header,
     _format_columns,
@@ -102,10 +109,10 @@ def test_format_column_line_with_col_type():
 
 
 def test_format_column_line_pk_marker():
-    """is_pk=True이면 [PK] 마커 포함."""
+    """is_pk=True이면 (PK) 마커 포함."""
     c = _col("CUST_NO", is_pk=True)
     result = _format_column_line(c)
-    assert "[PK]" in result
+    assert "(PK)" in result
 
 
 def test_format_column_line_no_pk_marker():
@@ -131,7 +138,7 @@ def test_format_column_line_full():
     assert "LOAN_NO" in result
     assert "(대출번호)" in result
     assert "VARCHAR(20)" in result
-    assert "[PK]" in result
+    assert "(PK)" in result
     assert "대출 일련번호" in result
 
 
@@ -291,7 +298,7 @@ def test_format_table_for_sql_prompt_with_columns():
     assert "  컬럼:" in result
     assert "CUST_NO" in result
     assert "CUST_NM" in result
-    assert "[PK]" in result
+    assert "(PK)" in result
 
 
 def test_format_table_for_sql_prompt_no_columns():
@@ -598,3 +605,52 @@ class TestBuildAssumptionSignals:
         assert len(signals) == 1
         assert signals[0].question == "'잔액' 해석"
         assert signals[0].inferred_value == "기말잔액"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# _build_agentic_prompt — handoff_note 주입 (Path F' §6, §7)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class TestBuildAgenticPromptHandoffNote:
+    """_build_agentic_prompt 의 {handoff_note} 치환 검증.
+
+    Path F' 설계 §6: REGENERATE 경로에서 handoff_note 가 sql_generator 시스템
+    프롬프트에 주입되어야 한다. 빈 값은 '(없음)'으로 치환된다.
+    """
+
+    def _minimal_reason(self) -> ReasoningState:
+        return ReasoningState(query_decomposition={"output_hint": {}})
+
+    def test_empty_handoff_note_rendered_as_placeholder(self) -> None:
+        """빈 handoff_note 는 '(없음)'으로 치환된다 (기본 동작 유지)."""
+        reason = self._minimal_reason()
+        state = PipelineState(handoff_note="")
+        prompt, _user, variables = _build_agentic_prompt(
+            reason, "이번 달 여신 보여줘", dialect="postgres", state=state,
+        )
+        # 치환 변수 딕셔너리에 handoff_note 키가 (없음)으로 들어갔는지
+        assert variables.get("handoff_note") == "(없음)"
+        # 프롬프트 텍스트에도 반영되는지 (render_prompt 가 변수를 본문 주입)
+        assert "(없음)" in prompt
+
+    def test_non_empty_handoff_note_injected_into_prompt(self) -> None:
+        """REGENERATE 오케스트레이터 지시가 시스템 프롬프트에 주입된다."""
+        reason = self._minimal_reason()
+        note = "### SQL 생성 지시\n컬럼 별칭을 '지점명'으로 변경하세요."
+        state = PipelineState(handoff_note=note)
+        prompt, _user, variables = _build_agentic_prompt(
+            reason, "다시 생성해줘", dialect="postgres", state=state,
+        )
+        assert variables.get("handoff_note") == note
+        assert "SQL 생성 지시" in prompt
+        assert "지점명" in prompt
+
+    def test_whitespace_only_handoff_note_treated_as_empty(self) -> None:
+        """공백만 있는 handoff_note 도 '(없음)'으로 처리된다."""
+        reason = self._minimal_reason()
+        state = PipelineState(handoff_note="   \n\t  ")
+        _prompt, _user, variables = _build_agentic_prompt(
+            reason, "질의", dialect="postgres", state=state,
+        )
+        assert variables.get("handoff_note") == "(없음)"

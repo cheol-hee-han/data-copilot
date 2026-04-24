@@ -22,12 +22,14 @@ pool 직접 전달 패턴:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from psycopg.types.json import Json
+from psycopg.types.json import Jsonb
 
-logger = logging.getLogger(__name__)
+from src.config import settings
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # ── 실패 버퍼: 세션별 미저장 메시지 보관 ──
 _pending_messages: dict[str, list[dict[str, Any]]] = {}
@@ -60,11 +62,11 @@ async def save_message(
     sql_explanation: str | None = None,
     target_db: str | None = None,
     metadata: dict | None = None,
-) -> str | None:
+) -> tuple[str, int] | None:
     """메시지를 저장한다. seq는 DB 레벨 원자적 채번.
 
     Returns:
-        저장된 메시지의 message_uuid (UUID). 실패 시 None.
+        (message_uuid, seq) 튜플. 실패 시 None.
 
     실패 시 _pending_messages 버퍼에 보관하고 다음 호출 시 재시도.
     """
@@ -88,7 +90,7 @@ async def save_message(
         "executed_sql": executed_sql,
         "sql_explanation": sql_explanation,
         "target_db": target_db,
-        "metadata": Json(metadata or {}),
+        "metadata": Jsonb(metadata or {}),
     }
 
     # 이전 실패 메시지 + 현재 메시지를 모아서 저장
@@ -97,6 +99,7 @@ async def save_message(
 
     saved_count = 0
     last_message_uuid: str | None = None
+    last_seq: int = 0
     try:
         async with pool.connection() as conn:
             for msg in pending:
@@ -126,25 +129,77 @@ async def save_message(
                         %(executed_sql)s, %(sql_explanation)s,
                         %(target_db)s, %(metadata)s
                     )
-                    RETURNING message_uuid::text
+                    RETURNING message_uuid::text, seq
                     """,
                     msg,
                 )
                 result = await row.fetchone()
-                last_message_uuid = result["message_uuid"] if result else None
+                if result:
+                    last_message_uuid = result["message_uuid"]
+                    last_seq = result["seq"]
+                else:
+                    logger.error(
+                        "INSERT RETURNING 결과 없음",
+                        thread_id=msg.get("thread_id"),
+                        role=msg.get("role"),
+                    )
                 saved_count += 1
     except Exception:
         unsaved = pending[saved_count:]
+        max_pending = settings.message_store_pending_max
+        dropped = 0
+        if len(unsaved) > max_pending:
+            # 상한 초과 시 오래된 항목부터 드롭 (최신 이력 우선 보존)
+            dropped = len(unsaved) - max_pending
+            unsaved = unsaved[-max_pending:]
         if unsaved:
             _pending_messages[thread_id] = unsaved
         logger.warning(
-            "메시지 저장 실패 — %d/%d건 저장, %d건 버퍼 보관",
-            saved_count, len(pending), len(unsaved),
+            "메시지 저장 실패",
+            saved=saved_count,
+            total=len(pending),
+            buffered=len(unsaved),
+            dropped=dropped,
             exc_info=True,
         )
         return None
 
-    return last_message_uuid
+    return (last_message_uuid, last_seq)
+
+
+# ============================================================================
+# 메시지 metadata 보강
+# ============================================================================
+
+async def update_message_metadata(
+    pool: Any,
+    *,
+    message_uuid: str,
+    metadata: dict,
+) -> None:
+    """저장된 메시지의 metadata 컬럼을 갱신한다.
+
+    trace 파일명 등 _build_result 이후에만 확정되는 정보를 보강할 때 사용한다.
+    """
+    if not message_uuid:
+        logger.error("update_message_metadata 호출 시 message_uuid 누락", message_uuid=message_uuid)
+        return
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(
+                """
+                UPDATE checkpoint_dc_messages
+                   SET metadata = COALESCE(metadata, '{}'::jsonb) || %(metadata)s
+                 WHERE message_uuid = %(message_uuid)s::uuid
+                """,
+                {"message_uuid": message_uuid, "metadata": Jsonb(metadata)},
+            )
+    except Exception:
+        logger.warning(
+            "메시지 metadata 갱신 실패",
+            message_uuid=message_uuid,
+            exc_info=True,
+        )
 
 
 # ============================================================================
@@ -193,6 +248,10 @@ async def get_session_messages_for_ui(
     """UI에서 과거 세션을 열 때 전체 메시지의 경량 데이터를 반환한다 (Tier 1).
 
     metadata 중 visualization은 Tier 1에 포함. 나머지(trace 등)는 Tier 2로 개별 로드.
+
+    Path F' §3.5.3: process_summary 의 hydration 전용 필드(`_raw`,
+    `_knowledge_items`, `_query_decomposition`)는 UI 에 전송할 필요가 없으므로
+    jsonb `#-` 연산자로 제거하여 Tier 1 payload 를 경량화한다.
     """
     async with pool.connection() as conn:
         rows = await conn.execute(
@@ -202,9 +261,14 @@ async def get_session_messages_for_ui(
                    created_at,
                    (metadata != '{}'::jsonb) AS has_metadata,
                    metadata->'trace_files' AS trace_files,
-                   metadata->'process_summary' AS process_summary,
+                   (metadata->'process_summary')
+                     #- '{interpretation,_raw}'
+                     #- '{context,_knowledge_items}'
+                     #- '{_query_decomposition}'
+                     AS process_summary,
                    metadata->'result_data' AS result_data_meta,
-                   metadata->'visualization' AS visualization
+                   metadata->'visualization' AS visualization,
+                   metadata->'clarification' AS clarification
             FROM checkpoint_dc_messages
             WHERE thread_id = %(thread_id)s
             ORDER BY seq

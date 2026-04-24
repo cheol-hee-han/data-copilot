@@ -125,10 +125,12 @@ class TestReasoningState:
         assert len(ki.evidence) == 1
 
     def test_loop_guard_escalation(self):
-        from src.agents.state.state import LoopGuard
+        from src.agents.state.state import MAX_LOCAL_FIXES, LoopGuard
         lg = LoopGuard()
         assert not lg.should_escalate_to_structural()
-        lg.increment_local_fix()
+        for _ in range(MAX_LOCAL_FIXES - 1):
+            lg.increment_local_fix()
+        assert not lg.should_escalate_to_structural()
         lg.increment_local_fix()
         assert lg.should_escalate_to_structural()
 
@@ -248,45 +250,6 @@ class TestConfidenceScorer:
         )
         assert evaluate_readiness(state.reason) == (
             ReadinessVerdict.TERMINATE
-        )
-
-    def test_evaluate_readiness_ask_user(self):
-        from src.agents.state.state import (
-            PipelineState,
-            ReasoningState,
-            Hypothesis,
-            HypothesisStatus,
-            KnowledgeItem,
-            ConfidenceStatus,
-        )
-        from src.services.confidence_scorer import (
-            ReadinessVerdict,
-            evaluate_readiness,
-        )
-        state = PipelineState(
-            reason=ReasoningState(
-                knowledge_items=[
-                    KnowledgeItem(
-                        key="x",
-                        status=ConfidenceStatus.CONFLICTED,
-                        is_critical=True,
-                        evidence=[
-                            "TB_LOAN_MASTER 확인",
-                            "TB_LOAN_DETAIL 상이",
-                        ],
-                    ),
-                ],
-                hypotheses=[
-                    Hypothesis(
-                        hypothesis_id="H1",
-                        description="t",
-                        status=HypothesisStatus.PENDING,
-                    ),
-                ],
-            ),
-        )
-        assert evaluate_readiness(state.reason) == (
-            ReadinessVerdict.ASK_USER
         )
 
     def test_evaluate_readiness_explore(self):
@@ -660,36 +623,6 @@ class TestNodeLogic:
         )
         result = await result_finalizer_node(state)
         assert result["reason"].final_status == FinalStatus.FAILURE
-
-    @pytest.mark.asyncio
-    async def test_result_finalizer_ask_user(self):
-        from src.agents.state.state import (
-            PipelineState,
-            ReasoningState,
-            KnowledgeItem,
-            ConfidenceStatus,
-            Phase,
-        )
-        from src.agents.nodes.reason.result_finalizer import (
-            result_finalizer_node,
-        )
-        state = PipelineState(
-            reason=ReasoningState(
-                phase=Phase.VERIFYING,
-                knowledge_items=[
-                    KnowledgeItem(
-                        key="test",
-                        status=ConfidenceStatus.CONFLICTED,
-                        evidence=["소스A: 값1", "소스B: 값2"],
-                    ),
-                ],
-            ),
-        )
-        result = await result_finalizer_node(state)
-        signals = result.get("pending_signals", [])
-        assert len(signals) >= 1
-        from src.agents.state.state import FinalStatus
-        assert result["reason"].final_status == FinalStatus.PENDING
 
     def test_recovery_agent_hypothesis_transition(self):
         """recovery_agent: ACTIVE 가설 FAILED 전환 + PENDING 소비."""

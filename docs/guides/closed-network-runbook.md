@@ -32,6 +32,19 @@
 
 **전제**: Rocky 9 / RHEL 9 계열. 인터넷 접속 가능. 디스크 20GB↑.
 
+> **⚠ Windows Git Bash 금지**: `build.sh` 는 폐쇄망 타겟(Rocky 9 x86_64)용 wheel·RPM·모델을 수집합니다.
+> Windows Git Bash 에서 실행하면 `sys.platform == "win32"` · `sysconfig.get_platform() == "win-amd64"` 로 감지돼
+> (1) Windows wheel 이 받아지고 (2) `sys_platform != "win32"` 마커의 `gunicorn` 이 누락되며
+> (3) `dnf download` 자체가 실패합니다. **WSL2(Rocky) · Rocky VM · Docker `rockylinux:9`** 중 하나에서 실행하세요.
+>
+> 현재 환경이 타겟인지 즉시 확인:
+>
+> ```bash
+> uname -a                                        # Linux …                        ← 합격
+> python3 -c "import sys; print(sys.platform)"    # linux                          ← 합격
+> python3 -c "import sysconfig; print(sysconfig.get_platform())"   # linux-x86_64  ← 합격
+> ```
+
 ```bash
 # 1-1. 기본 도구 확인
 curl --version && tar --version && sha256sum --version && dnf --version
@@ -83,12 +96,15 @@ cat deploy/offline-bundle/dist/MANIFEST.txt
 `build.sh`는 7단계로 구성되어 있습니다. 실패 단계만 재실행하려면 스크립트를 복사해 일부 단계를 주석 처리하거나, 수동 실행하세요:
 
 ```bash
-# 예: torch wheel 다운로드만 재시도
-uv pip download \
-  --python-version 3.12.7 \
+# 예: torch CPU wheel 다운로드만 재시도 (uv 는 pip download 미지원 → python -m pip 사용)
+python3 -m pip download \
   --dest deploy/offline-bundle/dist/wheels \
   --index-url https://download.pytorch.org/whl/cpu \
-  torch torchvision
+  --only-binary=:all: \
+  --python-version 3.12 \
+  --platform manylinux2014_x86_64 \
+  --implementation cp --abi cp312 \
+  torch
 
 # 예: HF 모델만 재다운로드
 bash deploy/offline-bundle/download_models.sh deploy/offline-bundle/dist/models
@@ -122,10 +138,12 @@ command -v python3.12 && python3.12 --version   # 없으면 5-3에서 tarball �
 nc -zv $PGHOST $PGPORT
 nc -zv $MONGO_HOST $MONGO_PORT
 nc -zv $QDRANT_HOST $QDRANT_PORT
+nc -zv $NEO4J_HOST $NEO4J_PORT    # 7687 (bolt)
 nc -zv $REDIS_HOST $REDIS_PORT
 # (옵션) 업무DB
 # nc -zv $IMPALA_HOST $IMPALA_PORT
 # nc -zv $ADW_HOST $ADW_PORT
+# nc -zv $ORACLE_HOST $ORACLE_PORT   # CRP (Oracle 19c)
 
 # 4-4. LDAP 계정 확인 (Impala LDAP 인증 사용 시)
 # id $IMPALA_USER   # 또는 ldapsearch ...
@@ -164,20 +182,92 @@ ls dist/   # python/ wheels/ models/ os-packages/ app/ MANIFEST.txt
 
 ## 6. 설치 (폐쇄망)
 
+`install.sh` 는 **7단계 일괄 실행** 스크립트입니다. 한 번에 돌려도 되고, 부담스럽다면 §6-3 에서 **단계별 수동 실행** 가능.
+
+### 6-1. 환경변수 override (선택)
+
+설치 경로를 기본값(`/opt/bdp/data-copilot`) 외로 바꾸려면 `install.sh` 호출 전에 다음 변수를 지정:
+
+```bash
+# 예: /opt/bdp/data-copilot 에 설치
+export INSTALL_ROOT=/opt/bdp/data-copilot
+export EMBEDDING_MODEL_CACHE_PATH=/opt/bdp/data-copilot/models
+# export SERVICE_USER=datacopilot       # 필요 시 변경
+# export SKIP_SYSTEMD=1                 # systemd 자동 등록 원치 않을 때
+```
+
+### 6-2. install.sh 일괄 실행
+
 ```bash
 cd /tmp/dc-install    # dist/ 상위
 
-# 6-1. install.sh 실행 (root)
-sudo bash dist/app/deploy/offline-bundle/install.sh
+# root 로 실행. export 한 환경변수를 전달하기 위해 sudo -E 사용.
+sudo -E bash dist/app/deploy/offline-bundle/install.sh
 
-# 6-2. 설치 결과 점검
-ls /opt/data-copilot/                          # 앱 배치 확인
-ls /opt/data-copilot/.venv/bin/python          # .venv 생성 확인
-/opt/data-copilot/.venv/bin/python --version   # 3.12.x
-ls $EMBEDDING_MODEL_CACHE_PATH 2>/dev/null \
-  || ls /opt/data-copilot/models/              # 모델 가중치 위치
-id datacopilot                                 # 서비스 계정 생성 확인
+# 결과 점검 (INSTALL_ROOT 가 실제 설치 경로로 치환됨)
+ls $INSTALL_ROOT/
+ls $INSTALL_ROOT/.venv/bin/python
+$INSTALL_ROOT/.venv/bin/python --version        # 3.12.x
+ls $INSTALL_ROOT/.venv/bin/gunicorn             # gunicorn 설치 확인
+ls $EMBEDDING_MODEL_CACHE_PATH                  # 모델 가중치
+id datacopilot                                  # 서비스 계정
+ls /etc/systemd/system/data-copilot.service     # systemd 유닛 자동 배치 확인
 ```
+
+> **gunicorn 설치 확인**: `pyproject.toml` main deps 에 `sys_platform != "win32"` 마커로 선언 → Linux 반입 시 `uv sync` 가 자동 설치.
+> **systemd 유닛**: [7/7] 단계가 `deploy/systemd/data-copilot.service` 의 `/opt/bdp/data-copilot` 을 `$INSTALL_ROOT` 로 치환해 `/etc/systemd/system/` 에 배치합니다. `SKIP_SYSTEMD=1` 로 이 단계만 건너뛸 수 있습니다.
+
+### 6-3. 단계별 수동 실행 (install.sh 실패·부분 재실행 시)
+
+install.sh 내부 7단계를 직접 실행하는 절차입니다. 예: `[4/7] uv sync` 에서 실패하면 1~3 은 건너뛰고 4부터 재시도.
+
+```bash
+# 공통 변수
+export DIST_DIR=/tmp/dc-install/dist
+export INSTALL_ROOT=/opt/bdp/data-copilot
+export SERVICE_USER=datacopilot
+export MODEL_CACHE_PATH=$INSTALL_ROOT/models
+
+# [1/7] Python 3.12 확인
+python3.12 --version || echo "!! dist/python/Python-*.tgz 로 수동 설치 필요 (§5-4 참조)"
+
+# [2/7] OS RPM 설치 — 로컬 RPM 만 사용 (온라인 저장소 차단)
+sudo dnf install -y --disablerepo='*' --nogpgcheck $DIST_DIR/os-packages/*.rpm
+
+# [3/7] 앱 배치
+sudo mkdir -p $INSTALL_ROOT
+sudo rsync -a --delete --exclude='.venv/' $DIST_DIR/app/ $INSTALL_ROOT/
+
+# [4/7] uv + .venv + 오프라인 의존성 설치
+#  (uv 미설치 시) wheels 에서 부트스트랩
+if ! command -v uv >/dev/null 2>&1; then
+    sudo python3.12 -m venv /tmp/uv-bootstrap
+    sudo /tmp/uv-bootstrap/bin/pip install --no-index --find-links $DIST_DIR/wheels uv
+    UV_BIN=/tmp/uv-bootstrap/bin/uv
+else
+    UV_BIN=$(command -v uv)
+fi
+cd $INSTALL_ROOT
+sudo $UV_BIN sync --frozen --offline --python python3.12 --find-links $DIST_DIR/wheels
+
+# [5/7] 모델 복사
+sudo mkdir -p $MODEL_CACHE_PATH
+sudo rsync -a $DIST_DIR/models/ $MODEL_CACHE_PATH/
+
+# [6/7] 서비스 계정·권한
+id -u $SERVICE_USER || sudo useradd --system --shell /sbin/nologin \
+    --home-dir $INSTALL_ROOT $SERVICE_USER
+sudo chown -R $SERVICE_USER:$SERVICE_USER $INSTALL_ROOT $MODEL_CACHE_PATH
+
+# [7/7] systemd 유닛 배치 ($INSTALL_ROOT 치환)
+sudo sed "s|/opt/bdp/data-copilot|$INSTALL_ROOT|g" \
+    $INSTALL_ROOT/deploy/systemd/data-copilot.service \
+    | sudo tee /etc/systemd/system/data-copilot.service >/dev/null
+sudo chmod 644 /etc/systemd/system/data-copilot.service
+sudo systemctl daemon-reload
+```
+
+각 단계는 **idempotent** (재실행 가능). 실패 단계만 재시도하세요.
 
 실패 시 [§13 롤백](#13-롤백-및-트러블슈팅) 참조.
 
@@ -186,9 +276,9 @@ id datacopilot                                 # 서비스 계정 생성 확인
 ## 7. `.env` 작성 (폐쇄망)
 
 ```bash
-sudo -u datacopilot cp /opt/data-copilot/.env.example /opt/data-copilot/.env
-sudo -u datacopilot chmod 600 /opt/data-copilot/.env
-sudo -u datacopilot vi /opt/data-copilot/.env
+sudo -u datacopilot cp /opt/bdp/data-copilot/.env.example /opt/bdp/data-copilot/.env
+sudo -u datacopilot chmod 600 /opt/bdp/data-copilot/.env
+sudo -u datacopilot vi /opt/bdp/data-copilot/.env
 ```
 
 ### 7-1. 폐쇄망 최소 필수 키 템플릿
@@ -218,6 +308,13 @@ MONGO_USER=<mongo-user>
 MONGO_PASSWORD=<mongo-pw>
 MONGO_DATABASE=<mongo-db>
 
+# Neo4j 5.26 LTS (온톨로지 그래프)
+NEO4J_HOST=<neo4j-host>
+NEO4J_PORT=7687
+NEO4J_USER=<neo4j-user>
+NEO4J_PASSWORD=<neo4j-pw>
+NEO4J_DATABASE=neo4j
+
 QDRANT_HOST=<qdrant-host>
 QDRANT_PORT=6333
 
@@ -246,14 +343,33 @@ IMPALA_USER=<ldap-user>
 IMPALA_PASSWORD=<ldap-pw>
 IMPALA_DATABASE=default
 
-# CRP (필요 시) — 실제 커넥터 env는 src/connectors/impl/crp_connector.py 참조
+# CRP (Oracle 19c) — thin 모드 기본. thick 모드는 Instant Client 별도 반입 필요.
+ORACLE_HOST=<oracle-host>
+ORACLE_PORT=1521
+ORACLE_SERVICE_NAME=<oracle-service>
+ORACLE_USER=<oracle-user>
+ORACLE_PASSWORD=<oracle-pw>
+ORACLE_DEFAULT_SCHEMA=
+ORACLE_THICK_MODE=false
 
-# ── 임베딩 / Reranker (CPU 추론) ───────────────────────────
+# ── 임베딩 / Reranker (CPU 추론, 로컬 경로 직접 지정) ──────
+# 폐쇄망에서는 HF 허브명("BAAI/bge-m3")이 아닌 **로컬 파일시스템 경로**를 모델로 지정한다.
+# install.sh [5/7] 이 $DIST_DIR/models/{bge-m3,bge-reranker-v2-m3}/ 를 아래 경로로 rsync 한다.
+# (INSTALL_ROOT override 시 해당 경로로 치환 필요 — 예: /opt/bdp/data-copilot/models/...)
+EMBEDDING_MODEL=/opt/bdp/data-copilot/models/bge-m3
 EMBEDDING_USE_FP16=false
-EMBEDDING_CACHE_PATH=/opt/data-copilot/models/bge-m3
+EMBEDDING_CACHE_PATH=                          # 경로 직접 지정이므로 공란 유지
 RERANKER_ENABLED=true
+RERANKER_MODEL=/opt/bdp/data-copilot/models/bge-reranker-v2-m3
 RERANKER_USE_FP16=false
-RERANKER_CACHE_PATH=/opt/data-copilot/models/bge-reranker-v2-m3
+RERANKER_CACHE_PATH=                           # 경로 직접 지정이므로 공란 유지
+
+# ── HuggingFace 오프라인 모드 (폐쇄망 필수) ────────────────
+# 모델은 위에서 로컬 경로로 직접 지정되지만, transformers/tokenizers 가 기동 시
+# HF 허브에 최신 버전 확인을 시도하므로 아래 3키로 완전 차단한다.
+HF_HOME=/opt/bdp/data-copilot/models
+TRANSFORMERS_OFFLINE=1
+HF_HUB_OFFLINE=1
 
 # ── 운영 ────────────────────────────────────────────────
 GUNICORN_BIND=0.0.0.0:8000
@@ -270,8 +386,8 @@ MAX_QUERY_ROWS=10000
 
 ```bash
 sudo -u datacopilot bash -c '
-  set -a; source /opt/data-copilot/.env; set +a
-  cd /opt/data-copilot
+  set -a; source /opt/bdp/data-copilot/.env; set +a
+  cd /opt/bdp/data-copilot
   ./.venv/bin/python -c "from src.config import settings; print(settings.llm_provider, settings.llm_model, settings.postgres_db.host)"
 '
 ```
@@ -283,7 +399,7 @@ sudo -u datacopilot bash -c '
 **데이터는 기보유. 이 단계는 Data Copilot 운영에 필요한 스키마·컬렉션·인덱스만 생성합니다.**
 
 ```bash
-cd /opt/data-copilot
+cd /opt/bdp/data-copilot
 set -a; source .env; set +a
 
 # 8-1. PostgreSQL (checkpoint_dc_*, message_store 등)
@@ -296,18 +412,32 @@ sudo -u datacopilot bash deploy/db-init/mongo/init.sh
 # 8-3. Qdrant (biz_manual + sql_history 컬렉션, Named Vectors)
 sudo -u datacopilot bash deploy/db-init/qdrant/init.sh
 
-# 8-4. 초기화 결과 검증
+# 8-4. Neo4j (온톨로지 그래프 스키마 — 제약조건·인덱스·엣지 정의)
+#      cypher-shell 이 설치돼 있어야 합니다 (Neo4j 서버 패키지에 포함).
+sudo -u datacopilot bash resources/connectors/neo4j/init.sh
+
+# 8-5. 초기화 결과 검증
 sudo -u datacopilot ./.venv/bin/python -c "
 from qdrant_client import QdrantClient
 c = QdrantClient(host='$QDRANT_HOST', port=$QDRANT_PORT)
 for n in ['biz_manual','sql_history']:
     print(n, c.get_collection(n).status)
 "
+
+sudo -u datacopilot ./.venv/bin/python -c "
+from neo4j import GraphDatabase
+d = GraphDatabase.driver('bolt://$NEO4J_HOST:$NEO4J_PORT', auth=('$NEO4J_USER','$NEO4J_PASSWORD'))
+with d.session(database='$NEO4J_DATABASE') as s:
+    print('constraints:', [r['name'] for r in s.run('SHOW CONSTRAINTS')])
+d.close()
+"
 ```
 
 **⚠ 순서 주의**:
-- PG → Mongo → Qdrant 순서는 앱 기동 시 초기 연결 체크 순서와 일치. 역순 실행은 가능하지만 권장하지 않음.
+
+- PG → Mongo → Qdrant → Neo4j 순서는 앱 기동 시 초기 연결 체크 순서와 일치. 역순 실행은 가능하지만 권장하지 않음.
 - 재실행: 모든 init.sh 는 **idempotent** (존재하면 skip). 단, Qdrant는 기존 컬렉션을 drop 후 재생성하므로 **이미 벡터가 들어있다면 덮어씌워집니다** → §9 재임베딩 전 실행.
+- Neo4j `init.sh` 는 **스키마만** 생성합니다. 온톨로지 실 데이터(테이블-컬럼 노드, FK 엣지 등)는 이관자 몫이며 `devtools/scripts/seed_neo4j.py` 또는 자체 ETL 로 별도 투입하세요.
 
 ---
 
@@ -357,7 +487,7 @@ CREATE INDEX IF NOT EXISTS idx_sql_exec_history_point_id
 ### 9-1. 사전 점검
 
 ```bash
-cd /opt/data-copilot
+cd /opt/bdp/data-copilot
 set -a; source .env; set +a
 
 # 9-1-1. 대상 건수 확인 (활성 플래그 기준)
@@ -454,7 +584,7 @@ asyncio.run(main())
 
 ```bash
 # 매일 02:00 증분 (crontab 예시)
-0 2 * * * cd /opt/data-copilot \
+0 2 * * * cd /opt/bdp/data-copilot \
   && ./.venv/bin/python devtools/scripts/enrich_sql_history.py \
      --source postgres --mode direct --since-last-run \
      --concurrency 8 \
@@ -467,7 +597,7 @@ asyncio.run(main())
 
 ```bash
 # 매주 일요일 03:00
-0 3 * * 0 cd /opt/data-copilot \
+0 3 * * 0 cd /opt/bdp/data-copilot \
   && ./.venv/bin/python devtools/scripts/enrich_sql_history.py \
      --source postgres --mode direct --reconcile-deletes \
      --reconcile-chunk-size 10000 \
@@ -506,7 +636,7 @@ asyncio.run(main())
 ### 10-1. Solar Pro 2 (현재)
 
 ```bash
-set -a; source /opt/data-copilot/.env; set +a
+set -a; source /opt/bdp/data-copilot/.env; set +a
 
 # 10-1-1. 네트워크 도달성
 curl -sS -o /dev/null -w "HTTP %{http_code}\n" "$OPENAI_BASE_URL/models"
@@ -526,8 +656,8 @@ curl -sS "$OPENAI_BASE_URL/chat/completions" \
 
 ```bash
 sudo -u datacopilot bash -c '
-  set -a; source /opt/data-copilot/.env; set +a
-  cd /opt/data-copilot
+  set -a; source /opt/bdp/data-copilot/.env; set +a
+  cd /opt/bdp/data-copilot
   ./.venv/bin/python -c "
 import asyncio
 from src.utils.llm.client import get_llm_client
@@ -574,9 +704,35 @@ sudo -u datacopilot ./.venv/bin/python devtools/evaluation/run_evaluation.py \
 
 ## 11. systemd 기동
 
+### 11-0. uvicorn 단독 검증 (gunicorn 전 단계, 필수)
+
+gunicorn 실패 시 원인 절연이 어려우므로 **uvicorn 단독 기동으로 설치·설정 먼저 검증**합니다.
+
 ```bash
-# 11-1. unit 파일 등록
-sudo cp /opt/data-copilot/deploy/systemd/data-copilot.service /etc/systemd/system/
+# 11-0-1. uvicorn 단독 포그라운드 기동 (별도 쉘 권장)
+sudo -u datacopilot ./.venv/bin/python -m uvicorn src.main:app \
+  --host 127.0.0.1 --port 8001 &
+UVI_PID=$!
+sleep 5
+
+# 11-0-2. 헬스체크 — 모든 의존성(PG/Mongo/Qdrant/Redis/LLM) status=ok 확인
+curl -sS http://localhost:8001/health/ready | python3 -m json.tool
+
+# 11-0-3. 종료
+kill "$UVI_PID" 2>/dev/null; wait "$UVI_PID" 2>/dev/null
+```
+
+검증 포인트:
+- `uv sync --offline` 으로 의존성 설치 완결 여부
+- `.env` 의 DB·LLM·Redis 접속값 정합성
+- 파이썬 패키지 로딩 오류 (BGE-M3 모델 경로, torch CPU whl 등)
+
+**uvicorn 에서 실패하면 gunicorn 도 동일하게 실패**합니다. 여기서 실패하면 §13 트러블슈팅 후 재검증하고, 통과 후 11-1 로 진행합니다.
+
+### 11-1. unit 파일 등록
+
+```bash
+sudo cp /opt/bdp/data-copilot/deploy/systemd/data-copilot.service /etc/systemd/system/
 sudo systemctl daemon-reload
 
 # 11-2. enable + start
@@ -647,8 +803,8 @@ sudo systemctl disable data-copilot.service 2>/dev/null || true
 sudo rm -f /etc/systemd/system/data-copilot.service
 sudo systemctl daemon-reload
 
-# 앱 제거 (모델/로그 보존하려면 /opt/data-copilot/{models,logs} 백업)
-sudo rm -rf /opt/data-copilot
+# 앱 제거 (모델/로그 보존하려면 /opt/bdp/data-copilot/{models,logs} 백업)
+sudo rm -rf /opt/bdp/data-copilot
 
 # 서비스 계정 제거 (선택)
 sudo userdel -r datacopilot 2>/dev/null || true
@@ -665,10 +821,18 @@ sudo userdel -r datacopilot 2>/dev/null || true
 | 증상 | 원인 | 조치 |
 |---|---|---|
 | `uv sync --offline` 실패 | wheel 누락 (플랫폼 불일치 등) | 빌드머신 OS/Python 버전을 타겟과 일치시켜 재번들 |
+| `build.sh [2/7]` `uv pip download` 미지원 오류 | uv 는 pip download 서브커맨드 없음 | 최신 build.sh 는 `python3 -m pip download` 사용 — 구버전이면 업데이트 |
+| Windows Git Bash 에서 `dnf: command not found` | build.sh 는 Linux 전용 | WSL2(Rocky) / Rocky VM / `docker run --rm -v ... rockylinux:9` 에서 실행 (§1 참조) |
 | BGE-M3 로드 시 `torch` ABI 오류 | CUDA 빌드 wheel 혼입 | `deploy/offline-bundle/dist/wheels/` 의 torch wheel 파일명이 `+cpu` 포함인지 확인 |
+| BGE-M3 로딩 시 HuggingFace 허브 접속 타임아웃 | `HF_HUB_OFFLINE` 미설정 | `.env` 에 `HF_HOME`, `TRANSFORMERS_OFFLINE=1`, `HF_HUB_OFFLINE=1` 세 키 모두 설정 |
+| `ImportError: cannot import name 'XXX' from 'transformers'` | transformers 5.x 혼입 (FlagEmbedding 비호환) | pyproject `transformers>=4.45.0,<5.0.0` 핀 고정 확인 + wheel 재수집 |
 | Qdrant upsert `Bad Request` | Named Vector 이름 불일치 | `init.sh` 와 `seed/reembed` 스크립트의 vector 이름(`dense`/`sparse`) 일치 확인 |
-| Impala LDAP 인증 실패 | SASL 라이브러리 누락 | `dnf install -y cyrus-sasl-devel` 후 재설치 |
-| systemd `start` 후 즉시 exit | `.env` 파일 권한/위치 오류 | `EnvironmentFile=/opt/data-copilot/.env` 가 루트가 아닌 `datacopilot` 으로 read 가능한지 |
+| Impala LDAP 인증 실패 | SASL 라이브러리 누락 | `dnf install -y cyrus-sasl-devel` 후 재설치 — 상세 [closed-network-db-connectors.md](closed-network-db-connectors.md) §설치 순서 |
+| Sybase IQ `libdbcapi_r.so not found` | SAP IQ Client 미반입 | `$IQDIR16/lib64/libdbcapi_r.so` 반입 + `LD_LIBRARY_PATH`·`SQLANY_API_DLL` 설정 ([db-connectors §Sybase IQ](closed-network-db-connectors.md)) |
+| Sybase IQ pyodbc 드라이버 미등록 | SAP ODBC 드라이버 `odbcinst.ini` 누락 | `unixODBC` + SAP IQ ODBC 드라이버 설치 후 `SYBASE_ODBC_DRIVER` 값 일치 |
+| Neo4j cypher-shell 미설치 | 이관자 Neo4j 서버 패키지 부재 | `docker exec <neo4j-container> cypher-shell ... < init_neo4j.cypher` 로 대체 실행 |
+| systemd `start` 후 즉시 exit | `.env` 파일 권한/위치 오류 | `EnvironmentFile=$INSTALL_ROOT/.env` 가 루트가 아닌 `datacopilot` 으로 read 가능한지 |
+| systemd 유닛 경로 불일치 | `INSTALL_ROOT` override 후 유닛 파일 미갱신 | install.sh [7/7] 재실행 또는 `sed` 로 수동 치환 (§6-3 참조) |
 | `/health/ready` 에서 LLM unreachable | 방화벽/프록시 | §10-1-1 curl 재확인, `NO_PROXY` 설정 |
 | 재임베딩 중단(OOM) | BGE-M3 배치 과다 | `--batch-size 32 → 16` 로 하향 후 재개 (`--resume-from <id>`) |
 
@@ -678,8 +842,8 @@ sudo userdel -r datacopilot 2>/dev/null || true
 sudo journalctl -u data-copilot.service --since "1 hour ago" > /tmp/dc.journal.log
 sudo tar -czf /tmp/dc-diag-$(date +%Y%m%d%H%M).tar.gz \
   /tmp/dc.journal.log \
-  /opt/data-copilot/logs/ \
-  /opt/data-copilot/.env.example \
+  /opt/bdp/data-copilot/logs/ \
+  /opt/bdp/data-copilot/.env.example \
   2>/dev/null
 # .env 는 민감정보 포함 — 공유 전 반드시 마스킹
 ```

@@ -152,17 +152,17 @@
 입력:
 - 사용자 질의: "영업점별 연체율 상위 10개 지점 보여줘"
 - dialect: postgresql
-- confirmed_terms: [table:ADWOWN.TB_ADW_LNB301M → 여신기본마스터, column:LN_BAL_AMT → 여신잔액, column:LN_STCD → 대출상태코드, column:BLNG_BRCD → 부점코드, table:ADWOWN.TB_ADW_COM001M → 부점정보기본, column:BR_NM → 지점명, code:LN_STCD → 01=정상/02=연체/03=부실]
+- confirmed_terms: [table:ADWOWN.TB_ADW_LNB301M → 여신기본마스터, column:LN_BAL_AMT → 여신잔액, column:LN_STCD → 대출상태코드, column:BLNG_BRCD → 부점코드, table:ADWOWN.TB_ADW_COM001M → 부점정보기본, column:BR_NM → 지점명, code:LN_STCD → 01=정상/02=기한이익상실/03=연체/04=대위변제/05=상각]
 
 출력:
 {
   "status": "success",
-  "sql": "SELECT C.BR_NM AS 지점명, SUM(A.LN_BAL_AMT) AS 총여신잔액, SUM(CASE WHEN A.LN_STCD IN ('02','03') THEN A.LN_BAL_AMT ELSE 0 END) AS 연체잔액, ROUND(SUM(CASE WHEN A.LN_STCD IN ('02','03') THEN A.LN_BAL_AMT ELSE 0 END) * 100.0 / NULLIF(SUM(A.LN_BAL_AMT), 0), 2) AS 연체율 FROM ADWOWN.TB_ADW_LNB301M A INNER JOIN ADWOWN.TB_ADW_COM001M C ON A.BLNG_BRCD = C.BLNG_BRCD GROUP BY C.BR_NM ORDER BY 연체율 DESC LIMIT 10",
-  "reasoning_summary": "여신기본마스터와 부점정보기본을 BLNG_BRCD로 조인. LN_STCD '02','03'을 연체 이상으로 분류하는 조건부 집계(SUM CASE WHEN)로 연체잔액과 총잔액을 한 행에 산출. 표준형 연체율 공식(연체잔액/총잔액×100)을 SQL로 직접 작성하고 NULLIF로 0 나눗셈 방지.",
+  "sql": "SELECT C.BR_NM AS 지점명, SUM(A.LN_BAL_AMT) AS 총여신잔액, SUM(CASE WHEN A.LN_STCD IN ('03','04','05') THEN A.LN_BAL_AMT ELSE 0 END) AS 연체잔액, ROUND(SUM(CASE WHEN A.LN_STCD IN ('03','04','05') THEN A.LN_BAL_AMT ELSE 0 END) * 100.0 / NULLIF(SUM(A.LN_BAL_AMT), 0), 2) AS 연체율 FROM ADWOWN.TB_ADW_LNB301M A INNER JOIN ADWOWN.TB_ADW_COM001M C ON A.BLNG_BRCD = C.BLNG_BRCD GROUP BY C.BR_NM ORDER BY 연체율 DESC LIMIT 10",
+  "reasoning_summary": "여신기본마스터와 부점정보기본을 BLNG_BRCD로 조인. LN_STCD '03'(연체),'04'(대위변제),'05'(상각)을 연체 이상으로 분류하는 조건부 집계(SUM CASE WHEN)로 연체잔액과 총잔액을 한 행에 산출. 표준형 연체율 공식(연체잔액/총잔액×100)을 SQL로 직접 작성하고 NULLIF로 0 나눗셈 방지.",
   "failure_reasons": [],
   "assumptions": [
-    "'연체율' 산출식 해석 → 연체 이상 잔액(대출상태코드(LN_STCD) 02,03 합계) / 총 여신잔액(LN_BAL_AMT 합계) × 100",
-    "'연체 이상' 해석 → 대출상태코드(LN_STCD) 02(연체), 03(부실)"
+    "'연체율' 산출식 해석 → 연체 이상 잔액(대출상태코드(LN_STCD) 03,04,05 합계) / 총 여신잔액(LN_BAL_AMT 합계) × 100",
+    "'연체 이상' 해석 → 대출상태코드(LN_STCD) 03(연체), 04(대위변제), 05(상각)"
   ],
   "explanation": "지점별 연체율(연체잔액÷총여신잔액×100) 상위 10개 영업점 집계"
 }
@@ -242,13 +242,13 @@
 입력:
 - 사용자 질의: "연체 고객 중 1등급 고객의 지점별 목록 (전화번호 포함)"
 - dialect: tsql
-- confirmed_terms: [table:ADWOWN.TB_ADW_LNB301M → 여신기본마스터, table:ADWOWN.TB_ADW_CSC101M → 고객기본마스터, table:ADWOWN.TB_ADW_COM001M → 부점정보기본, code:CUS_GRD_CD → 01=1등급, filter:CUS_GRD_CD='01', filter:연체 → OVDU_GRD_CD >= 'A', join:TB_ADW_LNB301M.EDPS_CSN = TB_ADW_CSC101M.EDPS_CSN, join:TB_ADW_LNB301M.BLNG_BRCD = TB_ADW_COM001M.BLNG_BRCD]
+- confirmed_terms: [table:ADWOWN.TB_ADW_LNB301M → 여신기본마스터, table:ADWOWN.TB_ADW_CSC101M → 고객기본마스터, table:ADWOWN.TB_ADW_COM001M → 부점정보기본, code:CUS_GRD_CD → 01=1등급, filter:CUS_GRD_CD='01', filter:연체 → OVDU_GRD_CD IN ('B','C','D','E'), code:OVDU_GRD_CD → A=정상/B=요주의/C=고정/D=회수의문/E=추정손실, join:TB_ADW_LNB301M.EDPS_CSN = TB_ADW_CSC101M.EDPS_CSN, join:TB_ADW_LNB301M.BLNG_BRCD = TB_ADW_COM001M.BLNG_BRCD]
 
 출력:
 {
   "status": "success",
-  "sql": "SELECT TOP 1000 C.BR_NM AS 지점명, A.EDPS_CSN AS 고객번호, B.CSM AS 고객명, B.TEL_NO AS 전화번호, CASE WHEN B.CUS_GRD_CD='01' THEN '1등급' ELSE B.CUS_GRD_CD END AS 고객등급명, A.OVDU_AMT AS 연체금액 FROM ADWOWN.TB_ADW_LNB301M A INNER JOIN ADWOWN.TB_ADW_CSC101M B ON A.EDPS_CSN = B.EDPS_CSN INNER JOIN ADWOWN.TB_ADW_COM001M C ON A.BLNG_BRCD = C.BLNG_BRCD WHERE B.CUS_GRD_CD = '01' AND A.OVDU_GRD_CD >= 'A' AND A.STD_DT >= CONVERT(VARCHAR, DATEADD(month, -1, GETDATE()), 112) ORDER BY C.BR_NM, A.OVDU_AMT DESC",
-  "reasoning_summary": "여신기본마스터·고객기본마스터·부점정보기본 3테이블을 EDPS_CSN/BLNG_BRCD로 조인. CUS_GRD_CD='01'로 1등급, OVDU_GRD_CD>='A'로 연체 필터. CUS_GRD_CD는 CASE WHEN으로 한글명칭 동반 출력. tsql 문법(TOP, CONVERT) 적용.",
+  "sql": "SELECT TOP 1000 C.BR_NM AS 지점명, A.EDPS_CSN AS 고객번호, B.CSM AS 고객명, B.TEL_NO AS 전화번호, CASE WHEN B.CUS_GRD_CD='01' THEN '1등급' ELSE B.CUS_GRD_CD END AS 고객등급명, A.OVDU_AMT AS 연체금액 FROM ADWOWN.TB_ADW_LNB301M A INNER JOIN ADWOWN.TB_ADW_CSC101M B ON A.EDPS_CSN = B.EDPS_CSN INNER JOIN ADWOWN.TB_ADW_COM001M C ON A.BLNG_BRCD = C.BLNG_BRCD WHERE B.CUS_GRD_CD = '01' AND A.OVDU_GRD_CD IN ('B','C','D','E') AND A.STD_DT >= CONVERT(VARCHAR, DATEADD(month, -1, GETDATE()), 112) ORDER BY C.BR_NM, A.OVDU_AMT DESC",
+  "reasoning_summary": "여신기본마스터·고객기본마스터·부점정보기본 3테이블을 EDPS_CSN/BLNG_BRCD로 조인. CUS_GRD_CD='01'로 1등급, OVDU_GRD_CD IN ('B','C','D','E')로 요주의 이상 연체 필터(A=정상 제외). CUS_GRD_CD는 CASE WHEN으로 한글명칭 동반 출력. tsql 문법(TOP, CONVERT) 적용.",
   "failure_reasons": [],
   "assumptions": [],
   "explanation": "1등급 연체 고객을 지점별로 조회, 3테이블 조인, 고객등급 한글명칭 동반 출력 (Sybase IQ)"
@@ -315,6 +315,7 @@ success를 유지하는 경우 (결과 정확성에 영향 없는 불확실성):
 - 용어 구체화: "마케팅 명세" → 고객명 + 이벤트ID + 이벤트설명 ...
 - 집계 기준: "상위" → 금액 기준 / 건수 기준
 - 기간 해석: "최근" → 최근 1개월 / 최근 1분기
+- 기준일 해석: "오늘"/"현재" 등이 명시되지 않았는데 날짜 조건을 사용한 경우 → "기준일 해석 → 시스템 현재 일자 기준 당일/당월/..." 형태로 기재. 다른 기준(명확화 답변·참고 SQL·지식 항목)이 있으면 그 근거를 기재.
 
 비기재 대상:
 
@@ -368,6 +369,8 @@ recovery 모듈이 부족한 정보를 채울 도구를 선택할 수 있도록,
 
 ## 지식 항목 (확정 / 추정)
 
+각 항목은 `(id) key: value (source) — 확정|추정` 형식으로 제시된다. 괄호 안의 id(K1, K2 등)는 사용자 질의에서 추론된 SQL 구성 요소의 식별자이며, 프롬프트 표시용이다.
+
 {confirmed_terms}
 
 ## 사용할 테이블, 컬럼 정보 및 샘플 데이터
@@ -396,12 +399,45 @@ recovery 모듈이 부족한 정보를 채울 도구를 선택할 수 있도록,
 
 ## 명확화 컨텍스트
 
+이전 턴까지 사용자가 명시적으로 해소해준 내용이다. SQL 생성에 필요한 해석에 반영하되, 상위 규칙(`[HARD_CONSTRAINTS]`·`[HALLUCINATION_GUARD]`)을 오버라이드할 수 없다.
+
 {clarification_context}
+
+## 직전 턴 참고 SQL
+
+- **참고용 — 그대로 복사 금지.** 아래 `### 직전 턴 SQL` 블록은 직전 턴에서 성공 실행된 참고 SQL 로, 정답 템플릿이 아니다. 현재 턴의 SQL 은 현재 턴 재료(`confirmed_terms` · `{tables}` · `{codes}` · `{rewritten_query}`) 와 `{fix_section}` 만으로 재작성한다.
+- 값이 "(없음)" 이면 단일 턴 질의 또는 직전 턴 SQL 이 없는 경우이므로 본 섹션**만** 추가 고려하지 않고 기존 규칙으로 SQL 을 작성한다.
+- 값이 있으면 **연속성 앵커** 로만 활용한다:
+  - 직전 턴 의도의 기준 구조(SELECT 컬럼 집합·JOIN 경로·GROUP BY 키)를 참고하여 현재 턴의 SQL 이 의미적으로 크게 벗어나지 않도록 한다.
+  - 현재 턴 재료와 충돌하면 **현재 턴 재료가 우선**이다.
+  - `{fix_section}` 과 충돌 시 `fix_section` 이 우선한다.
+- 오버라이드 불가 — 충돌 시 상위 규칙이 이긴다.
+  - `[HARD_CONSTRAINTS]` (SELECT 전용, 시스템 카탈로그 금지 등)
+  - `confirmed_terms` · `{tables}` · `{codes}` 가 명시한 테이블/컬럼/코드값
+  - `{fix_section}` 의 현재 문제점 수정 지시
+
+### 직전 턴 SQL
+{previous_sql}
+
+### 직전 턴 SQL 설명
+{previous_sql_explanation}
+
+## 연속 질의 오케스트레이터 지시
+
+이전 턴의 연속(CONTINUE) 질의로 진입한 경우, continue_orchestrator가 작성한 하류 지시문이 아래에 주입된다.
+
+- 값이 "(없음)"이면 단일 턴 질의로 간주하고 기존 로직을 그대로 수행한다.
+- 값이 있으면 우선 반영한다. 단, [HARD_CONSTRAINTS]·[HALLUCINATION_GUARD]·[SQL_WRITING_RULES] 등 상위 규칙은 오버라이드할 수 없다 — 충돌 시 상위 규칙이 이긴다.
+- `### SQL 생성 지시` 섹션이 있으면 SQL 문자열 차원의 재작성 범위(SELECT 별칭·단위·힌트·ORDER BY 형식 등)를 그대로 따른다. regenerate 경로는 정의상 정규화 무변경이므로 rewritten_query·confirmed_terms·tables 를 새로 해석하지 말고 그대로 SQL 로 옮기며, WHERE/GROUP BY/테이블 변경을 요구하는 문구가 있더라도 상위 정규화 결과와 충돌하면 무시한다.
+- `### 연속 처리 의도`·`### 분석 초점`·`### 시각화/포맷 지시` 섹션은 이 노드 소관이 아니다. 힌트로만 참고하고 SQL 생성 자체에 반영하지 않는다 (해당 섹션은 다른 노드가 주도).
+
+{handoff_note}
 
 
 [TASK]
 
 - 위 [INPUT_CONTEXT]의 확인된 테이블·컬럼·코드값만 근거로 단 하나의 SELECT SQL을 작성한다.
+- handoff_note가 있으면 우선 반영하되, 상위 [HARD_CONSTRAINTS]·[HALLUCINATION_GUARD]는 오버라이드할 수 없다.
 - 결과 정확성을 보장할 수 없으면 추측하지 말고 fail로 출력한다.
 - 코드값 컬럼이 SELECT에 포함되면 반드시 한글 명칭 컬럼을 함께 출력한다.
 - 출력은 [OUTPUT_CONTRACT]의 JSON 객체 하나만. reasoning_summary 필드 필수, 마크다운 코드 펜스·설명 텍스트 금지.

@@ -1,4 +1,4 @@
-"""연속 여부 판정 + 의도 분류 + 분석 질의 재작성 서비스.
+"""연속 여부 판정 + 의도 분류 서비스.
 
 작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
 
@@ -11,31 +11,27 @@ LLM 응답은 continuity/intent 중첩 JSON 구조이며,
 _parse_response에서 평탄화된 dict로 변환 후 IntentClassifyResult로 반환한다.
 CONTINUE 판정 시 continue_context에 맥락 반영된 질문 풀어쓰기를 포함한다.
 
-DATA_ANALYSIS 판정 시 rewrite_analysis_query()로 2차 LLM 호출하여
-시각화/분석 지시어를 제거한 데이터 추출 중심 질의를 생성한다.
-이 재작성 질의가 후속 SQL 생성의 입력으로 사용된다.
+DATA_ANALYSIS 질의의 시각화/분석 지시어 제거는 본 서비스가 아닌
+`src/services/query_normalizer.py` 의 `extraction_query_rewriter` 에서
+수행한다. 이유: CONTINUE 턴 오케스트레이터 라우팅은 본 노드에서 일어나며,
+그 시점에 재작성된 질의가 주입되면 맥락 해석이 왜곡되기 때문.
 
 핵심 함수:
     - intent_classifier: 연속 여부 + 의도 분류 통합 판정 (단일 LLM 호출)
-    - rewrite_analysis_query: 분석 질의 → 추출 질의 재작성 (2차 LLM 호출)
 """
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass
 
 from src.models.enums import HistoryDecision, IntentType
 from src.config import settings
-from src.utils.llm import ParseError, get_llm_client, llm_call_with_parse_retry
+from src.agents.nodes.thinking_modes import LLMNode
+from src.utils.llm import ParseError, llm_call_with_parse_retry
+from src.utils.llm.prompt import render_prompt
 from src.utils.llm.response import extract_json
 from src.utils.logger import get_logger
-from src.utils.tracker import (
-    get_current_node,
-    record_prompt_variables,
-    set_current_node,
-)
+from src.utils.tracker import LLMInteraction, llm_failure_sentinel
 
 logger = get_logger(__name__)
 
@@ -77,25 +73,23 @@ def _format_history(
 ) -> str:
     """대화 이력을 프롬프트 주입용 텍스트로 포맷팅한다.
 
-    type="clarification" 항목은 제외하여 LLM이
-    일반 질의/응답 맥락만 참조하도록 한다.
-    명확화 Q&A가 연속 여부 판정을 오염시키는 것을 방지한다.
+    명확화 Q&A도 포함하여 LLM이 이전 턴에서 해소된 용어를
+    참조할 수 있도록 한다. 명확화 메시지는 [명확화] 태그로
+    구분하여 일반 질의/응답과 혼동되지 않도록 한다.
 
     Args:
         max_turns: 포함할 최근 턴 수. 단방향 메시지 기준
             (사용자 1건 + AI 1건 = 2턴). 0이면 전체 이력.
     """
-    filtered = [
-        t for t in conversation_history
-        if t.get("type", "query") != "clarification"
-    ]
     if max_turns > 0:
-        filtered = filtered[-max_turns:]
+        conversation_history = conversation_history[-max_turns:]
     lines: list[str] = []
-    for turn in filtered:
+    for turn in conversation_history:
         role = "사용자" if turn["role"] == "user" else "시스템"
         content = turn["content"]
-        lines.append(f"  {role}: {content}")
+        is_clarification = turn.get("type") == "clarification"
+        prefix = "[명확화] " if is_clarification else ""
+        lines.append(f"  {prefix}{role}: {content}")
     return "\n".join(lines)
 
 
@@ -119,6 +113,13 @@ class IntentClassifyResult:
     # UNSURE / AMBIGUOUS 전용 필드
     ambiguities: list[dict] | None = None  # LLM이 생성한 구조화 모호성
 
+    # ── analyzer 실행 판정 ──
+    # 기본값 False: 본 서비스는 명세 추출이 주 업무이며 analyzer(해석 텍스트 생성)는
+    # 명시적 분석 요청("분석해줘", "비교", "추이", "원인" 등)이 있을 때만 실행.
+    # LLM이 true를 명시해야만 analyzer 호출.
+    needs_analyzer: bool = False
+    needs_analyzer_reason: str = ""
+
     def __post_init__(self) -> None:
         if self.ambiguities is None:
             self.ambiguities = []
@@ -133,7 +134,7 @@ async def intent_classifier(
     system_prompt: str,
     user_template: str,
     clarification_history: str = "",
-) -> IntentClassifyResult:
+) -> tuple[IntentClassifyResult, LLMInteraction]:
     """연속 여부 판정 + 의도 분류를 단일 LLM 호출로 수행한다.
 
     LLM은 continuity/intent 중첩 JSON으로 응답하며,
@@ -141,6 +142,12 @@ async def intent_classifier(
     SKIP은 LLM 호출 실패 시 에러 반환용으로만 사용된다.
 
     질의 재작성은 수행하지 않는다.
+
+    Returns:
+        (IntentClassifyResult, LLMInteraction): 분류 결과와 프롬프트 변수·원본
+        응답 쌍. REASONING_STEP payload 구성에 사용된다 (Option B §trace-input-
+        output-redesign). LLM 실패 시 interaction.raw_response 에 예외 메시지가
+        기록되어 장애 원인이 trace 에 보존된다.
     """
     # 유저 프롬프트 조립 — 이력 있으면 포함, 없으면 생략
     history_text = (
@@ -151,31 +158,32 @@ async def intent_classifier(
         if conversation_history
         else ""
     )
-    user_prompt = user_template.format(
-        history=history_text,
-        query=query,
-        clarification_history=clarification_history,
-    )
+    user_prompt, prompt_vars = render_prompt(user_template, {
+        "{history}": history_text,
+        "{query}": query,
+        "{clarification_history}": clarification_history,
+    })
 
     try:
-        _, parsed = await llm_call_with_parse_retry(
+        raw_text, parsed = await llm_call_with_parse_retry(
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
             parse_fn=_parse_response,
             max_tokens=settings.llm_default_max_tokens,
             timeout=settings.llm_default_timeout,
-            node_name="intent_classifier",
+            node_name=LLMNode.INTENT_CLASSIFIER,
         )
-        await record_prompt_variables({
-            "query": query,
-            "history": history_text,
-            "clarification_history": clarification_history,
-        })
     except (ParseError, Exception) as e:
         logger.error("intent_classifier LLM 호출 실패", error=str(e))
-        return IntentClassifyResult(
-            resolution=HistoryDecision.SKIP,
-            is_error=True,
+        return (
+            IntentClassifyResult(
+                resolution=HistoryDecision.SKIP,
+                is_error=True,
+            ),
+            LLMInteraction(
+                prompt_variables=prompt_vars,
+                raw_response=llm_failure_sentinel("LLM 실패", e),
+            ),
         )
 
     resolution = parsed["resolution"]
@@ -191,27 +199,42 @@ async def intent_classifier(
         category, confidence_str,
     )
 
+    interaction = LLMInteraction(
+        prompt_variables=prompt_vars,
+        raw_response=raw_text,
+    )
+
     if resolution == HistoryDecision.CONTINUE:
-        return IntentClassifyResult(
+        return (
+            IntentClassifyResult(
+                resolution=resolution,
+                intent=intent,
+                confidence=confidence,
+                category=category,
+                continue_reason=parsed.get("continue_reason", ""),
+                continue_context=parsed.get("continue_context", ""),
+                reason=parsed.get("intent_reason", ""),
+                needs_analyzer=parsed.get("needs_analyzer", True),
+                needs_analyzer_reason=parsed.get("needs_analyzer_reason", ""),
+            ),
+            interaction,
+        )
+
+    return (
+        IntentClassifyResult(
             resolution=resolution,
             intent=intent,
             confidence=confidence,
             category=category,
-            continue_reason=parsed.get("continue_reason", ""),
-            continue_context=parsed.get("continue_context", ""),
-            reason=parsed.get("intent_reason", ""),
-        )
-
-    return IntentClassifyResult(
-        resolution=resolution,
-        intent=intent,
-        confidence=confidence,
-        category=category,
-        reason=(
-            parsed.get("intent_reason", "")
-            or parsed.get("continuity_reason", "")
+            reason=(
+                parsed.get("intent_reason", "")
+                or parsed.get("continuity_reason", "")
+            ),
+            ambiguities=parsed.get("ambiguities", []),
+            needs_analyzer=parsed.get("needs_analyzer", True),
+            needs_analyzer_reason=parsed.get("needs_analyzer_reason", ""),
         ),
-        ambiguities=parsed.get("ambiguities", []),
+        interaction,
     )
 
 
@@ -268,13 +291,27 @@ def _parse_response(raw: str) -> dict:
         ),
     }
 
+    # needs_analyzer: 본 서비스는 명세 추출이 주 업무이므로 analyzer는 opt-in.
+    # LLM이 true(또는 "true"/"True"/"yes"/"1")를 명시 반환할 때만 True.
+    # 필드 누락·빈 문자열·null은 모두 False (analyzer 스킵).
+    # "false" 문자열은 Python에서 truthy이므로 문자열/비문자열을 구분하여 처리.
+    raw_needs = intent_obj.get("needs_analyzer", False)
+    if isinstance(raw_needs, str):
+        needs_analyzer = raw_needs.strip().lower() in ("true", "1", "yes")
+    else:
+        needs_analyzer = bool(raw_needs)
+
+    # 공통 — CONTINUE/NEW 무관하게 동일하게 채우는 intent 필드
+    result["intent_reason"] = intent_obj.get("label_reason", "")
+    result["needs_analyzer"] = needs_analyzer
+    result["needs_analyzer_reason"] = intent_obj.get("needs_analyzer_reason", "")
+
+    # 분기 — CONTINUE만 context 보존, 그 외는 continuity.reason 보존
     if resolution == HistoryDecision.CONTINUE:
         result["continue_reason"] = continuity.get("reason", "")
         result["continue_context"] = continuity.get("context", "")
-        result["intent_reason"] = intent_obj.get("reason", "")
     else:
         result["continuity_reason"] = continuity.get("reason", "")
-        result["intent_reason"] = intent_obj.get("reason", "")
 
     # UNSURE / AMBIGUOUS: LLM 생성 구조화 모호성
     ambiguities = data.get("ambiguities", [])
@@ -282,60 +319,3 @@ def _parse_response(raw: str) -> dict:
         result["ambiguities"] = ambiguities
 
     return result
-
-
-# ── 분석 질의 재작성 ──
-
-
-async def rewrite_analysis_query(
-    query: str,
-    *,
-    system_prompt: str,
-) -> str:
-    """DATA_ANALYSIS 질의에서 시각화/분석 지시어를 제거한 추출 질의를 생성한다.
-
-    plain text 출력이므로 JSON 파싱 재시도가 불필요하여
-    LLM 클라이언트를 직접 호출한다.
-
-    Args:
-        query: 원본 사용자 질의 (시각화/분석 지시어 포함).
-        system_prompt: 재작성 전용 시스템 프롬프트.
-
-    Returns:
-        데이터 추출 중심으로 재작성된 질의.
-
-    Raises:
-        Exception: LLM 호출 실패 시 (호출자에서 폴백 처리).
-    """
-    prev_node = get_current_node()
-    set_current_node("intent_classifier_rewriter")
-
-    try:
-        client = get_llm_client()
-        response = await client.messages.create(
-            model=settings.llm_model,
-            max_tokens=settings.llm_default_max_tokens,
-            timeout=settings.llm_default_timeout,
-            system=system_prompt,
-            messages=[{"role": "user", "content": query}],
-        )
-
-        result = (
-            response.content[0].text.strip()
-            if response.content else ""
-        )
-
-        logger.info(
-            "분석 질의 재작성 완료",
-            original=query,
-            rewritten=result,
-        )
-
-        await record_prompt_variables({
-            "query": query,
-            "rewritten": result,
-        })
-
-        return result
-    finally:
-        set_current_node(prev_node)

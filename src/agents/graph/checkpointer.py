@@ -68,7 +68,8 @@ async def create_checkpointer(
             "prepare_threshold": 0,   # PgBouncer/pooler 호환
             "row_factory": dict_row,
             "password": postgres_db.password,   # DSN에서 분리하여 로그 노출 방지
-            "options": "-c search_path=bdptbl,public",  # checkpoint_dc_* 테이블 스키마 해석
+            # checkpoint_dc_* 테이블 스키마 해석 (폐쇄망 전환 시 settings 로 조정)
+            "options": f"-c search_path={settings.checkpointer_search_path}",
         }
 
         pool = AsyncConnectionPool(
@@ -121,6 +122,11 @@ _ALLOWLIST_MODULES = (
     "src.agents.models.normalization",
     "src.agents.models.clarification",
     "src.agents.models.response",
+    # CONTINUE 오케스트레이터가 참조하는 TurnSnapshot 이 State.turn_snapshots 에
+    # 누적 저장되므로 checkpoint 역직렬화 경로에 반드시 포함되어야 한다.
+    # 누락 시 다중턴 CONTINUE 경로(REDISPLAY/ANALYZE/REGENERATE/REFINE)가
+    # 이전 턴 맥락을 잃는다.
+    "src.agents.models.snapshot",
 )
 
 

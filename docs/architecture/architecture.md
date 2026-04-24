@@ -2,20 +2,20 @@
 
 > 은행 임직원의 자연어 데이터 추출/분석 요청을 LangGraph 파이프라인(Pipeline)으로 처리하는 AI 에이전트의 전체 구조, 컴포넌트 간 관계, 데이터 흐름을 정의한다.
 
-**버전**: 2.3
-**최종 수정**: 2026-04-13
+**버전**: 2.4
+**최종 수정**: 2026-04-20
 **대상 독자**: 본 프로젝트의 설계·구현·운영에 참여하는 모든 구성원 및 AI 서브에이전트(Sub-Agent)
 
 ---
 
 ## 목차
 
-1. [시스템 개요](#1-시스템-개요)
-2. [LangGraph 그래프 설계](#2-langgraph-그래프-설계)
-3. [정확한 요구사항 분석을 위한 설계 아이디어](#3-정확한-요구사항-분석을-위한-설계-아이디어)
-4. [데이터 정합성 보장을 위한 설계 아이디어](#4-데이터-정합성-보장을-위한-설계-아이디어)
-5. [노드별 상세 설계](#5-노드별-상세-설계)
-6. [커넥터 아키텍처](#6-커넥터-아키텍처)
+1. [시스템 개요](#1-시스템-개요) — 3계층 19노드 파이프라인의 전체 구성도
+2. [LangGraph 그래프 설계](#2-langgraph-그래프-설계) — 노드 정의, 조건부 분기, PipelineState/ReasoningState
+3. [정확한 요구사항 분석을 위한 설계 아이디어](#3-정확한-요구사항-분석을-위한-설계-아이디어) — Multi-Source RAG, 도메인 사전, 유사 테이블 구분
+4. [데이터 정합성 보장을 위한 설계 아이디어](#4-데이터-정합성-보장을-위한-설계-아이디어) — 3중 SQL 검증, 골든셋, PII, 추적
+5. [노드별 상세 설계](#5-노드별-상세-설계) — 19개 노드 책임/입출력/분기 (turn_reset / continue_orchestrator / visualizer / save_turn_snapshot 포함)
+6. [커넥터 아키텍처](#6-커넥터-아키텍처) — MongoDB / PostgreSQL / Qdrant / Redis (ES 제거 완료)
 7. [향후 고도화 방향](#7-향후-고도화-방향)
 
 ---
@@ -26,9 +26,12 @@ Data Copilot은 은행 임직원이 **자연어로 데이터 추출/분석을 �
 사내 다양한 참조 정보를 기반으로 SQL을 생성하여 데이터를 추출하거나
 데이터 기반 분석 결과를 반환하는 **LangGraph 기반 AI 에이전트**이다.
 
-v2.0에서 **3계층 16노드 에이전틱 파이프라인**으로 전면 재설계되었다.
+v2.0에서 **3계층 16노드** 에이전틱 파이프라인으로 전면 재설계된 후,
+멀티턴(CONTINUE 4-Way) · 시각화 분리 · 턴 스냅샷 영속화 등을 더해
+v2.4 현재 **3계층 19노드 구조**로 운영된다.
 입력 정제(sanitize)는 `runner.py`에서 그래프 진입 전에 1회 수행하며,
-그래프 내부에는 전처리 노드가 존재하지 않는다.
+그래프 진입 직후의 `turn_reset` 노드가 이전 턴의 산출물·실패 컨텍스트를
+초기화하여 **턴 격리(turn isolation)** 를 보장한다.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -49,43 +52,59 @@ v2.0에서 **3계층 16노드 에이전틱 파이프라인**으로 전면 재설
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│          LangGraph 파이프라인 (pipeline.py) — 16노드         │
+│          LangGraph 파이프라인 (pipeline.py) — 19노드         │
 │                                                             │
+│  ┌── 엔트리 ──────────────────────────────────────┐         │
+│  │ turn_reset (이전 턴 산출물 · phase · loop_guard │         │
+│  │             초기화, turn_id 발급)               │         │
+│  └──────────────────────┬─────────────────────────┘         │
+│                         ▼                                   │
 │  ┌─────────── Interpret 계층 ─────────────────────┐         │
-│  │ intent_classifier → normalize_query           │         │
-│  └──────────────────────┬────────────────────────┘         │
+│  │ intent_classifier → continue_orchestrator?    │         │
+│  │                   → query_normalizer          │         │
+│  │                   → clarification_handler     │         │
+│  │                   → simple_responder          │         │
+│  └──────────────────────┬─────────────────────────┘         │
 │                         │                                   │
-│          ┌──────────────┴──────────────┐                    │
-│          ▼                             ▼                    │
-│  ┌─ clarification_handler ──┐   ┌─── Reason 계층 (에이전틱) ──┐  │
-│  │ 통합 명확화 노드    │   │ reasoning_preparer            │  │
-│  │                     │   │ → context_retriever            │  │
-│  │ T1~T5 트리거        │   │ → context_interpreter       │  │
-│  │ AmbiguitySignal     │   │ → readiness_gate            │  │
-│  │ source_node 복귀    │←──│ → sql_generator             │  │
-│  └────────────────────┘   │ → sql_validator              │  │
-│                            │ → recovery_agent             │  │
-│                            │ → result_finalizer           │  │
-│                            └──────────┬──────────────────┘  │
-│                                       │                     │
-│                            ┌──────────┴──────────────────┐  │
-│                            │  Present 계층               │  │
-│                            │  execute_sql                │  │
-│                            │  → [분석?] → analyze_data   │  │
-│                            │  → simple_responder         │  │
-│                            │  → format_response          │  │
-│                            │  error_end                  │  │
-│                            └─────────────────────────────┘  │
+│  ┌── CONTINUE 4-Way (continue_orchestrator) ──────┐         │
+│  │ REDISPLAY  → visualizer                        │         │
+│  │ ANALYZE    → analyzer                          │         │
+│  │ REGENERATE → sql_generator                     │         │
+│  │ REFINE     → query_normalizer (정규화부터 재실행) │         │
+│  └──────────────────────┬─────────────────────────┘         │
+│                         ▼                                   │
+│  ┌─── Reason 계층 (에이전틱 루프) ─────────────────┐         │
+│  │ reasoning_preparer → context_retriever         │         │
+│  │ → context_interpreter → readiness_gate         │         │
+│  │ → sql_generator → sql_validator                │         │
+│  │ → recovery_agent → result_finalizer            │         │
+│  │ (clarification_handler ↔ T1~T5 source_node 복귀)│         │
+│  └──────────────────────┬─────────────────────────┘         │
+│                         ▼                                   │
+│  ┌─── Present 계층 ───────────────────────────────┐         │
+│  │ sql_executor                                   │         │
+│  │   → analyzer? (DATA_ANALYSIS) → visualizer     │         │
+│  │   → visualizer (그 외)                         │         │
+│  │ simple_responder ─────────────→ formatter      │         │
+│  │ formatter → save_turn_snapshot → END           │         │
+│  │ error_end → save_turn_snapshot → END           │         │
+│  └────────────────────────────────────────────────┘         │
 └─────────────────────────────────────────────────────────────┘
                          │
    ┌──────────┬──────────┬──────────┬──────────┐
    ▼          ▼          ▼          ▼          ▼
 ┌──────────┐┌──────────┐┌──────────┐┌──────────┐
-│ MongoDB  ││PostgreSQL││  Qdrant  ││  Neo4j   │
-│메타·코드 ││정보계    ││업무매뉴얼││온톨로지  │
-│용어사전  ││·이력DB   ││SQL이력   ││JOIN경로  │
+│ MongoDB  ││PostgreSQL││  Qdrant  ││  Redis   │
+│메타·코드 ││정보계    ││업무매뉴얼││캐시·세션 │
+│용어사전  ││·이력DB   ││SQL이력   ││턴 스냅샷 │
 └──────────┘└──────────┘└──────────┘└──────────┘
 ```
+
+> **노드 분포 요약 (19개):** Interpret 4 (`turn_reset`, `intent_classifier`, `query_normalizer`, `clarification_handler`)
+> + 멀티턴 라우터 1 (`continue_orchestrator`)
+> + Reason 8 (`reasoning_preparer`, `context_retriever`, `context_interpreter`, `readiness_gate`, `sql_generator`, `sql_validator`, `recovery_agent`, `result_finalizer`)
+> + Present 6 (`sql_executor`, `analyzer`, `visualizer`, `formatter`, `simple_responder`, `error_end`) + 종료 훅 1 (`save_turn_snapshot`).
+> Neo4j 온톨로지 커넥터는 도구 인터페이스만 유지된 상태로 활성 검색 경로에서는 사용되지 않는다.
 
 ---
 
@@ -108,74 +127,89 @@ v2.0에서 **3계층 16노드 에이전틱 파이프라인**으로 전면 재설
 ### 2.2 그래프 정의 (StateGraph)
 
 ```python
-# src/agents/graph/pipeline.py — 핵심 구조
+# src/agents/graph/pipeline.py — 핵심 구조 (v2.4, 19 노드)
 
 workflow = StateGraph(PipelineState)
 
-# ── Interpret 계층 (2노드) ──
-workflow.add_node("intent_classifier",  intent_classifier_node)  # 이력 해소 + 의도 분류 통합
-workflow.add_node("normalize_query",     normalize_query_node)     # 8-Slot 정규화
+# ── 엔트리: 턴 격리 ──
+workflow.add_node("turn_reset",          _turn_reset)              # 이전 턴 산출물·phase·loop_guard 초기화
 
-# ── 통합 명확화 (1노드) ──
-workflow.add_node("clarification_handler",     clarification_handler_node)     # T1~T5 통합 명확화
+# ── Interpret 계층 (3노드) ──
+workflow.add_node("intent_classifier",   intent_classifier_node)   # 이력 해소(CONTINUE/NEW/UNSURE) + 의도 분류 통합
+workflow.add_node("query_normalizer",    query_normalizer_node)    # 8-Slot 정규화 + search_keywords
+workflow.add_node("clarification_handler", clarification_handler_node)  # T1~T5 통합 명확화
+
+# ── 멀티턴 라우터 (1노드) ──
+workflow.add_node("continue_orchestrator", continue_orchestrator_node)  # CONTINUE 4-Way (REDISPLAY/ANALYZE/REGENERATE/REFINE)
 
 # ── Reason 계층 (8노드, 에이전틱 루프) ──
 workflow.add_node("reasoning_preparer",  reasoning_preparer_node)  # 규칙 기반 실행 계획 수립 (LLM 미사용)
-workflow.add_node("context_retriever",     context_retriever_node)     # 도구 기반 검색 실행
-workflow.add_node("context_interpreter", context_interpreter_node) # 검색 결과 해석, 지식 승격
+workflow.add_node("context_retriever",   context_retriever_node)   # 도구 기반 검색 실행
+workflow.add_node("context_interpreter", context_interpreter_node) # 검색 결과 해석, KnowledgeItem 승격
 workflow.add_node("readiness_gate",      readiness_gate_node)      # 준비도 판정 (SSOT)
-workflow.add_node("sql_generator",       sql_generator_node)       # SQL 생성 (dialect 라우팅)
-workflow.add_node("sql_validator",       sql_validator_node)       # 3-레이어 검증
+workflow.add_node("sql_generator",       sql_generator_node)       # SQL 생성 (target_db 라우팅)
+workflow.add_node("sql_validator",       sql_validator_node)       # 3-레이어 검증 + LLM 의미 검증
 workflow.add_node("recovery_agent",      recovery_agent_node)      # ReAct 스타일 복구
-workflow.add_node("result_finalizer",    result_finalizer_node)    # 최종 상태 결정
+workflow.add_node("result_finalizer",    result_finalizer_node)    # 최종 상태 결정 + target_db_resolver
 
-# ── Present 계층 (5노드) ──
-workflow.add_node("execute_sql",         execute_sql_node)         # DB 쿼리 실행
-workflow.add_node("analyze_data",        analyze_data_node)        # 데이터 분석 + 시각화
-workflow.add_node("format_response",     format_response_node)     # 보고서 포맷팅
+# ── Present 계층 (6노드) ──
+workflow.add_node("sql_executor",        sql_executor_node)        # DB 쿼리 실행
+workflow.add_node("analyzer",            analyzer_node)            # 데이터 분석 (인사이트·통계만)
+workflow.add_node("visualizer",          visualizer_node)          # 시각화 단독 노드 (analyzer에서 분리)
+workflow.add_node("formatter",           formatter_node)           # 보고서/엑셀 포맷팅
 workflow.add_node("simple_responder",    simple_responder_node)    # 비데이터 의도 경량 응답
 workflow.add_node("error_end",           _handle_error)            # 에러 메시지 생성
 
-workflow.add_node("turn_reset",          _turn_reset)              # 이전 턴 산출물 초기화
+# ── 종료 훅 (1노드) ──
+workflow.add_node("save_turn_snapshot",  save_turn_snapshot_node)  # 턴 스냅샷을 message_store에 영속화
 
 workflow.set_entry_point("turn_reset")
 workflow.add_edge("turn_reset", "intent_classifier")
+# formatter / error_end → save_turn_snapshot → END (정적 에지)
+workflow.add_edge("formatter", "save_turn_snapshot")
+workflow.add_edge("error_end", "save_turn_snapshot")
+workflow.add_edge("save_turn_snapshot", END)
 ```
 
 **노드 명명 규칙**: 그래프 노드 이름 = 파일명 = 함수명(`_node` 접미사 제외).
-예: `"context_retriever"` → `context_retriever.py` → `context_retriever_node()`
+예: `"context_retriever"` → `context_retriever.py` → `context_retriever_node()`.
+v2.4에서 Present 계층 3개 노드는 책임에 더 가까운 이름으로 통일되었다
+(`execute_sql`→`sql_executor`, `analyze_data`→`analyzer`, `format_response`→`formatter`).
 
 **노드 디렉토리 구조:**
 
 ```
 src/agents/nodes/
 ├── interpret/
-│   ├── intent_classifier.py    # intent_classifier (이력 해소 + 의도 분류 통합)
-│   ├── query_normalizer.py      # normalize_query
-│   ├── clarification_handler.py # clarification_handler (통합 명확화)
-│   └── 미사용_intent_classifier.py # (미사용) intent_classifier로 통합
+│   ├── intent_classifier.py     # intent_classifier (이력 해소 + 의도 분류 통합)
+│   ├── query_normalizer.py      # query_normalizer (8-Slot + search_keywords)
+│   ├── clarification_handler.py # clarification_handler (T1~T5 통합 명확화)
+│   └── continue_orchestrator.py # continue_orchestrator (CONTINUE 4-Way 라우터)
 ├── reason/
 │   ├── reasoning_preparer.py    # reasoning_preparer
-│   ├── context_retriever.py       # context_retriever
+│   ├── context_retriever.py     # context_retriever
 │   ├── context_interpreter.py   # context_interpreter
 │   ├── readiness_gate.py        # readiness_gate
 │   ├── sql_generator.py         # sql_generator
 │   ├── sql_validator.py         # sql_validator
 │   ├── recovery_agent.py        # recovery_agent
-│   ├── result_finalizer.py      # result_finalizer
+│   ├── result_finalizer.py      # result_finalizer (+ target_db_resolver 호출)
 │   └── tools.py                 # 도구 함수 모음
 ├── present/
-│   ├── sql_executor.py          # execute_sql
-│   ├── analyzer.py              # analyze_data
-│   ├── formatter.py             # format_response
-│   └── simple_responder.py      # simple_responder (비데이터 의도 경량 응답)
+│   ├── sql_executor.py          # sql_executor
+│   ├── analyzer.py              # analyzer (시각화 분리됨)
+│   ├── visualizer.py            # visualizer (시각화 단독 노드)
+│   ├── formatter.py             # formatter
+│   └── simple_responder.py      # simple_responder
+├── post/
+│   └── save_turn_snapshot.py    # save_turn_snapshot (종료 훅)
 ├── system_prompts.py
 └── thinking_modes.py
 ```
 
 ### 2.3 조건부 분기 (Conditional Edges)
 
-9개 라우팅 함수가 파이프라인의 동적 흐름을 결정한다.
+10개 라우팅 함수가 파이프라인의 동적 흐름을 결정한다 (v2.4: continue_orchestrator 라우터가 추가됨).
 
 ```mermaid
 ---
@@ -184,18 +218,24 @@ config:
     fontSize: 14px
 ---
 graph TD
-    START((시작)) --> intent_classifier
+    START((시작)) --> turn_reset --> intent_classifier
+    intent_classifier -->|CONTINUE_ORCHESTRATION_PENDING| continue_orchestrator
     intent_classifier -->|pending_signals| clarification_handler
     intent_classifier -->|비데이터 의도| simple_responder
     intent_classifier -->|ERROR| error_end
-    intent_classifier -->|normalization ON| normalize_query
+    intent_classifier -->|normalization ON| query_normalizer
     intent_classifier -->|normalization OFF| reasoning_preparer
 
-    normalize_query -->|pending_signals| clarification_handler
-    normalize_query -->|else| reasoning_preparer
+    continue_orchestrator -->|REDISPLAY| visualizer
+    continue_orchestrator -->|ANALYZE| analyzer
+    continue_orchestrator -->|REGENERATE| sql_generator
+    continue_orchestrator -->|REFINE| query_normalizer
+    continue_orchestrator -->|판정 실패| error_end
+
+    query_normalizer -->|pending_signals| clarification_handler
+    query_normalizer -->|else| reasoning_preparer
 
     reasoning_preparer --> context_retriever
-
     context_retriever --> context_interpreter
     context_interpreter --> readiness_gate
 
@@ -211,8 +251,9 @@ graph TD
     sql_generator -->|else| sql_validator
 
     sql_validator -->|None = pass| result_finalizer
-    sql_validator -->|SQL_SYNTAX + retry OK| sql_generator
-    sql_validator -->|SQL_SEMANTIC_LOCAL + retry OK| sql_generator
+    sql_validator -->|SQL_SYNTAX + local_fix OK| sql_generator
+    sql_validator -->|SQL_SEMANTIC_LOCAL + local_fix OK| sql_generator
+    sql_validator -->|REGENERATE × non-local_fix 차단| result_finalizer
     sql_validator -->|STRUCTURAL/EMPTY/DB_ERROR| recovery_agent
     sql_validator -->|limit exceeded| result_finalizer
 
@@ -222,24 +263,27 @@ graph TD
     recovery_agent -->|pending_signals| clarification_handler
 
     result_finalizer -->|pending_signals| clarification_handler
-    result_finalizer -->|validated_sql| execute_sql
+    result_finalizer -->|validated_sql| sql_executor
     result_finalizer -->|error| error_end
 
-    execute_sql -->|ERROR| error_end
-    execute_sql -->|DATA_ANALYSIS| analyze_data
-    execute_sql -->|else| format_response
+    sql_executor -->|ERROR| error_end
+    sql_executor -->|DATA_ANALYSIS + needs_analyzer| analyzer
+    sql_executor -->|else| visualizer
 
-    analyze_data --> format_response
-    format_response --> END_STATE
-    error_end --> END_STATE
-
-    simple_responder --> format_response
+    analyzer --> visualizer
+    visualizer --> formatter
+    simple_responder --> formatter
+    formatter --> save_turn_snapshot
+    error_end --> save_turn_snapshot
+    save_turn_snapshot --> END_STATE
 
     clarification_handler -->|source_node| intent_classifier
-    clarification_handler -->|source_node| normalize_query
+    clarification_handler -->|source_node| query_normalizer
     clarification_handler -->|source_node| sql_generator
     clarification_handler -->|source_node| readiness_gate
+    clarification_handler -->|source_node| recovery_agent
     clarification_handler -->|source_node| result_finalizer
+    clarification_handler -->|source_node| continue_orchestrator
 ```
 
 **라우팅 함수 상세:**
@@ -248,11 +292,26 @@ graph TD
 
 | 조건 | 분기 대상 |
 |------|-----------|
+| `status == CONTINUE_ORCHESTRATION_PENDING` (CONTINUE 판정 + snapshot 존재) | `continue_orchestrator` |
 | `pending_signals` 존재 | `clarification_handler` |
 | `status == ERROR` | `error_end` |
 | 비데이터 의도 (CASUAL_TALK, META_QUESTION) | `simple_responder` |
-| 데이터 의도 + normalization ON | `normalize_query` |
+| 데이터 의도 + normalization ON | `query_normalizer` |
 | 데이터 의도 + normalization OFF | `reasoning_preparer` |
+
+#### (1-A) `_route_after_continue_orchestrator` — CONTINUE 4-Way 라우팅
+
+`ContinueRoute` 판정 결과(`PipelineState.route`)에 따른 분기. 모든 경로는 하류(downstream)
+노드로 향하므로 순환 위험이 없으며, 판정 우선순위는 **REDISPLAY → ANALYZE → REGENERATE → REFINE**
+(하류 비용 낮은 순)이다.
+
+| ContinueRoute | 의미 | 분기 대상 |
+|---------------|------|-----------|
+| `REDISPLAY` | SQL·결과 동일, 시각화/포맷만 변경 | `visualizer` (스냅샷 result_data hydrate) |
+| `ANALYZE` | 기존 결과로 분석/인사이트 요청 | `analyzer` → visualizer (SQL 재실행 스킵) |
+| `REGENERATE` | SQL 표현만 재작성 (정규화 동일) | `sql_generator` (knowledge_items·target_db 전량 복원, reasoning_preparer 우회) |
+| `REFINE` | 질의 자체 수정 (필터/집계/기간 변경) | `query_normalizer` (정규화부터 재수행, hydration 스킵) |
+| 판정 실패 (LLM 파싱 오류·빈 스냅샷) | — | `error_end` (상류 회귀 금지) |
 
 #### (2) `_route_after_normalize` — 정규화 후
 
@@ -282,19 +341,22 @@ graph TD
 | `pending_signals` 존재 (Cross-DB INFER 등) | `clarification_handler` |
 | 그 외 | `sql_validator` |
 
-#### (5) `_route_after_sql_validator` — SQL 검증 후 (FailureType 기반)
-
-5가지 분기:
+#### (5) `_route_after_sql_validator` — SQL 검증 후 (FailureType 기반, 6분기)
 
 | FailureType | 조건 | 분기 대상 |
 |-------------|------|-----------|
 | `None` (통과) | — | `result_finalizer` (conclude_success) |
-| `SQL_SYNTAX` | `generate_attempts < MAX_GENERATES` | `sql_generator` (fix_syntax) |
+| `SQL_SYNTAX` | `generate_attempts < MAX_GENERATES` AND **local_fix 가능** | `sql_generator` (fix_syntax) |
 | `SQL_SYNTAX` | 한도 초과 | `result_finalizer` (conclude_failure) |
 | `SQL_SEMANTIC_LOCAL` | `should_escalate_to_structural()` | `recovery_agent` (replan) |
-| `SQL_SEMANTIC_LOCAL` | `generate_attempts < MAX_GENERATES` | `sql_generator` (fix_local) |
+| `SQL_SEMANTIC_LOCAL` | `generate_attempts < MAX_GENERATES` AND **local_fix 가능** | `sql_generator` (fix_local) |
+| **REGENERATE × non-local_fix 차단** | `route == REGENERATE` AND failure가 local_fix 대상 아님 (예: STRUCTURAL/NO_TABLE 등) | `result_finalizer` (conclude_failure, recovery_agent 우회) |
 | `SQL_STRUCTURAL`, `EMPTY_RESULT`, `DB_ERROR`, `NO_KNOWLEDGE`, `NO_TABLE`, `TERM_UNRESOLVABLE`, `GENERATION_FAILED` | — | `recovery_agent` (replan) |
 | 기타 | — | `result_finalizer` (conclude_failure) |
+
+> **REGENERATE × non-local_fix 가드(Guard)**: CONTINUE-REGENERATE 턴은 SQL 표현만 수정하는
+> 의도이므로, local_fix 범위를 벗어나는 실패(테이블 재선택·재계획)는 직전 turn 의 의미를
+> 보존하기 위해 recovery_agent 진입 없이 즉시 실패 처리한다 (Phase 3 §14.3.5).
 
 #### (6) `_route_after_recovery_agent` — 복구 에이전트 후
 
@@ -313,7 +375,7 @@ graph TD
 |------|-----------|
 | `pending_signals` 존재 | `clarification_handler` |
 | `error_message` 존재 | `error_end` |
-| `validated_sql` 존재 | `execute_sql` |
+| `validated_sql` 존재 | `sql_executor` |
 | 그 외 | `error_end` |
 
 #### (8) `_route_after_execution` — SQL 실행 후
@@ -321,14 +383,17 @@ graph TD
 | 조건 | 분기 대상 |
 |------|-----------|
 | `status == ERROR` | `error_end` |
-| `intent == DATA_ANALYSIS` | `analyze_data` |
-| 그 외 | `format_response` |
+| `intent == DATA_ANALYSIS` AND `needs_analyzer == True` | `analyzer` |
+| 그 외 (DATA_EXTRACTION 또는 분석 불필요) | `visualizer` |
 
-#### `_route_after_clarify` — 통합 명확화 후 (source_node 복귀)
+> v2.4부터 시각화는 `visualizer` 단독 노드로 분리되었다. analyzer는 인사이트·통계만 산출하고
+> 차트 판단/생성은 항상 visualizer에서 수행한다 (REDISPLAY 경로와 동일 진입점 확보).
+
+#### (9) `_route_after_clarify` — 통합 명확화 후 (source_node 복귀)
 
 마지막 `resolved_signals[-1].source_node`로 복귀한다.
-유효한 복귀 대상: `intent_classifier`, `normalize_query`,
-`sql_generator`, `readiness_gate`, `result_finalizer`.
+유효한 복귀 대상(`_VALID_RETURN_TARGETS`): `intent_classifier`, `query_normalizer`,
+`sql_generator`, `readiness_gate`, `recovery_agent`, `result_finalizer`, `continue_orchestrator`.
 
 **통합 명확화 (Unified Clarification) 상세:**
 
@@ -338,7 +403,7 @@ graph TD
 |--------|-----------|-----------|
 | T1 | `intent_classifier` | 대화 이력 UNSURE |
 | T2 | `intent_classifier` | 의도 불분명 (AMBIGUOUS) |
-| T3 | `normalize_query` | 8-Slot 파싱 불확실 |
+| T3 | `query_normalizer` | 8-Slot 파싱 불확실 |
 | T4 | `sql_generator` | Cross-DB dialect INFER |
 | T5 | `result_finalizer` | 사용자 확인 필요 |
 
@@ -348,55 +413,74 @@ graph TD
 
 ### 2.4 공유 상태 (PipelineState + ReasoningState)
 
-v2.0에서 **2계층 중첩 구조**로 재설계되었다.
-`PipelineState`가 파이프라인 전체를, `ReasoningState`가 Reason 계층 내부를 담당한다.
+`PipelineState`가 파이프라인 전체를, `ReasoningState`가 Reason 계층 내부를 담당하는
+**2계층 중첩 구조**이며, v2.4에서는 멀티턴(turn isolation, CONTINUE 4-Way) · 스트리밍 ·
+시각화 분리 · target_db 라우팅을 위한 필드가 추가되었다. **턴 경계 초기화의 SSoT**는
+`PipelineState.turn_reset_updates(intent_norm)` classmethod 이며, `turn_reset` 노드가
+이 함수의 결과를 그대로 반영한다.
 
 ```python
 # src/agents/state/state.py
 
 class PipelineState(BaseModel):
     # ── 공통 ──
-    user_input: str                          # 원본 사용자 입력
-    session_id: str                          # 세션 추적용
+    user_input: str                          # 원본 사용자 입력 (당 턴)
+    session_id: str                          # 세션 ID (멀티턴 키)
     original_query: str                      # 불변 원본 (감사 추적용)
-    conversation_history: list[dict[str, str]]  # 멀티턴 대화 이력
+    conversation_history: list[dict[str, str]]  # 멀티턴 대화 이력 (전 턴 복원)
+    current_user_message_seq: int            # 당 턴의 user message 시퀀스 (snapshot 매칭 키)
+    turn_id: str                             # 턴 단위 식별자 (turn_reset에서 발급)
 
     # ── Interpret 계층 ──
     preprocessed_input: str                  # runner.py에서 sanitize 후 설정 (노드 아님)
-    intent: IntentType                       # 6가지 의도 (DATA_EXTRACTION, DATA_ANALYSIS,
-                                             #   CLARIFICATION_NEEDED, GENERAL_QUESTION,
-                                             #   CASUAL_TALK, META_QUESTION)
+    intent: IntentType                       # 7가지 (DATA_EXTRACTION/DATA_ANALYSIS/
+                                             #   CLARIFICATION_NEEDED/GENERAL_QUESTION/
+                                             #   CASUAL_TALK/META_QUESTION/UNKNOWN)
     intent_confidence: float                 # 분류 신뢰도 (0.0~1.0)
     query_category: str                      # 쿼리 카테고리 (여신, 수신 등)
-    normalized_query: NormalizedQuery | None  # 8-Slot 정규화 결과
+    normalized_query: NormalizedQuery | None # 8-Slot 정규화 결과
 
     # ── Unified Clarification ──
     pending_signals: list[AmbiguitySignal]   # 미처리 시그널 (덮어쓰기)
     resolved_signals: Annotated[             # 처리 완료 누적 (operator.add)
         list[AmbiguitySignal], operator.add]
 
-    # ── 레거시 명확화 (이관 후 제거 예정) ──
-    clarification_question: str
-    clarification_response: str
-    awaiting_clarification: bool
-    clarification_turns: int
+    # ── CONTINUE 멀티턴 (v2.4 신규) ──
+    turn_snapshots: list[TurnSnapshot]       # 세션 영속 — 직전 턴 result_data + visualization 등
+    reference_turns: list[int]               # CONTINUE 라우팅 시 참조한 turn user_message_seq
+    route: ContinueRoute | None              # REDISPLAY/ANALYZE/REGENERATE/REFINE
+    handoff_note: str | None                 # continue_orchestrator → 하류 노드용 지시 노트
+    continue_context: ContinueContext | None # 직전 턴 핵심 메타 (NormalizedQuery·target_db 등)
 
     # ── Reason 계층 (에이전틱 추론 — 중첩) ──
     reason: ReasoningState                   # ← 별도 모델로 중첩
 
     # ── Present 계층 ──
     context: ContextInfo                     # 수집된 참조 정보
-    sql_result: SQLResult                    # SQL 실행 결과
-    analysis_result: AnalysisResult          # 분석 결과
-    visualization: VisualizationData         # 시각화 데이터
+    sql_result: SQLResult                    # SQL 실행 결과 (raw)
+    result_data: ResultData | None           # 가공된 결과 데이터 (스냅샷 hydrate 대상)
+    analysis_query: str | None               # ANALYZE 라우트의 분석 의도 추출 결과
+    needs_analyzer: bool                     # sql_executor 후 analyzer 라우팅 결정
+    analysis_result: AnalysisResult          # 분석 결과 (인사이트·통계만 — 시각화 분리됨)
+    visualization: VisualizationData         # 시각화 결과 (visualizer 노드에서 산출)
     formatted_response: str                  # 최종 사용자 응답
+    process_summary: str                     # 추론 추적 요약 (formatter에서 산출)
+
+    # ── 스트리밍 ──
+    streaming_enabled: bool                  # 스트리밍 모드 여부 (런너에서 설정)
+    streaming_delivered: bool                # WebSocket으로 실제 전달되었는지 표시 (중복 방지)
 
     # ── 상태 관리 ──
-    status: QueryStatus                      # 현재 처리 상태
+    status: QueryStatus                      # 현재 처리 상태 (CONTINUE_ORCHESTRATION_PENDING 포함)
     error_message: str                       # 에러 메시지
 
     # ── 추론 추적 ──
     trace_log: list[TraceEntry]              # 노드별 추론 과정 기록
+
+    @classmethod
+    def turn_reset_updates(cls, intent_norm: bool) -> dict[str, Any]:
+        """턴 경계 초기화 SSoT — turn_reset 노드가 그대로 반영한다."""
+        ...
 ```
 
 ```python
@@ -404,8 +488,8 @@ class ReasoningState(BaseModel):
     """에이전틱 추론 루프의 내부 상태 (PipelineState.reason)."""
 
     # ── 진행 상태 ──
-    phase: Phase                             # PLANNING→EXPLORING→VERIFYING→
-                                             # GENERATING→VALIDATING→REPLANNING→DONE
+    phase: Phase                             # PLANNING→EXPLORING→GENERATING→VALIDATING→
+                                             # REPLANNING→DONE
 
     # ── 플래너 산출물 ──
     query_decomposition: dict                # 질의 분해 결과
@@ -416,20 +500,34 @@ class ReasoningState(BaseModel):
     # ── 누적 지식 ──
     knowledge_items: list[KnowledgeItem]     # 탐색 중 축적된 지식 단위
     explored_use_cases: list[dict]           # 검색된 활용사례 SQL
-    candidate_tables: list[CandidateTable]   # 후보 테이블 (MongoDB/DB 파싱 결과)
+    candidate_tables: list[CandidateTable]   # 후보 테이블 (selection_status 포함)
     searched_queries: list[str]              # 중복 검색 방지용
     discovered_facts: list[str]              # 도구 실행 결과 해석 누적
     code_map: dict[str, CodeMeta]            # 코드 컬럼별 코드값 매핑
+    executed_tool_keys: list[str]            # 도구 호출 dedup 키
 
     # ── 실패 기록 ──
     dead_ends: list[DeadEnd]                 # 실패한 탐색 경로
+    fix_history: list[FixAttempt]            # SQL 수정 시도 누적 (loop guard 보조)
 
     # ── SQL ──
     generated_sql: str | None                # LLM 생성 SQL
     validated_sql: str | None                # 검증 통과 SQL
+    sql_explanation: str | None              # SQL 설명 (formatter 사용)
+
+    # ── 직전 턴 SQL 주입 (Phase 3 §3.6) ──
+    previous_turn_sql: str | None            # CONTINUE 라우트에서 sql_generator/recovery_agent 참고용
+    previous_turn_sql_explanation: str | None
+
+    # ── target_db 라우팅 (Phase 3) ──
+    target_db: str | None                    # readiness_gate 직후 결정된 라우팅 대상 DB
+    target_db_decision: TargetDbDecision | None  # SSoT 판정 결과 (FORCED/SINGLE/AMBIGUOUS/NO_SELECTION)
 
     # ── SQL 검증 상세 ──
     validation_checks: dict[str, Any]        # 체크 항목별 판정 사유
+    validation_summary: str                  # 검증 통과·실패 요약 (formatter 사용)
+    confidence_score: float                  # readiness 점수 (가시화용)
+    pending_assumptions: list[str]           # 검증되지 않은 SQL 가정 (T5 트리거 후보)
 
     # ── 실패 맥락 ──
     failure_type: FailureType | None         # 실패 유형 (라우팅 분기 키)
@@ -451,9 +549,14 @@ class ReasoningState(BaseModel):
     inference_notes: list[str]               # 추론 과정 메모 (규칙 기반 판단 근거)
 
     # ── 최종 출력 ──
-    final_status: FinalStatus                # PENDING/SUCCESS/FAILURE
+    final_status: FinalStatus                # PENDING/SUCCESS/CANCELLED/FAILURE/AWAITING_CLARIFICATION
     exploration_summary: str                 # 탐색 과정 요약 텍스트
 ```
+
+> **레거시 필드 제거(v2.4)**: `clarification_question`/`clarification_response`/
+> `awaiting_clarification`/`clarification_turns` 등 멀티턴 명확화 보조 필드는
+> `pending_signals`/`resolved_signals` + `interrupt` 패턴으로 완전히 대체되어 모두 제거되었다.
+> 마찬가지로 `fast_path_triggered`(v2.0 일시 도입) 도 제거되었다.
 
 ---
 
@@ -920,7 +1023,7 @@ class TraceEntry(BaseModel):
 | 노드 | 기록 내용 | 예시 |
 |------|----------|------|
 | intent_classifier | 이력 해소 + 분류 결과 | CONTINUE + DATA_EXTRACTION (97%) |
-| normalize_query | 8-Slot 정규화 결과 | 대상: 고객, 기간: 이번 달, ... |
+| query_normalizer | 8-Slot 정규화 + search_keywords 결과 | 대상: 고객, 기간: 이번 달, ... |
 | reasoning_preparer | 실행 계획 수립 | 가설 2건, 실행 계획 3스텝 |
 | context_retriever | 도구 실행 결과 | MongoDB 테이블 3건, SQL 이력 2건 |
 | context_interpreter | 지식 승격 결과 | KnowledgeItem 5건 CONFIRMED |
@@ -929,9 +1032,12 @@ class TraceEntry(BaseModel):
 | sql_validator | 검증 결과 | 3-레이어 검증 통과 |
 | recovery_agent | 복구 전략 | 가설 교체, 추가 탐색 실행 |
 | result_finalizer | 최종 상태 | SUCCESS, validated_sql 확정 |
-| execute_sql | 결과 건수 + 실행 시간 | 쿼리 실행 완료 (342건, 15.2ms) |
-| analyze_data | 인사이트 건수 + 시각화 | 데이터 분석 완료 (인사이트 3건, 시각화: bar_chart) |
-| format_response | 보고서 정리 완료 | 보고서 형태로 결과 정리 완료 |
+| sql_executor | 결과 건수 + 실행 시간 + target_db | 쿼리 실행 완료 (342건, 15.2ms, target_db=postgres) |
+| analyzer | 인사이트 건수 | 데이터 분석 완료 (인사이트 3건) |
+| visualizer | 시각화 판단·생성 결과 | 시각화 생성 완료 (chart_type: bar_chart) |
+| formatter | 보고서 정리 완료 | 보고서 형태로 결과 정리 완료 |
+| save_turn_snapshot | 스냅샷 영속화 | 턴 스냅샷 저장 완료 (turn_id=...) |
+| continue_orchestrator | CONTINUE 라우팅 결정 | REGENERATE (직전 턴 SQL 표현 수정) |
 
 **3가지 노출 경로:**
 
@@ -942,6 +1048,19 @@ class TraceEntry(BaseModel):
 ---
 
 ## 5. 노드별 상세 설계
+
+### 5.0 턴 리셋 노드 (turn_reset)
+
+**책임**: 그래프 진입 직후 이전 턴의 산출물·실패 컨텍스트·loop_guard·phase를 초기화하여
+**턴 격리(turn isolation)** 를 보장한다. `turn_id`도 이 시점에 발급한다.
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/agents/graph/pipeline.py` (`_turn_reset` 함수) |
+| 입력 | `PipelineState` 전체 |
+| 출력 | `PipelineState.turn_reset_updates(intent_norm)` 결과 (SSoT 단일 호출) |
+| 특성 | 규칙 기반, LLM/도구 미사용. 멀티턴 컨텍스트(`conversation_history`/`turn_snapshots`)는 보존 |
+| 후속 | 항상 `intent_classifier`로 직행 (정적 에지) |
 
 ### 5.1 통합 이력 해소 + 의도 분류 노드 (intent_classifier)
 
@@ -957,20 +1076,37 @@ class TraceEntry(BaseModel):
 | 출력 | `preprocessed_input` (이력 반영), `intent`, `intent_confidence`, `query_category`, `pending_signals` |
 | 이력 판정 | CONTINUE(이전 대화 연속) / NEW(신규 질의) / UNSURE(모호 → T1 트리거) |
 | 의도 분류 | `DATA_EXTRACTION`, `DATA_ANALYSIS`, `CASUAL_TALK`, `META_QUESTION`, `AMBIGUOUS` |
-| 분기 | UNSURE/AMBIGUOUS → `clarification_handler`, CASUAL_TALK/META_QUESTION → `simple_responder`, DATA → `normalize_query` |
+| 분기 | CONTINUE+snapshot → `continue_orchestrator`, UNSURE/AMBIGUOUS → `clarification_handler`, CASUAL_TALK/META_QUESTION → `simple_responder`, DATA → `query_normalizer` |
 | 폴백 | LLM 실패 시 → Legacy 분류기로 폴백 |
 
-### 5.3 쿼리 정규화 노드 (normalize_query)
+### 5.2 CONTINUE 오케스트레이터 노드 (continue_orchestrator)
 
-**책임**: 사용자 입력을 8개 Slot 구조로 정규화하여 후속 노드에 구조화된 입력을 제공한다.
+**책임**: `intent_classifier`가 CONTINUE로 판정하고 `turn_snapshots`에 직전 턴 결과가 존재할 때
+4-Way 라우팅(REDISPLAY / ANALYZE / REGENERATE / REFINE)을 LLM 판정으로 결정하고
+`PipelineState.route` + `handoff_note` + `reference_turns` + (필요 시) state hydration을 수행한다.
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/agents/nodes/interpret/continue_orchestrator.py` |
+| 입력 | `user_input`, `conversation_history`, `turn_snapshots`, `current_user_message_seq` |
+| 출력 | `route`, `handoff_note`, `reference_turns`, `continue_context`, (라우트별) hydrated `result_data` / `reason.previous_turn_sql` / `reason.knowledge_items` 등 |
+| 우선순위 | REDISPLAY → ANALYZE → REGENERATE → REFINE (하류 비용 낮은 순) |
+| Hydration 규칙 | REDISPLAY: result_data + visualization · ANALYZE: result_data(SQL 재실행 스킵) · REGENERATE: NormalizedQuery + knowledge_items + target_db + previous_turn_sql 전량 · REFINE: 정규화 오염 방지 위해 hydration 스킵 |
+| 분기 | `_route_after_continue_orchestrator` (4-Way) |
+| 폴백 | LLM 파싱 오류·빈 스냅샷 시 `error_end` 직행 (상류 회귀 금지) |
+
+### 5.3 쿼리 정규화 노드 (query_normalizer)
+
+**책임**: 사용자 입력을 8개 Slot 구조로 정규화하고, 소스별 검색 키워드(`SearchKeywords`)를 산출하여 후속 노드에 구조화된 입력을 제공한다.
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/agents/nodes/interpret/query_normalizer.py` |
-| 입력 | `preprocessed_input`, `intent` |
-| 출력 | `normalized_query: NormalizedQuery`, `pending_signals` (불확실 시 T3 트리거) |
+| 입력 | `preprocessed_input`, `intent`, (REFINE 라우트에서) `handoff_note` |
+| 출력 | `normalized_query: NormalizedQuery`(`search_keywords` 포함), `pending_signals` (불확실 시 T3 트리거) |
 | 8-Slot | INTENT(의도), ENTITY(대상), MEASURE(측정값), DIMENSION(차원), FILTER(필터), TIME(시간), MODIFIER(수식어), OUTPUT_HINT(출력) |
 | 조건 | `settings.normalization_enabled` 가 True일 때만 실행한다 |
+| CONTINUE 소비 | REFINE 라우트에서는 `handoff_note`의 `### 연속 처리 의도` 섹션을 프롬프트에 주입하여 직전 턴 의미를 보존한다 |
 
 ### 5.4 통합 명확화 노드 (clarification_handler)
 
@@ -1076,50 +1212,68 @@ class TraceEntry(BaseModel):
 ### 5.12 최종 상태 결정 노드 (result_finalizer)
 
 **책임**: Reason 계층의 최종 상태를 결정하고 Present 계층으로 전환한다.
+SUCCESS 진입 직전에 `target_db_resolver`(SSoT)를 호출하여 라우팅 대상 DB를 결정한다.
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/reason/result_finalizer.py` |
-| 입력 | `reason` (전체 ReasoningState) |
-| 출력 | `reason.final_status`, `reason.exploration_summary`, `context` (ContextInfo 복원), `error_message` (실패 시) |
-| 상태 | `FinalStatus.SUCCESS` → `execute_sql`, `FinalStatus.FAILURE` → `error_end` |
+| 파일 | `src/agents/nodes/reason/result_finalizer.py` (+ `src/services/target_db_resolver.py`) |
+| 입력 | `reason` (전체 ReasoningState), `reason.candidate_tables` (selection_status), settings |
+| 출력 | `reason.final_status`, `reason.exploration_summary`, `reason.target_db`, `reason.target_db_decision`, `context`, `error_message` (실패 시) |
+| target_db_decision | FORCED(settings 강제) / SINGLE(SELECTED 단일 DB) / AMBIGUOUS(복수 DB → 우선순위) / NO_SELECTION(SELECTED 없음 → fail) |
+| 상태 | `FinalStatus.SUCCESS` → `sql_executor`, `FinalStatus.FAILURE` → `error_end` |
 | T5 | 사용자 확인이 필요한 경우 `pending_signals`를 생성하여 `clarification_handler`로 분기한다 |
 
-### 5.13 SQL 실행 노드 (execute_sql)
+### 5.13 SQL 실행 노드 (sql_executor)
 
-**책임**: 검증 통과한 SQL을 정보계 DB에서 실행한다.
+**책임**: 검증 통과한 SQL을 정보계 DB(target_db)에서 실행하고 가공된 `result_data`를 산출한다.
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/agents/nodes/present/sql_executor.py` |
-| 입력 | `reason.validated_sql` |
-| 출력 | `sql_result` (SQLResult: columns, rows, row_count, execution_time_ms) |
-| 안전장치 | SELECT/WITH 문 재확인, 결과 행 수 상한(10,000건) |
+| 입력 | `reason.validated_sql`, `reason.target_db` |
+| 출력 | `sql_result`, `result_data` (ResultData: columns·rows·row_count·execution_time_ms·summary), `needs_analyzer` |
+| 안전장치 | SELECT/WITH 문 재확인, 결과 행 수 상한(`settings.max_query_rows`) |
+| 분기 | DATA_ANALYSIS + needs_analyzer → `analyzer`, 그 외 → `visualizer` |
 
-### 5.14 분석 노드 (analyze_data)
+### 5.14 분석 노드 (analyzer)
 
-**책임**: 추출된 데이터를 기반으로 요약, 인사이트, 통계를 산출하고 시각화 차트를 생성한다.
+**책임**: 추출된 데이터를 기반으로 요약·인사이트·통계를 산출한다. **시각화는 분리되어 visualizer 노드에서 수행**한다.
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/agents/nodes/present/analyzer.py` + `src/services/visualization/chart_generator.py` |
-| 입력 | `sql_result`, `user_input` |
-| 출력 | `analysis_result` (summary, insights, statistics), `visualization` (VisualizationData) |
-| LLM | 설정 모델 (JSON 구조 응답 + 시각화 판단 + SVG 생성) |
-| 재시도 | `llm_call_with_parse_retry`로 JSON 파싱 실패 시 재시도, 최종 실패 시 텍스트 폴백한다 |
-| 시각화 | 3단계 하이브리드 — LLM 판단 → LLM SVG 생성 → 템플릿 폴백 (5.17절 참고) |
+| 파일 | `src/agents/nodes/present/analyzer.py` |
+| 입력 | `sql_result`, `result_data`, `analysis_query` (ANALYZE 라우트), `user_input` |
+| 출력 | `analysis_result` (summary, insights, statistics) |
+| LLM | 설정 모델 (JSON 구조 응답) |
+| 재시도 | `llm_call_with_parse_retry`로 JSON 파싱 실패 시 재시도, 최종 실패 시 텍스트 폴백 |
+| CONTINUE 소비 | ANALYZE 라우트에서 `handoff_note`의 분석 의도 섹션을 프롬프트에 주입 |
+| 후속 | 항상 `visualizer`로 이동 (정적 에지) |
 
-### 5.15 포맷팅 노드 (format_response)
+### 5.14.5 시각화 노드 (visualizer)
 
-**책임**: SQL 실행 결과 또는 분석 결과를 사용자 친화적인 보고서 형태로 변환한다.
+**책임**: `result_data` + (선택) `analysis_result`를 입력받아 시각화 필요 여부를 판단하고 SVG 차트를 생성한다 (analyzer에서 분리됨).
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/agents/nodes/present/visualizer.py` + `src/services/visualization/chart_generator.py` |
+| 입력 | `result_data`, `analysis_result`, `intent`, (REDISPLAY 시) hydrated `result_data` |
+| 출력 | `visualization` (VisualizationData: svg_code, chart_type, title) |
+| LLM | VISUALIZATION_JUDGMENT (차트 유형 판단) + VISUALIZATION_SVG_GENERATION (SVG 생성) |
+| 폴백 | LLM SVG 실패 시 chart_generator 템플릿 폴백 (bar/line/pie) |
+| CONTINUE 소비 | REDISPLAY 라우트에서 `handoff_note`의 시각화 변경 지시 섹션을 프롬프트에 주입 |
+| 후속 | 항상 `formatter`로 이동 (정적 에지) |
+
+### 5.15 포맷팅 노드 (formatter)
+
+**책임**: SQL 실행 결과 + 분석 + 시각화를 사용자 친화적인 보고서 형태로 변환한다.
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/agents/nodes/present/formatter.py` |
-| 입력 | `sql_result`, `user_input`, `trace_log` |
-| 출력 | `formatted_response` |
-| 규칙 | 기술용어 금지, 금액 단위 변환, 코드값→이름 변환, 표 형태 |
-| 추론 추적 | 응답 끝에 `<details>` 접기로 "조회 과정 요약"을 추가한다 |
+| 입력 | `result_data`, `analysis_result`, `visualization`, `trace_log`, `reason.sql_explanation`, `reason.validation_summary` |
+| 출력 | `formatted_response`, `process_summary` |
+| 규칙 | 기술용어 금지, 금액 단위 변환, 코드값→이름 변환, 표 형태, 엑셀 다운로드 메타 포함 |
+| 추론 추적 | 응답 끝에 `<details>` 접기로 "조회 과정 요약(process_summary)"을 추가 |
 
 ### 5.16 에러 종료 노드 (error_end)
 
@@ -1128,14 +1282,29 @@ class TraceEntry(BaseModel):
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/agents/graph/pipeline.py` (`_handle_error` 함수) |
-| 입력 | `error_message`, `reason.loop_guard.generate_attempts` |
+| 입력 | `error_message`, `reason.loop_guard.generate_attempts`, `reason.failure_type` |
 | 출력 | `formatted_response`, `status` (ERROR) |
-| 메시지 | SQL 재시도 소진 시 전용 메시지, 그 외 일반 에러 + 다시 표현 안내 |
+| 메시지 | SQL 재시도 소진/CONTINUE 판정 실패/일반 에러 별 전용 메시지 |
+| 후속 | `save_turn_snapshot`으로 직행 (성공/실패 모두 스냅샷 영속화) |
+
+### 5.16.5 턴 스냅샷 저장 노드 (save_turn_snapshot)
+
+**책임**: 종료 직전(`formatter` 또는 `error_end` 이후) 당 턴 결과를 `message_store`에 영속화하여
+다음 턴의 CONTINUE 라우팅 hydration 소스를 보존한다.
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/agents/nodes/post/save_turn_snapshot.py` |
+| 입력 | `turn_id`, `current_user_message_seq`, `result_data`, `visualization`, `analysis_result`, `reason.validated_sql` 등 |
+| 출력 | `turn_snapshots` 갱신 (세션 영속, message_store 저장) |
+| 특성 | 규칙 기반, LLM 미사용. 실패 시에도 최소 메타(질의 + 실패 사유)는 기록 |
+| 후속 | `END` (정적 에지) |
 
 ### 5.17 분석결과 자동 시각화
 
-분석 의도(`data_analysis`)로 분류된 요청에 대해, 데이터 특성에 따라
-LLM이 시각화 필요 여부를 판단하고 SVG 차트를 자동 생성한다.
+v2.4부터 시각화는 **`visualizer` 단독 노드**로 분리되었다 (analyzer는 인사이트·통계만 산출).
+이는 REDISPLAY 라우트(SQL 재실행 없이 시각화만 갱신)와 DATA_EXTRACTION 라우트
+(분석 없이 시각화)가 모두 동일 진입점을 사용하도록 만든 결정이다.
 
 **설계 원칙:**
 
@@ -1146,25 +1315,27 @@ LLM이 시각화 필요 여부를 판단하고 SVG 차트를 자동 생성한다
 **시각화 흐름:**
 
 ```
-analyze_data 노드
+sql_executor → (DATA_ANALYSIS) → analyzer → visualizer → formatter
+sql_executor → (DATA_EXTRACTION)         → visualizer → formatter
+continue_orchestrator(REDISPLAY)         → visualizer → formatter (SQL 재실행 스킵)
+continue_orchestrator(ANALYZE)  → analyzer → visualizer → formatter
+
+visualizer 노드 내부:
     │
-    ├─ [1] 데이터 분석 (DATA_ANALYSIS 프롬프트)
-    │       → AnalysisResult
-    │
-    ├─ [2] 시각화 필요 판단 (행 수 ≥ 3 일 때만)
+    ├─ [1] 시각화 필요 판단 (행 수 ≥ 3, 데이터 패턴, REDISPLAY 강제 여부)
     │       │
     │       └─ LLM 호출 (VISUALIZATION_JUDGMENT)
-    │           → CHART_TYPE + CHART_TITLE
+    │           → CHART_TYPE + CHART_TITLE (19종 + none/table_only)
     │
-    ├─ [3-A] LLM 직접 SVG 생성 (고성능 모델)
+    ├─ [2-A] LLM 직접 SVG 생성 (고성능 모델)
     │       │
     │       └─ LLM 호출 (VISUALIZATION_SVG_GENERATION)
     │           → 순수 <svg>...</svg> 코드
     │
-    └─ [3-B] 템플릿 폴백 (LLM SVG 실패 시)
+    └─ [2-B] 템플릿 폴백 (LLM SVG 실패 시)
             │
             └─ chart_generator.py
-                → 서버사이드 SVG 생성
+                → 서버사이드 SVG 생성 (bar/line/pie)
 ```
 
 **차트 유형 판단 기준:**
@@ -1285,22 +1456,25 @@ client = get_llm_client()
 
 | 영역 | 현재 상태 | 고도화 방향 |
 |------|----------|------------|
-| 에이전틱 추론 루프 | **v2.0 구현 완료** — 8노드 Reason 계층 (reasoning_preparer→fetcher→interpreter→gate→generator→validator→recovery→finalizer) | 멀티에이전트 분산 추론, 병렬 가설 탐색 |
+| 에이전틱 추론 루프 | **v2.0 구현 완료** — 8노드 Reason 계층 (reasoning_preparer→retriever→interpreter→gate→generator→validator→recovery→finalizer) | 멀티에이전트 분산 추론, 병렬 가설 탐색 |
 | 통합 명확화 | **v2.0 구현 완료** — AmbiguitySignal + pending/resolved 패턴, T1~T5 트리거, source_node 복귀 | 컨텍스트 기반 자동 추론 비율 향상 (ASK 감소) |
-| 이력 해소 | **v2.0 구현 완료** — intent_classifier 노드 (CONTINUE/NEW/UNSURE + 의도 분류 통합) | 장기 세션 대화 문맥 요약 |
-| 8-Slot 정규화 | **v2.0 구현 완료** — normalize_query 노드 | Slot 정확도 개선, 복합 질의 분리 |
-| SQL 재생성 | **v2.0 구현 완료** — FailureType 기반 분기 (6가지), recovery_agent ReAct 복구 | 자동 수정 전략 다양화 (부분 AST 수정) |
-| 벡터 검색 (SQL 이력) | **v2.0 구현 완료** — Qdrant sql_history 컬렉션 (10,000건+), context_retriever에서 활용 | 임베딩 모델 고도화, 하이브리드 검색 |
+| 이력 해소 | **v2.0 구현 완료** — intent_classifier (CONTINUE/NEW/UNSURE + 의도 분류 통합) | 장기 세션 대화 문맥 요약 |
+| 8-Slot 정규화 | **v2.0 구현 완료** — query_normalizer 노드 (search_keywords 포함) | Slot 정확도 개선, 복합 질의 분리 |
+| SQL 재생성 | **v2.0 구현 완료** — FailureType 기반 분기 (6가지), recovery_agent ReAct 복구, REGENERATE × non-local_fix 가드 | 자동 수정 전략 다양화 (부분 AST 수정) |
+| 멀티턴 CONTINUE 4-Way | **v2.4 구현 완료** — continue_orchestrator + ContinueRoute(REDISPLAY/ANALYZE/REGENERATE/REFINE) + handoff_note + state hydration | LLM 판정 정확도 회귀 테스트 강화, REDISPLAY 가속화 |
+| 턴 격리 | **v2.4 구현 완료** — turn_reset 엔트리 + `PipelineState.turn_reset_updates()` SSoT + turn_id 발급 | 동시 멀티턴 처리 시 격리 성능 개선 |
+| 턴 스냅샷 영속화 | **v2.4 구현 완료** — save_turn_snapshot + message_store 세션 영속 + 재임베딩 배치 | 스냅샷 압축, 장기 세션 archival |
+| 시각화 분리 | **v2.4 구현 완료** — visualizer 단독 노드 (analyzer에서 분리), REDISPLAY/ANALYZE/EXTRACTION 단일 진입점 | 인터랙티브 차트, 추가 차트 유형, PNG/PDF 내보내기 |
+| 스트리밍 | **v2.4 구현 완료** — `streaming_enabled`/`streaming_delivered`로 WebSocket 부분 응답 | 노드별 진행률 push, partial visualization streaming |
+| target_db 라우팅 | **v2.4 구현 완료** — target_db_resolver (FORCED/SINGLE/AMBIGUOUS/NO_SELECTION) SSoT | 사용자 선택 UI 추가, 다중 DB 분산 쿼리 |
+| 벡터 검색 (SQL 이력) | **v2.0 구현 완료** — Qdrant sql_history (BGE-M3 Hybrid + Reranker-v2-m3) | 폐쇄망 임베딩 모델 검증, 하이브리드 검색 가중치 튜닝 |
 | 유사 테이블 구분 | **구현 완료** — 5개 그룹, 신호어 기반 점수 + CandidateTable.selection_status | 임베딩 유사도 기반 테이블 추천으로 고도화 |
 | 테이블 설명 보강 | **구현 완료** — 3관점 충분성 판단 + LLM 보강 + Semaphore 병렬 | 보강 결과 캐싱(Redis), 사용자 피드백으로 품질 개선 |
 | LLM 포맷 재시도 | **구현 완료** — `llm_call_with_parse_retry` 공용 유틸리티 | 프로바이더별 최적 포맷 힌트 자동 선택 |
 | 캐싱 | 설정만 존재 (Redis 미연동) | Redis 기반 동일 질의 캐싱 + 보강 설명 캐싱 |
-| 분석결과 시각화 | **구현 완료** — LLM 판단 + SVG 생성 + 템플릿 폴백 | 인터랙티브 차트, 추가 차트 유형, PNG/PDF 내보내기 |
-| 모델 교체 | Anthropic + OpenAI 호환 (설정으로 변경 가능) | 폐쇄망 로컬 LLM 대응 프롬프트 최적화 |
+| 모델 교체 | Anthropic + OpenAI 호환 (설정으로 변경 가능). 폐쇄망 타겟 = Qwen 3.5 397B 단일 | thinking 모드 제어, 출력 안정성 회귀 테스트 |
 | 프로그램 저장소 | 미구현 | 프로그램 코드에서 SQL 패턴 추출 |
-| Fast-Path | **v2.1에서 제거됨** — reasoning_preparer는 항상 context_retriever로 직행. 향후 캐시 기반 즉시 응답 계층으로 대체 검토 | 캐시 기반 즉시 응답 계층 추가 |
-| planner → reasoning_preparer 리네임 | **v2.1 완료** — LLM 미사용 규칙 기반 노드로 전환, 노드명을 역할에 맞게 변경 | — |
-| Dialect 라우팅 | **v2.0 구현 완료** — PostgreSQL/Sybase IQ/Impala 지원 | 폐쇄망 타겟 DB별 프롬프트 최적화 |
+| 폐쇄망 배포 | **구현 완료** — deploy/ 스캐폴드, offline-bundle, systemd, db-init | 운영자 핸드오버 자동화, 폐쇄망 회귀 테스트 |
 
 ---
 
@@ -1315,3 +1489,4 @@ client = get_llm_client()
 | 2.1 | 2026-04-02 | 구현 코드 정합성 반영: planner→reasoning_preparer 리네임(규칙 기반, LLM 미사용), Fast-Path 메커니즘 제거(직접 에지로 변경), fast_path_triggered 상태 필드 제거, inference_notes 필드 추가, 라우팅 함수 10→8곳으로 정정(_route_after_planner 제거), sql_validator에서 explore_after_fast_path 분기 제거, 커넥터 아키텍처에 MongoDB·Neo4j 추가 | doc-writer |
 | 2.2 | 2026-04-03 | 구현 정합성 전면 재검증: server.py→main.py 정정, 라우팅 함수 8→9곳 정정(_route_after_execution 포함), 노드 디렉토리에서 존재하지 않는 history_resolver.py/intent_classifier.py 제거, search_query_builder.py→SearchKeywords(normalization.py) 반영, 8-Slot 명칭 정정(INTENT/ENTITY/MEASURE/DIMENSION/FILTER/TIME/MODIFIER/OUTPUT_HINT), chart_generator.py 경로 정정(services/visualization/), ES Dockerfile 참조 제거, services/history_resolver.py 참조 제거 | doc-writer |
 | 2.3 | 2026-04-13 | ElasticSearch 참조 전면 제거(MongoDB/Qdrant로 대체), turn_reset 엔트리포인트 추가, 커넥터 아키텍처 도식에서 ES 제거·Neo4j 반영(6종→5종), state.py W/R 약어 현행화(EXP→FET, EVL→RDG, RET→INT) | doc-writer |
+| 2.4 | 2026-04-20 | **3계층 19노드 구조 반영** — continue_orchestrator(CONTINUE 4-Way: REDISPLAY/ANALYZE/REGENERATE/REFINE) · visualizer 단독 노드 분리 · save_turn_snapshot 종료 훅 신규 추가; Present 노드 리네임(execute_sql→sql_executor, analyze_data→analyzer, format_response→formatter); SQL 검증 라우팅에 REGENERATE × non-local_fix 가드 추가; PipelineState에 turn_id/turn_snapshots/reference_turns/route/handoff_note/continue_context/result_data/needs_analyzer/process_summary/streaming_* 필드 추가 + 레거시 clarification_* 필드 제거; ReasoningState에 target_db/target_db_decision/previous_turn_sql/pending_assumptions/validation_summary/fix_history/executed_tool_keys 추가; result_finalizer에 target_db_resolver SSoT 통합; 라우팅 함수 9→10개; clarification 복귀 대상에 recovery_agent/continue_orchestrator 추가; 향후 고도화 표 v2.4 신규 항목 추가 | doc-writer |

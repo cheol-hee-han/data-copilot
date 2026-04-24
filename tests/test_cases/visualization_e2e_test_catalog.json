@@ -1,0 +1,1672 @@
+{
+  "version": "2.0",
+  "created": "2026-04-17",
+  "updated": "2026-04-17",
+  "description": "시각화 파이프라인 E2E 수동 테스트 카탈로그 — 20개 시각화 유형 전수 검증 + 엣지 케이스",
+  "target": "Docker 데이터소스(PG/Qdrant/MongoDB) + LLM API, UI 서버(python -m src.main)",
+  "changelog": [
+    "2026-04-17 v1: 초기 작성 — visualizer 상시 실행 아키텍처 변경에 따른 8개 시나리오 38건",
+    "2026-04-17 v2: 전면 확장 — 20개 시각화 유형(정량 차트 10 + 다이어그램 8 + info_card + none) 전수 커버, 실제 시드 테이블 기반 쿼리"
+  ],
+  "total_cases": 108,
+  "architecture_context": {
+    "before": "DATA_ANALYSIS만 analyzer -> visualizer -> formatter 경유, DATA_EXTRACTION은 시각화 없이 formatter 직행",
+    "after": "DATA_EXTRACTION도 visualizer -> formatter 경유 (analyzer만 DATA_ANALYSIS 전용). visualizer는 intent 무관 항상 실행",
+    "key_changes": [
+      "pipeline.py: sql_executor -> (분석필요? analyzer : 직행) -> visualizer -> formatter",
+      "visualizer_node: intent 무관 항상 실행, row_count < min_rows_for_visualization이면 시각화 스킵",
+      "info_card: 1~2행 KPI성 결과에 카드형 SVG 시각화 신규 지원",
+      "min_rows_for_visualization 기본값 1 (info_card 지원을 위해 하향)"
+    ],
+    "config_dependencies": {
+      "min_rows_for_visualization": "1 (기본값). 0이면 시각화 항상 스킵, 2이상이면 단건 info_card 불가"
+    },
+    "supported_chart_types": {
+      "info_card": "K1~K3 규칙. 1~2행 KPI/스칼라/텍스트 단건",
+      "line_chart": "규칙1. 시계열 + 수치 1~2계열",
+      "stacked_bar": "규칙2. 시계열 + 수치 3계열+ (누적)",
+      "grouped_bar": "규칙3. 시계열 + 수치 2~4계열 (절대값 비교)",
+      "bar_chart": "규칙4. 카테고리 + 수치1계열 + 3~9행",
+      "horizontal_bar": "규칙5. 카테고리 + 수치1계열 + 10행+ 또는 항목명 8자+",
+      "pie_chart": "규칙6. 구성 비율 + 2~6항목",
+      "donut_chart": "규칙7. 구성 비율 + 중앙 KPI 표시",
+      "scatter_plot": "규칙8. 연속형 수치 2변수 상관",
+      "waterfall_chart": "규칙9. 증감 누적 재무 데이터",
+      "heatmap": "규칙10. 카테고리x카테고리 격자 + 수치",
+      "flowchart": "규칙11. 순차 단계 + 분기/조건",
+      "timeline": "규칙12. 시간순 이벤트/마일스톤",
+      "mind_map": "규칙13. 중심주제 + 하위카테고리 계층",
+      "org_chart": "규칙14. 상하 보고관계/조직 트리",
+      "process_diagram": "규칙15. 선형 프로세스 (입력->처리->출력)",
+      "venn_diagram": "규칙16. 2~3개 집합 공통/차이 비교",
+      "matrix_chart": "규칙17. 2축 4사분면 분류",
+      "value_chain": "규칙18. 기업 가치사슬 (지원+주활동)",
+      "none": "N1~N8. 시각화 불필요"
+    }
+  },
+  "seeded_tables_reference": {
+    "description": "22개 시드 테이블 요약 — 쿼리 설계 시 참조",
+    "tables": {
+      "TB_ADW_COM001M": "부점정보 20건 (BLNG_BRCD, BR_NM, RGN_CD, RGN_NM, BR_DCD)",
+      "TB_ADW_COM002M": "등급코드 5건 (GRD_CD, GRD_NM, GRD_DESC)",
+      "TB_ADW_CSC101M": "고객기본 500건 (EDPS_CSN, STD_DT, CSM, CUS_DCD, JOIN_DT, BLNG_BRCD, GNDR_DCD, AGE_GRP_CD, CUS_GRD_CD)",
+      "TB_ADW_CSC102H": "고객이력 1500건 3스냅샷 (EDPS_CSN, STD_DT, CUS_GRD_CD 등)",
+      "TB_ADW_CSP103M": "고객프로필 500건 (MKT_GRD_CD, PREF_CHN_DCD)",
+      "TB_ADW_DEP201P": "예금계좌 600건 (ACN, BAL_AMT, ACT_DCD, APLY_RT, ACT_STCD, BLNG_BRCD)",
+      "TB_ADW_DEP202S": "예금일별요약 600건 (TOT_BAL_AMT)",
+      "TB_ADW_LNB301M": "대출잔액 800건 (LN_BAL_AMT, LN_DCD, LN_STCD, OVDU_GRD_CD, OVDU_AMT, APLY_RT, BLNG_BRCD)",
+      "TB_ADW_LNB302M": "대출원장 800건 (LN_APR_AMT, CLTR_DCD, LN_PUSE_CD)",
+      "TB_ADW_CRD401M": "카드 300건 (CRD_DCD, MON_USE_AMT, BLNG_BRCD)",
+      "TB_ADW_TRX701L": "거래내역 3000건 (TR_DT, TR_DCD, CHN_CD, TR_AMT, BLNG_BRCD)",
+      "TB_ADW_FXD501L": "외환거래 200건 (FX_DL_DCD, CCY_CD, DL_AMT, DL_RT)",
+      "TB_ADW_FXB502M": "환율 100건=5통화x20일 (CCY_CD, BASE_DT, BASE_RT, BUY_RT, SELL_RT)",
+      "TB_ADW_FND601P": "펀드계좌 300건 (BAL_AMT, FND_DCD, RSK_GRD_CD)",
+      "TB_ADW_FND602P": "펀드평가 300건 (EVAL_AMT, ERNS_RT)",
+      "TB_ADW_INS803M": "보험 200건 (INS_DCD, INS_AMT, INS_STCD)",
+      "TB_ADW_PNB904P": "퇴직연금 200건 (PN_DCD, TOT_BAL_AMT)",
+      "TB_ADW_RSK1101M": "리스크지표 ~80건 (IND_CD, IND_VAL, IND_UNIT, LIMIT_VAL)",
+      "TB_ADW_MKT1201M": "캠페인 50건 (CAMP_STCD, BUDGET_AMT, START_DT, END_DT)",
+      "TB_ADW_MKT1202M": "캠페인대상 500건 (RESP_YN, CONTACT_CHN_CD)",
+      "TB_ADW_FIN1306S": "손익 ~120건 (BLNG_BRCD, BASE_YM, PL_ITEM_CD, AMT)",
+      "TB_ADW_WMB1401M": "WM고객 ~150건 (WM_GRD_CD, INVEST_PRFL_CD, TOT_ASSET_AMT)"
+    }
+  },
+  "categories": [
+    {
+      "id": "VIZ-01",
+      "name": "DATA_EXTRACTION + 시각화 (핵심 변경점)",
+      "description": "DATA_EXTRACTION 의도에서 visualizer 노드가 항상 실행되어 차트가 생성되는지 검증",
+      "expected_path": "sql_executor -> visualizer -> formatter -> END",
+      "verify_points": [
+        "visualizer_node 진입 확인 (트레이스 로그에 '시각화' 단계 존재)",
+        "analyzer_node 미진입 확인 (DATA_EXTRACTION이므로 분석 불필요)",
+        "결과 화면에 차트(SVG)가 테이블 위에 표시됨"
+      ],
+      "cases": [
+        {
+          "id": "VIZ-01-001",
+          "query": "이번 달 지점별 대출 건수 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart": "bar_chart",
+          "expected_row_range": "5~20행 (지점 수)",
+          "judgment_rule": "규칙4: 카테고리(지점) + 수치1계열(건수) + 3~9행",
+          "verify": [
+            "intent=DATA_EXTRACTION (분석 아닌 추출)",
+            "visualizer 진입 -> bar_chart 판정",
+            "analyzer 미진입 (트레이스에 '분석' 단계 없음)",
+            "UI에 막대 차트 SVG + 테이블 데이터 표시"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-01-002",
+          "query": "고객등급별 고객 수 뽑아줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart": "bar_chart",
+          "expected_row_range": "3~5행 (등급 종류)",
+          "judgment_rule": "규칙4: 카테고리(등급) + 수치1계열(COUNT) + 3~9행",
+          "verify": [
+            "GROUP BY CUS_GRD_CD + COUNT 쿼리 생성",
+            "bar_chart 또는 pie_chart 판정",
+            "테이블 결과와 차트 동시 표시"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-01-003",
+          "query": "대출유형별 건수와 총 잔액 뽑아줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart_candidates": ["grouped_bar", "bar_chart"],
+          "expected_row_range": "3~6행",
+          "judgment_rule": "규칙3/4: 카테고리 + 수치 2계열(건수, 잔액)",
+          "verify": [
+            "2개 측정값(건수, 잔액)이 있으므로 grouped_bar 또는 bar_chart",
+            "차트와 테이블이 동시에 표시됨"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-01-004",
+          "query": "월별 거래 건수 추이 보여줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_TRX701L"],
+          "expected_chart": "line_chart",
+          "expected_row_range": "3~12행 (월수)",
+          "judgment_rule": "규칙1: 시계열(월) + 수치1계열(건수)",
+          "verify": [
+            "시계열 데이터 -> line_chart 판정",
+            "X축=월, Y축=건수인 꺾은선 차트"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-01-005",
+          "query": "카드유형별 이용금액 비중 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_CRD401M"],
+          "expected_chart_candidates": ["pie_chart", "donut_chart"],
+          "expected_row_range": "2~5행",
+          "judgment_rule": "규칙6/7: 구성 비율 + 2~6항목",
+          "verify": [
+            "'비중' 키워드 -> pie_chart 또는 donut_chart 판정",
+            "각 유형의 비율이 표시됨"
+          ],
+          "difficulty": "easy"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-02",
+      "name": "DATA_ANALYSIS + 시각화",
+      "description": "분석 의도에서 analyzer -> visualizer 순서로 둘 다 실행되는지 검증",
+      "expected_path": "sql_executor -> analyzer -> visualizer -> formatter -> END",
+      "verify_points": [
+        "analyzer_node 진입 후 visualizer_node 진입 (트레이스 순서)",
+        "분석 인사이트(analysis_result)와 차트(visualization) 둘 다 state에 존재",
+        "UI에서 차트 -> 분석 텍스트 -> 테이블 순서 또는 차트 -> 테이블 순서로 표시"
+      ],
+      "cases": [
+        {
+          "id": "VIZ-02-001",
+          "query": "최근 3개월 지점별 대출 현황 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart": "bar_chart",
+          "verify": [
+            "intent=DATA_ANALYSIS 확인",
+            "analyzer 진입 -> analysis_result에 insights 존재",
+            "visualizer 진입 -> bar_chart SVG 생성",
+            "UI에 분석 인사이트 텍스트 + 차트 + 테이블 모두 표시"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-02-002",
+          "query": "고객등급별 분포를 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart_candidates": ["pie_chart", "donut_chart"],
+          "verify": [
+            "analyzer: 등급별 비중, 주요 인사이트 도출",
+            "visualizer: pie_chart 또는 donut_chart 독립 판정",
+            "차트와 분석 텍스트가 동시에 표시"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-02-003",
+          "query": "연체율 추이를 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "line_chart",
+          "verify": [
+            "시계열 분석 -> analyzer가 추이 인사이트 도출",
+            "visualizer가 line_chart 판정 (월별 연체율 추이)",
+            "차트 X축=기간, Y축=연체율"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-02-004",
+          "query": "지점별 연체율 현황 보여주고 위험한 지점 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart": "bar_chart",
+          "verify": [
+            "analysis_query에 분석 관점('위험한 지점')이 반영되어 analyzer 실행",
+            "visualizer가 bar_chart 독립 판정 (지점별 비교)",
+            "분석 텍스트에 위험 지점 강조 인사이트 포함"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-02-005",
+          "query": "월별 신규 고객 수 트렌드 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart": "line_chart",
+          "verify": [
+            "analyzer: 트렌드 분석 인사이트 (증가/감소/변곡점)",
+            "visualizer: line_chart (시계열)",
+            "둘 다 독립적으로 결과 생성"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-03",
+      "name": "info_card (K1~K3 규칙)",
+      "description": "1~2행 KPI/스칼라/텍스트 결과에 대한 카드형 시각화 생성 검증",
+      "expected_path": "sql_executor -> visualizer(info_card) -> formatter -> END",
+      "judgment_rules": ["K1: 1행+수치1+", "K2: 정확히2행+수치1++비시계열레이블", "K3: 1~2행+텍스트만"],
+      "cases": [
+        {
+          "id": "VIZ-03-001",
+          "query": "전체 대출 잔액 합계 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "info_card",
+          "expected_row_count": 1,
+          "judgment_rule": "K1: 1행 + 수치1컬럼 (SUM)",
+          "verify": [
+            "단건 합계 결과 (1행 1컬럼)",
+            "info_card 판정 -> 금액이 카드 형태로 크게 표시",
+            "테이블이 중복 표시되지 않음 (카드가 테이블 역할 대체)",
+            "금액 포맷팅 적용"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-03-002",
+          "query": "이번 달 신규 대출 건수랑 금액 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "info_card",
+          "expected_row_count": 1,
+          "judgment_rule": "K1: 1행 + 수치2컬럼 (COUNT, SUM)",
+          "verify": [
+            "1행 2컬럼 결과 (건수, 금액)",
+            "info_card -> 두 수치가 나란히 카드 형태로 표시",
+            "각 수치에 적절한 단위 표시 (건, 원)"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-03-003",
+          "query": "VIP 고객 수 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart": "info_card",
+          "expected_row_count": 1,
+          "judgment_rule": "K1: 1행 + 수치1컬럼 (COUNT WHERE CUS_GRD_CD='VIP')",
+          "verify": [
+            "단건 COUNT 결과",
+            "info_card -> 숫자가 크게 표시되는 카드"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-03-004",
+          "query": "정기예금 총 잔액이랑 계좌 수 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_DEP201P"],
+          "expected_chart": "info_card",
+          "expected_row_count": 1,
+          "judgment_rule": "K1: 1행 + 수치2컬럼 (SUM, COUNT)",
+          "verify": [
+            "1행 2컬럼 (잔액합계, 계좌수)",
+            "info_card -> 2개 KPI를 카드 형태로 표시"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-03-005",
+          "query": "신용대출 평균 금리랑 담보대출 평균 금리 비교해줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "info_card",
+          "expected_row_count": 2,
+          "judgment_rule": "K2: 2행 + 수치1컬럼 + 비시계열 레이블(신용/담보)",
+          "verify": [
+            "2행 결과 (신용대출, 담보대출 각 평균 금리)",
+            "info_card -> 2개 유형을 나란히 비교하는 카드"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-04",
+      "name": "info_card 판단 경계 (엣지 케이스)",
+      "description": "2행이지만 info_card가 아닌 경우 등 경계 조건에서의 시각화 유형 판정 검증",
+      "cases": [
+        {
+          "id": "VIZ-04-001",
+          "query": "1월과 2월 대출 건수 비교해줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart_candidates": ["bar_chart", "line_chart"],
+          "not_expected_chart": "info_card",
+          "expected_row_count": 2,
+          "judgment_rule": "K2 예외: 레이블이 시간축(1월/2월) -> K2 미적용 -> 규칙1(line_chart)",
+          "verify": [
+            "2행이지만 시계열(월별) 비교 데이터",
+            "info_card가 아닌 bar_chart 또는 line_chart 판정 기대"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-04-002",
+          "query": "서울지점과 부산지점 대출 잔액 비교",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart_candidates": ["bar_chart", "horizontal_bar", "info_card"],
+          "expected_row_count": 2,
+          "judgment_rule": "K2: 2행+수치1컬럼+비시계열 -> info_card 가능, 또는 카테고리비교 -> bar_chart",
+          "verify": [
+            "2행 카테고리 비교 -> LLM 판단에 따라 info_card 또는 bar_chart",
+            "어떤 유형이든 2개 값의 비교가 명확히 표시"
+          ],
+          "difficulty": "medium",
+          "notes": "K2 규칙상 info_card도 합당, LLM 판단 경계"
+        },
+        {
+          "id": "VIZ-04-003",
+          "query": "이번 달 대출 총 건수",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "info_card",
+          "expected_row_count": 1,
+          "judgment_rule": "K1: 1행 + 수치1컬럼",
+          "verify": [
+            "1행 1컬럼 단순 COUNT -> info_card 확실",
+            "단건 스칼라 값은 차트보다 카드가 적합"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-04-004",
+          "query": "상위 3개 지점 대출 잔액",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart_candidates": ["bar_chart", "horizontal_bar"],
+          "not_expected_chart": "info_card",
+          "expected_row_count": 3,
+          "judgment_rule": "규칙4: 카테고리(지점) + 수치1계열 + 3행",
+          "verify": [
+            "3행 랭킹 데이터 -> bar_chart (info_card보다 비교 시각화 우선)",
+            "LIMIT 3 + ORDER BY DESC 쿼리"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-04-005",
+          "query": "남녀별 고객 수",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart_candidates": ["bar_chart", "pie_chart", "info_card"],
+          "expected_row_count": 2,
+          "judgment_rule": "K2 가능(2행+수치+비시계열), 또는 규칙6(비율비교)",
+          "verify": [
+            "2행 카테고리 집계 -> LLM 판단에 따라 다양한 유형 가능",
+            "이 케이스는 LLM 판단 경계로 정답 범위가 넓음"
+          ],
+          "difficulty": "medium",
+          "notes": "LLM 판단 경계"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-05",
+      "name": "시각화 스킵 (none) 조건",
+      "description": "visualizer 진입은 하되 N1~N8 규칙으로 시각화를 생성하지 않는 경우",
+      "expected_path": "sql_executor -> visualizer(none) -> formatter -> END",
+      "cases": [
+        {
+          "id": "VIZ-05-001",
+          "query": "고객번호 12345의 대출 상태 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "none",
+          "expected_row_count": "0~1행",
+          "judgment_rule": "N1 또는 row_count=0 -> 시각화 스킵",
+          "verify": [
+            "row_count=0이면 min_rows 미달 -> 시각화 스킵",
+            "결과가 있으면 텍스트/테이블만, 없으면 '결과 없음' 메시지"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-05-002",
+          "query": "대출유형코드 ZZZ인 대출 건수",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_chart": "none",
+          "expected_row_count": 0,
+          "judgment_rule": "row_count=0 -> min_rows 미달",
+          "verify": [
+            "row_count=0 -> 시각화 스킵",
+            "'조회 결과 없음' 안내 메시지"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-05-003",
+          "query": "고객번호 12345의 이름이랑 등급 알려줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart_candidates": ["info_card", "none"],
+          "expected_row_count": 1,
+          "judgment_rule": "K3 가능(1행+텍스트) 또는 N7(텍스트만)",
+          "verify": [
+            "1행이지만 텍스트 속성(이름, 등급)",
+            "K3 규칙에 의해 info_card가 될 수도 있음"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-05-004",
+          "query": "고객 상위 30명의 전체 정보 조회해줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart": "none",
+          "expected_row_count": 30,
+          "judgment_rule": "N4: 개별 레코드 상세 정보 (고유ID+다속성 나열) -> 테이블 적합",
+          "verify": [
+            "각 행이 고유 고객의 속성을 나열하는 원시 레코드",
+            "차트가 아닌 테이블로 표시",
+            "N6(20행 초과) 또는 N4(원시 레코드) 적용"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-05-005",
+          "query": "최근 거래 내역 20건 보여줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_TRX701L"],
+          "expected_chart": "none",
+          "expected_row_count": 20,
+          "judgment_rule": "N4: 개별 거래의 속성 나열 (TR_ID, TR_DT, TR_AMT 등)",
+          "verify": [
+            "거래 내역 상세 -> 원시 레코드이므로 시각화 불필요",
+            "테이블 형태로만 표시"
+          ],
+          "difficulty": "easy"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-06",
+      "name": "비데이터 의도 회귀 확인",
+      "description": "CASUAL_TALK, META_QUESTION에서 visualizer 미진입 확인",
+      "expected_path": "intent_classifier -> simple_responder -> formatter -> END",
+      "cases": [
+        {
+          "id": "VIZ-06-001",
+          "query": "안녕하세요",
+          "expected_intent": "CASUAL_TALK",
+          "expected_chart": "none",
+          "verify": ["intent=CASUAL_TALK -> simple_responder -> formatter", "시각화 미진입"],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-06-002",
+          "query": "어떤 테이블을 조회할 수 있어?",
+          "expected_intent": "META_QUESTION",
+          "expected_chart": "none",
+          "verify": ["intent=META_QUESTION -> simple_responder", "시스템 안내 텍스트 응답"],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-06-003",
+          "query": "고마워요",
+          "expected_intent": "CASUAL_TALK",
+          "expected_chart": "none",
+          "verify": ["일상 대화 처리 (감사 인사)", "시각화 없이 텍스트 응답만"],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-06-004",
+          "query": "이 시스템 뭐 할 수 있어?",
+          "expected_intent": "META_QUESTION",
+          "expected_chart": "none",
+          "verify": ["시스템 기능 안내 응답", "Present 계층 진입하지 않음"],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-06-005",
+          "query": "TB_ADW_CSC101M 테이블 컬럼 뭐가 있어?",
+          "expected_intent": "META_QUESTION",
+          "expected_chart": "none",
+          "verify": ["테이블 메타 질의 -> simple_responder", "SQL 실행 없이 메타 정보 응답"],
+          "difficulty": "easy"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-07",
+      "name": "취소 시 정상 중단",
+      "description": "실행 중 취소 시 analyzer/visualizer 모두 정상 중단되는지 확인",
+      "cases": [
+        {
+          "id": "VIZ-07-001",
+          "scenario": "SQL 실행 중 취소",
+          "query": "전체 거래 이력 월별 집계 분석해줘",
+          "cancel_timing": "sql_executor 실행 중",
+          "verify": ["status=CANCELLED", "'요청이 중단되었습니다'", "analyzer/visualizer 미진입"],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-07-002",
+          "scenario": "분석 중 취소",
+          "query": "최근 6개월 전체 데이터 종합 분석해줘",
+          "cancel_timing": "analyzer 실행 중",
+          "verify": ["analyzer에서 cancel 감지 -> CANCELLED", "visualizer 미진입"],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-07-003",
+          "scenario": "시각화 생성 중 취소",
+          "query": "지점별 모든 지표 비교 차트 만들어줘",
+          "cancel_timing": "visualizer 실행 중",
+          "verify": ["visualizer에서 cancel 감지 -> CANCELLED", "불완전한 SVG 미표시"],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-07-004",
+          "scenario": "취소 후 재질의",
+          "step1_query": "복잡한 분석 질의",
+          "step1_action": "취소 버튼 클릭",
+          "step2_query": "이번 달 신규 고객 수 알려줘",
+          "verify": ["step1 취소 후 정상 종료", "step2 깨끗한 상태에서 정상 실행"],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-08",
+      "name": "line_chart (규칙1: 시계열 + 수치 1~2계열)",
+      "description": "시간 축 데이터에 대한 꺾은선 차트 렌더링 검증",
+      "judgment_rule": "규칙1: 시계열 축(월, 분기, 연도, 일자 등) + 수치 1~2계열 -> line_chart",
+      "cases": [
+        {
+          "id": "VIZ-08-001",
+          "query": "월별 신규 고객 수 추이 보여줘",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart": "line_chart",
+          "expected_row_range": "3~12행",
+          "data_shape": "시계열(JOIN_DT 월 기준) + COUNT 1계열",
+          "verify": [
+            "X축=월, Y축=신규고객수",
+            "데이터 포인트 연결된 꺾은선",
+            "차트 제목, 축 라벨 존재"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-08-002",
+          "query": "최근 20일간 USD 환율 추이",
+          "expected_tables": ["TB_ADW_FXB502M"],
+          "expected_chart": "line_chart",
+          "expected_row_range": "~20행",
+          "data_shape": "시계열(BASE_DT) + BASE_RT 1계열, CCY_CD='USD'",
+          "verify": [
+            "X축=일자, Y축=환율",
+            "20개 데이터 포인트의 꺾은선",
+            "환율 수치가 소수점 포함 표시"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-08-003",
+          "query": "월별 대출 실행건수와 상환건수 추이",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "line_chart",
+          "expected_row_range": "3~12행",
+          "data_shape": "시계열(월) + 수치 2계열(실행건수, 상환건수)",
+          "verify": [
+            "2개 시리즈 꺾은선 차트",
+            "범례로 시리즈 구분",
+            "각 시리즈 데이터 포인트 표시"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-08-004",
+          "query": "일별 환율 변동(매입/매도) 추이 보여줘",
+          "expected_tables": ["TB_ADW_FXB502M"],
+          "expected_chart": "line_chart",
+          "expected_row_range": "~20행",
+          "data_shape": "시계열(BASE_DT) + BUY_RT, SELL_RT 2계열",
+          "verify": [
+            "2개 시리즈(매입율, 매도율) 꺾은선",
+            "각 시리즈 색상 구분, 범례"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-09",
+      "name": "bar_chart (규칙4: 카테고리 + 수치1계열 + 3~9행)",
+      "description": "카테고리별 수치 비교 세로 막대 차트",
+      "judgment_rule": "규칙4",
+      "cases": [
+        {
+          "id": "VIZ-09-001",
+          "query": "고객등급별 평균 예금 잔액 비교",
+          "expected_tables": ["TB_ADW_CSC101M", "TB_ADW_DEP201P"],
+          "expected_chart": "bar_chart",
+          "expected_row_range": "3~5행",
+          "data_shape": "카테고리(CUS_GRD_CD) + AVG(BAL_AMT) 1계열",
+          "verify": [
+            "X축=등급명, Y축=평균 잔액",
+            "금액 포맷팅, 차트 제목 존재"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-09-002",
+          "query": "대출유형별 평균 금리 보여줘",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "bar_chart",
+          "expected_row_range": "3~6행",
+          "data_shape": "카테고리(LN_DCD) + AVG(APLY_RT) 1계열",
+          "verify": [
+            "대출유형별 막대 차트",
+            "금리(%) 수치 표시"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-09-003",
+          "query": "펀드유형별 총 잔액 비교",
+          "expected_tables": ["TB_ADW_FND601P"],
+          "expected_chart": "bar_chart",
+          "expected_row_range": "3~6행",
+          "data_shape": "카테고리(FND_DCD) + SUM(BAL_AMT) 1계열",
+          "verify": [
+            "펀드유형별 세로 막대 차트",
+            "금액 단위 포맷팅"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-09-004",
+          "query": "통화별 외환거래 건수",
+          "expected_tables": ["TB_ADW_FXD501L"],
+          "expected_chart": "bar_chart",
+          "expected_row_range": "3~5행 (5통화)",
+          "data_shape": "카테고리(CCY_CD) + COUNT 1계열",
+          "verify": [
+            "USD, EUR, JPY 등 통화별 막대",
+            "건수 수치 표시"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-09-005",
+          "query": "연금유형별 평균 잔액",
+          "expected_tables": ["TB_ADW_PNB904P"],
+          "expected_chart": "bar_chart",
+          "expected_row_range": "3~5행",
+          "data_shape": "카테고리(PN_DCD) + AVG(TOT_BAL_AMT)",
+          "verify": [
+            "연금유형별 막대 차트"
+          ],
+          "difficulty": "easy"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-10",
+      "name": "horizontal_bar (규칙5: 카테고리 + 10행+ 또는 항목명 8자+)",
+      "description": "가로 막대 차트 — 항목이 많거나 이름이 긴 경우",
+      "judgment_rule": "규칙5",
+      "cases": [
+        {
+          "id": "VIZ-10-001",
+          "query": "지점별 대출 잔액 상위 10개",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart": "horizontal_bar",
+          "expected_row_range": "10행",
+          "data_shape": "카테고리(BR_NM, 8자+) + SUM(LN_BAL_AMT) + 10행",
+          "verify": [
+            "지점명이 Y축(가로 막대), 잔액이 X축",
+            "10개 지점이 잔액 내림차순 정렬",
+            "긴 지점명이 잘리지 않고 표시"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-10-002",
+          "query": "지점별 예금 잔액 현황 전체 보여줘",
+          "expected_tables": ["TB_ADW_DEP201P", "TB_ADW_COM001M"],
+          "expected_chart": "horizontal_bar",
+          "expected_row_range": "~20행 (전체 지점)",
+          "data_shape": "카테고리(BR_NM) + SUM(BAL_AMT) + 20행",
+          "verify": [
+            "20개 지점 전체 가로 막대",
+            "행이 10개 이상이므로 horizontal_bar 판정"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-10-003",
+          "query": "지점별 카드 이용금액 순위",
+          "expected_tables": ["TB_ADW_CRD401M", "TB_ADW_COM001M"],
+          "expected_chart": "horizontal_bar",
+          "expected_row_range": "10~20행",
+          "data_shape": "카테고리(BR_NM) + SUM(MON_USE_AMT)",
+          "verify": [
+            "지점명이 가로 막대의 Y축",
+            "이용금액 내림차순 정렬"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-11",
+      "name": "grouped_bar (규칙3: 시계열 + 수치 2~4계열 절대값비교)",
+      "description": "그룹 막대 차트 — 여러 계열의 절대값을 나란히 비교",
+      "judgment_rule": "규칙3",
+      "cases": [
+        {
+          "id": "VIZ-11-001",
+          "query": "지점별 수신잔액과 여신잔액 비교해줘",
+          "expected_tables": ["TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart": "grouped_bar",
+          "expected_row_range": "5~20행",
+          "data_shape": "카테고리(지점) + 수치 2계열(수신잔액, 여신잔액)",
+          "verify": [
+            "각 지점마다 수신/여신 2개 막대가 나란히 표시",
+            "범례로 수신/여신 구분",
+            "절대값 비교에 적합한 스케일"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-11-002",
+          "query": "분기별 대출 실행금액과 상환금액 비교",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "grouped_bar",
+          "expected_row_range": "3~4행 (분기)",
+          "data_shape": "시계열(분기) + 수치 2계열(실행, 상환)",
+          "verify": [
+            "분기별 2개 막대 나란히",
+            "절대값 비교 목적"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-11-003",
+          "query": "고객등급별 평균 예금잔액, 평균 대출잔액, 평균 카드이용액 비교",
+          "expected_tables": ["TB_ADW_CSC101M", "TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_CRD401M"],
+          "expected_chart": "grouped_bar",
+          "expected_row_range": "3~5행",
+          "data_shape": "카테고리(등급) + 수치 3계열(예금, 대출, 카드)",
+          "verify": [
+            "등급별 3개 막대 나란히",
+            "3색 범례",
+            "복잡한 JOIN이 정확히 수행되는지"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-12",
+      "name": "stacked_bar (규칙2: 시계열 + 수치 3계열+ 누적)",
+      "description": "누적 막대 차트 — 전체 구성의 시계열 변화",
+      "judgment_rule": "규칙2",
+      "cases": [
+        {
+          "id": "VIZ-12-001",
+          "query": "월별 채널별 거래건수 추이 보여줘",
+          "expected_tables": ["TB_ADW_TRX701L"],
+          "expected_chart": "stacked_bar",
+          "expected_row_range": "3~12행 (월수)",
+          "data_shape": "시계열(월) + 수치 4계열(CHN_CD: 인터넷/모바일/창구/ATM 등)",
+          "verify": [
+            "월별 누적 막대 차트",
+            "각 채널이 다른 색상으로 누적",
+            "범례로 채널 구분"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-12-002",
+          "query": "월별 대출유형별 신규 대출건수 누적 추이",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "stacked_bar",
+          "expected_row_range": "3~12행",
+          "data_shape": "시계열(월) + 수치 3계열(LN_DCD: 신용/담보/기타)",
+          "verify": [
+            "월별 대출유형이 누적된 막대",
+            "전체 중 각 유형의 비중 변화 확인 가능"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-12-003",
+          "query": "월별 거래유형별 금액 추이 보여줘",
+          "expected_tables": ["TB_ADW_TRX701L"],
+          "expected_chart": "stacked_bar",
+          "expected_row_range": "3~12행",
+          "data_shape": "시계열(월) + 수치 3계열+(TR_DCD별 SUM(TR_AMT))",
+          "verify": [
+            "거래유형별 누적 금액 막대"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-13",
+      "name": "pie_chart (규칙6: 구성 비율 + 2~6항목)",
+      "description": "원형 차트 — 전체 대비 구성 비율",
+      "judgment_rule": "규칙6",
+      "cases": [
+        {
+          "id": "VIZ-13-001",
+          "query": "대출유형별 잔액 비중 보여줘",
+          "expected_tables": ["TB_ADW_LNB301M"],
+          "expected_chart": "pie_chart",
+          "expected_row_range": "3~6행",
+          "data_shape": "카테고리(LN_DCD) + 비중(%) 또는 SUM",
+          "verify": [
+            "각 유형별 비율(%) 표시",
+            "범례 또는 직접 라벨"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-13-002",
+          "query": "보험유형별 가입 비중",
+          "expected_tables": ["TB_ADW_INS803M"],
+          "expected_chart": "pie_chart",
+          "expected_row_range": "3~5행",
+          "data_shape": "카테고리(INS_DCD) + COUNT 비율",
+          "verify": [
+            "보험유형별 원형 차트",
+            "각 세그먼트 비율 표시"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-13-003",
+          "query": "펀드 위험등급별 투자 비중",
+          "expected_tables": ["TB_ADW_FND601P"],
+          "expected_chart": "pie_chart",
+          "expected_row_range": "3~5행",
+          "data_shape": "카테고리(RSK_GRD_CD) + SUM(BAL_AMT) 비율",
+          "verify": [
+            "위험등급별 원형 차트",
+            "고위험/중위험/저위험 비중 확인"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-13-004",
+          "query": "연령대별 고객 분포 비율",
+          "expected_tables": ["TB_ADW_CSC101M"],
+          "expected_chart_candidates": ["pie_chart", "bar_chart"],
+          "expected_row_range": "4~6행",
+          "data_shape": "카테고리(AGE_GRP_CD) + COUNT 비율",
+          "verify": [
+            "'분포 비율' 키워드 -> pie_chart 우선",
+            "연령대별 세그먼트 표시"
+          ],
+          "difficulty": "easy"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-14",
+      "name": "donut_chart (규칙7: 구성 비율 + 중앙 KPI)",
+      "description": "도넛 차트 — 중앙에 총합/KPI를 표시하는 구성 비율",
+      "judgment_rule": "규칙7",
+      "cases": [
+        {
+          "id": "VIZ-14-001",
+          "query": "카드유형별 이용금액 구성비 보여줘 (총 이용금액도 같이)",
+          "expected_tables": ["TB_ADW_CRD401M"],
+          "expected_chart": "donut_chart",
+          "expected_row_range": "2~5행",
+          "data_shape": "카테고리(CRD_DCD) + SUM(MON_USE_AMT) + 총합 KPI",
+          "verify": [
+            "도넛 차트 렌더링",
+            "중앙에 총 이용금액 표시",
+            "각 유형별 비율(%) 표시"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-14-002",
+          "query": "예금유형별 잔액 구성과 총 수신잔액 보여줘",
+          "expected_tables": ["TB_ADW_DEP201P"],
+          "expected_chart": "donut_chart",
+          "expected_row_range": "3~5행",
+          "data_shape": "카테고리(ACT_DCD) + SUM(BAL_AMT) + 총합 KPI",
+          "verify": [
+            "중앙에 총 수신잔액 KPI",
+            "예금유형별 비율 세그먼트"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-14-003",
+          "query": "캠페인 상태별 건수 구성과 전체 캠페인 수",
+          "expected_tables": ["TB_ADW_MKT1201M"],
+          "expected_chart": "donut_chart",
+          "expected_row_range": "3~5행",
+          "data_shape": "카테고리(CAMP_STCD) + COUNT + 전체 COUNT KPI",
+          "verify": [
+            "캠페인 상태(진행중/완료/예정 등)별 도넛",
+            "중앙에 전체 캠페인 수"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-15",
+      "name": "scatter_plot (규칙8: 연속형 수치 2변수)",
+      "description": "산점도 — 두 연속형 수치 변수 간 관계/분포 파악",
+      "judgment_rule": "규칙8",
+      "cases": [
+        {
+          "id": "VIZ-15-001",
+          "query": "고객별 예금잔액과 대출잔액의 관계 보여줘",
+          "expected_tables": ["TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_CSC101M"],
+          "expected_chart": "scatter_plot",
+          "expected_row_range": "다수 (고객별 집계)",
+          "data_shape": "X=SUM(BAL_AMT), Y=SUM(LN_BAL_AMT) 고객별 집계",
+          "verify": [
+            "X축=예금잔액, Y축=대출잔액",
+            "각 점이 고객 1명",
+            "상관관계 패턴 확인 가능"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-15-002",
+          "query": "펀드별 원금 대비 평가금액 분포",
+          "expected_tables": ["TB_ADW_FND601P", "TB_ADW_FND602P"],
+          "expected_chart": "scatter_plot",
+          "expected_row_range": "다수",
+          "data_shape": "X=ORGNL_AMT, Y=EVAL_AMT",
+          "verify": [
+            "X축=원금, Y축=평가금액",
+            "대각선 위면 수익, 아래면 손실"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-15-003",
+          "query": "캠페인 예산 대비 응답률 상관관계",
+          "expected_tables": ["TB_ADW_MKT1201M", "TB_ADW_MKT1202M"],
+          "expected_chart": "scatter_plot",
+          "expected_row_range": "~50행 (캠페인별)",
+          "data_shape": "X=BUDGET_AMT, Y=응답률(RESP_YN='Y' 비율)",
+          "verify": [
+            "X축=예산, Y축=응답률",
+            "예산과 응답률의 상관관계"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-16",
+      "name": "waterfall_chart (규칙9: 증감 누적 재무 데이터)",
+      "description": "폭포 차트 — 시작->변동->최종 구조의 재무 데이터",
+      "judgment_rule": "규칙9",
+      "cases": [
+        {
+          "id": "VIZ-16-001",
+          "query": "강남지점 손익 구조 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_FIN1306S"],
+          "expected_chart": "waterfall_chart",
+          "expected_row_range": "3~8행 (PL_ITEM_CD별)",
+          "data_shape": "PL_ITEM_CD(이자수익, 수수료수익, 인건비, 경비...) + AMT 증감 구조",
+          "verify": [
+            "매출(수익)에서 시작해 비용 차감 후 최종 이익",
+            "증가(녹색)/감소(빨강)/합계(파랑) 색상 구분",
+            "각 항목의 기여도가 시각적으로 명확"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-16-002",
+          "query": "전체 지점 손익 항목별 구성 보여줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_FIN1306S"],
+          "expected_chart": "waterfall_chart",
+          "expected_row_range": "3~8행",
+          "data_shape": "PL_ITEM_CD별 SUM(AMT) 증감 누적",
+          "verify": [
+            "전사 수준의 손익 폭포 차트",
+            "항목별 증감 명확"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-16-003",
+          "query": "이번 달 지점별 수익-비용 구조를 폭포차트로 보여줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_FIN1306S"],
+          "expected_chart": "waterfall_chart",
+          "expected_row_range": "3~8행",
+          "data_shape": "특정 지점의 PL_ITEM_CD별 AMT",
+          "verify": [
+            "사용자가 명시적으로 '폭포차트' 요청",
+            "LLM이 요청을 반영하여 waterfall_chart 판정"
+          ],
+          "difficulty": "medium",
+          "notes": "사용자 명시 요청 시 판정 우선도 확인"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-17",
+      "name": "heatmap (규칙10: 카테고리x카테고리 격자 + 수치)",
+      "description": "히트맵 — 두 범주 축의 격자에 수치를 색상 강도로 표현",
+      "judgment_rule": "규칙10",
+      "cases": [
+        {
+          "id": "VIZ-17-001",
+          "query": "지점별 대출유형별 건수 분포 보여줘",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+          "expected_chart": "heatmap",
+          "expected_row_range": "다수 (지점 x 대출유형 격자)",
+          "data_shape": "Y축=BR_NM(20지점) x X축=LN_DCD(3~6유형) -> COUNT 격자",
+          "verify": [
+            "지점(Y축) x 대출유형(X축) 격자",
+            "건수가 색상 강도로 표현",
+            "밝음->어두움 또는 그라디언트 컬러맵"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-17-002",
+          "query": "지점별 연령대별 고객 수 격자 보여줘",
+          "expected_tables": ["TB_ADW_CSC101M", "TB_ADW_COM001M"],
+          "expected_chart": "heatmap",
+          "expected_row_range": "다수",
+          "data_shape": "Y축=BR_NM(지점) x X축=AGE_GRP_CD(연령대) -> COUNT",
+          "verify": [
+            "지점 x 연령대 격자 히트맵",
+            "특정 지점-연령대 조합의 고객 밀도 파악"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-17-003",
+          "query": "채널별 거래유형별 거래금액 분포",
+          "expected_tables": ["TB_ADW_TRX701L"],
+          "expected_chart": "heatmap",
+          "expected_row_range": "다수",
+          "data_shape": "Y축=CHN_CD(4채널) x X축=TR_DCD(거래유형) -> SUM(TR_AMT)",
+          "verify": [
+            "채널 x 거래유형 격자",
+            "금액 강도 색상 표현"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-17-004",
+          "query": "지점별 월별 거래건수 분포 히트맵으로 보여줘",
+          "expected_tables": ["TB_ADW_TRX701L", "TB_ADW_COM001M"],
+          "expected_chart": "heatmap",
+          "expected_row_range": "다수",
+          "data_shape": "Y축=BR_NM(지점) x X축=월 -> COUNT(TR_ID)",
+          "verify": [
+            "지점 x 월 격자 히트맵",
+            "활발한 지점-시기 조합 파악"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-18",
+      "name": "flowchart (규칙11: 순차 단계 + 분기/조건)",
+      "description": "순서도 — 분석 결과에서 프로세스 흐름을 도출하는 경우",
+      "judgment_rule": "규칙11: 순차적 단계 + 분기/조건 포함",
+      "notes": "flowchart는 정형 SQL 결과가 아닌 분석 인사이트에서 LLM이 추론하는 다이어그램. DATA_ANALYSIS 의도에서 analyzer가 구조적 흐름을 도출할 때 적용",
+      "cases": [
+        {
+          "id": "VIZ-18-001",
+          "query": "대출 심사 프로세스를 단계별로 설명해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "flowchart",
+          "data_source": "LLM 도메인 지식 + 업무매뉴얼(Qdrant)",
+          "verify": [
+            "대출 신청 -> 서류 접수 -> 신용평가 -> 승인/거절 분기",
+            "조건 분기가 있는 순서도 SVG",
+            "시작/끝 노드, 판단 노드, 프로세스 노드 구분"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-18-002",
+          "query": "연체 고객 관리 프로세스 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "flowchart",
+          "data_source": "LLM 도메인 지식",
+          "verify": [
+            "연체 발생 -> 독촉 -> 기한이익상실 -> 법적조치 등 단계",
+            "연체 등급에 따른 분기 포함"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-18-003",
+          "query": "신규 고객 가입부터 첫 거래까지의 과정 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart_candidates": ["flowchart", "process_diagram"],
+          "data_source": "LLM 도메인 지식",
+          "verify": [
+            "가입 신청 -> 본인인증 -> 계좌개설 -> 첫 거래 흐름",
+            "flowchart 또는 process_diagram 판정"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-19",
+      "name": "timeline (규칙12: 시간순 이벤트/마일스톤)",
+      "description": "타임라인 — 시간순으로 나열된 이벤트 시각화",
+      "judgment_rule": "규칙12",
+      "cases": [
+        {
+          "id": "VIZ-19-001",
+          "query": "올해 마케팅 캠페인 일정 타임라인으로 보여줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_MKT1201M"],
+          "expected_chart": "timeline",
+          "expected_row_range": "5~50행",
+          "data_shape": "CAMP_NM + START_DT + END_DT 시간순 나열",
+          "verify": [
+            "캠페인명과 시작/종료일이 타임라인으로 표시",
+            "시간순 정렬",
+            "진행중/완료 등 상태 색상 구분 가능"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-19-002",
+          "query": "특정 고객의 가입부터 현재까지 주요 이벤트 이력 보여줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "timeline",
+          "data_source": "CSC101M(가입일) + DEP201P(계좌개설) + LNB301M(대출) + TRX701L(거래) 종합",
+          "verify": [
+            "가입 -> 계좌개설 -> 대출신청 -> 주요거래 등 마일스톤",
+            "시간순으로 배치된 이벤트"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-19-003",
+          "query": "보험 상품의 계약 -> 효력 -> 만기 일정 보여줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_INS803M"],
+          "expected_chart": "timeline",
+          "expected_row_range": "다수",
+          "data_shape": "CNTR_DT, EFF_DT, EXP_DT 시간순 이벤트",
+          "verify": [
+            "계약일 -> 효력발생일 -> 만기일 타임라인",
+            "보험별 이벤트 나열"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-20",
+      "name": "mind_map (규칙13: 중심주제 + 하위카테고리 계층)",
+      "description": "마인드맵 — 분석 결과를 계층적으로 분류하여 표시",
+      "judgment_rule": "규칙13",
+      "cases": [
+        {
+          "id": "VIZ-20-001",
+          "query": "우리 은행 상품 체계를 정리해서 보여줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "mind_map",
+          "data_source": "LLM 도메인 지식 + 메타 데이터",
+          "verify": [
+            "중심: 은행 상품",
+            "하위: 수신(예금/적금), 여신(신용/담보), 카드, 펀드, 보험, 연금 등",
+            "계층적 마인드맵 구조"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-20-002",
+          "query": "리스크 지표 분류 체계 보여줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_RSK1101M"],
+          "expected_chart": "mind_map",
+          "data_source": "RSK1101M IND_CD 분류 + LLM 도메인 지식",
+          "verify": [
+            "중심: 리스크 지표",
+            "하위: 신용리스크, 시장리스크, 유동성리스크 등 분류"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-20-003",
+          "query": "고객 세분화 기준을 정리해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "mind_map",
+          "data_source": "CSC101M 컬럼 기반(등급, 연령, 성별, 지역) + LLM 추론",
+          "verify": [
+            "중심: 고객 세분화",
+            "하위: 등급별, 연령별, 성별, 채널선호, 지역별 등 분류 기준"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-21",
+      "name": "org_chart (규칙14: 상하 보고관계/조직 트리)",
+      "description": "조직도 — 지점/부서 구조를 트리 형태로 시각화",
+      "judgment_rule": "규칙14",
+      "cases": [
+        {
+          "id": "VIZ-21-001",
+          "query": "지역별 지점 조직 구조 보여줘",
+          "expected_intent": "DATA_EXTRACTION",
+          "expected_tables": ["TB_ADW_COM001M"],
+          "expected_chart": "org_chart",
+          "expected_row_range": "20행 (지점 수)",
+          "data_shape": "RGN_NM(지역) -> BR_NM(지점) 상하 구조",
+          "verify": [
+            "지역(서울/경기/충청 등) 아래 소속 지점 트리",
+            "상위-하위 보고 관계 시각화"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-21-002",
+          "query": "WM 고객의 PB 담당 구조 보여줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_WMB1401M", "TB_ADW_COM001M"],
+          "expected_chart": "org_chart",
+          "data_shape": "지점 -> PB -> WM고객 트리 구조",
+          "verify": [
+            "지점 -> PB담당자 -> WM고객 계층",
+            "조직 트리 형태 SVG"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-22",
+      "name": "process_diagram (규칙15: 선형 프로세스)",
+      "description": "프로세스 다이어그램 — 입력->처리->출력의 선형 흐름",
+      "judgment_rule": "규칙15: 단계별 프로세스 (분기 없는 선형)",
+      "cases": [
+        {
+          "id": "VIZ-22-001",
+          "query": "거래 처리 프로세스를 단계별로 보여줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "process_diagram",
+          "data_source": "LLM 도메인 지식",
+          "verify": [
+            "거래 요청 -> 인증 -> 잔액확인 -> 실행 -> 완료 선형 흐름",
+            "분기 없는 순차 프로세스"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-22-002",
+          "query": "캠페인 실행 프로세스 보여줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_MKT1201M", "TB_ADW_MKT1202M"],
+          "expected_chart": "process_diagram",
+          "data_source": "캠페인 상태 흐름(기획->대상선정->실행->결과분석)",
+          "verify": [
+            "캠페인 생명주기 선형 프로세스",
+            "각 단계 설명 포함"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-23",
+      "name": "venn_diagram (규칙16: 2~3개 집합 비교)",
+      "description": "벤 다이어그램 — 집합 간 공통/차이 비교",
+      "judgment_rule": "규칙16",
+      "cases": [
+        {
+          "id": "VIZ-23-001",
+          "query": "대출 고객과 카드 고객의 겹치는 비율 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_LNB301M", "TB_ADW_CRD401M"],
+          "expected_chart": "venn_diagram",
+          "data_shape": "대출고객 집합, 카드고객 집합, 교집합",
+          "verify": [
+            "대출만, 카드만, 둘다 보유 고객 3영역",
+            "각 영역의 고객 수 표시"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-23-002",
+          "query": "예금, 대출, 펀드 보유 고객의 교차 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_FND601P"],
+          "expected_chart": "venn_diagram",
+          "data_shape": "예금고객, 대출고객, 펀드고객 3개 집합",
+          "verify": [
+            "3개 집합의 벤 다이어그램",
+            "7개 영역(각 단독 + 2개 교집합 3개 + 전체 교집합) 수치"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-23-003",
+          "query": "캠페인 대상 고객과 실제 응답 고객 겹침 분석",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_MKT1202M"],
+          "expected_chart": "venn_diagram",
+          "data_shape": "대상고객 전체 vs RESP_YN='Y' 고객",
+          "verify": [
+            "대상고객, 응답고객 2개 집합",
+            "응답률이 시각적으로 표현"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-24",
+      "name": "matrix_chart (규칙17: 2축 4사분면 분류)",
+      "description": "매트릭스 차트 — BCG, SWOT 등 2축 기준 4사분면 분류",
+      "judgment_rule": "규칙17",
+      "cases": [
+        {
+          "id": "VIZ-24-001",
+          "query": "지점별 수익성과 성장성으로 4사분면 분류해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_FIN1306S", "TB_ADW_COM001M"],
+          "expected_chart": "matrix_chart",
+          "data_shape": "X축=수익성(AMT), Y축=성장률(전월대비) -> 지점 4사분면 배치",
+          "verify": [
+            "X축=수익성, Y축=성장성",
+            "Star/Cash Cow/Question Mark/Dog 사분면",
+            "각 지점이 사분면에 배치"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-24-002",
+          "query": "고객별 수익 기여도와 거래 활성도로 분류 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_CSC101M", "TB_ADW_TRX701L", "TB_ADW_LNB301M"],
+          "expected_chart": "matrix_chart",
+          "data_shape": "X축=수익기여(대출잔액), Y축=거래빈도(건수)",
+          "verify": [
+            "고수익+고활성(VIP), 고수익+저활성(유지), 저수익+고활성(육성), 저수익+저활성(관리)",
+            "4사분면 분류 매트릭스"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-24-003",
+          "query": "펀드별 수익률과 위험도로 포트폴리오 매트릭스 보여줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_tables": ["TB_ADW_FND601P", "TB_ADW_FND602P"],
+          "expected_chart": "matrix_chart",
+          "data_shape": "X축=위험등급(RSK_GRD_CD), Y축=수익률(ERNS_RT)",
+          "verify": [
+            "위험-수익 매트릭스",
+            "각 펀드가 사분면에 배치"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-25",
+      "name": "value_chain (규칙18: 기업 가치사슬)",
+      "description": "밸류체인 다이어그램 — 지원활동 + 주활동 구조",
+      "judgment_rule": "규칙18",
+      "cases": [
+        {
+          "id": "VIZ-25-001",
+          "query": "우리 은행의 소매금융 밸류체인을 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "value_chain",
+          "data_source": "LLM 도메인 지식 + 은행 업무 구조",
+          "verify": [
+            "지원활동: IT인프라, 리스크관리, 컴플라이언스, 인사",
+            "주활동: 고객유치 -> 계좌개설 -> 상품판매 -> 사후관리 -> 고객유지",
+            "밸류체인 구조 SVG"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-25-002",
+          "query": "대출 사업의 가치사슬 분석해줘",
+          "expected_intent": "DATA_ANALYSIS",
+          "expected_chart": "value_chain",
+          "data_source": "LLM 도메인 지식",
+          "verify": [
+            "지원활동: 심사모델, 리스크관리, 자금조달",
+            "주활동: 상담 -> 신청접수 -> 심사 -> 실행 -> 사후관리 -> 회수",
+            "대출 비즈니스 밸류체인"
+          ],
+          "difficulty": "hard"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-26",
+      "name": "복합 시나리오 (멀티턴/혼합 의도)",
+      "description": "멀티턴 대화에서 시각화 유형이 전환되거나, 같은 데이터를 다른 시각화로 요청하는 경우",
+      "cases": [
+        {
+          "id": "VIZ-26-001",
+          "scenario": "같은 데이터 다른 시각화",
+          "step1_query": "대출유형별 잔액 보여줘",
+          "step1_expected_chart": "bar_chart",
+          "step2_query": "방금 결과를 비중으로 보여줘",
+          "step2_expected_chart_candidates": ["pie_chart", "donut_chart"],
+          "verify": [
+            "step1: bar_chart (카테고리 비교)",
+            "step2: 같은 데이터를 비중 관점으로 전환 -> pie_chart/donut_chart",
+            "멀티턴에서 시각화 유형 변경 정상 동작"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-26-002",
+          "scenario": "추출 후 분석 전환",
+          "step1_query": "지점별 대출 잔액 뽑아줘",
+          "step1_expected_intent": "DATA_EXTRACTION",
+          "step1_expected_chart": "bar_chart",
+          "step2_query": "여기서 위험한 지점을 분석해줘",
+          "step2_expected_intent": "DATA_ANALYSIS",
+          "step2_expected_chart": "bar_chart",
+          "verify": [
+            "step1: DATA_EXTRACTION + bar_chart",
+            "step2: DATA_ANALYSIS + analyzer 진입 + bar_chart (또는 다른 유형)",
+            "분석 인사이트가 추가됨"
+          ],
+          "difficulty": "hard"
+        },
+        {
+          "id": "VIZ-26-003",
+          "scenario": "info_card에서 상세 조회로 확장",
+          "step1_query": "전체 대출 잔액 합계",
+          "step1_expected_chart": "info_card",
+          "step2_query": "지점별로 나눠서 보여줘",
+          "step2_expected_chart_candidates": ["bar_chart", "horizontal_bar"],
+          "verify": [
+            "step1: info_card (단건 KPI)",
+            "step2: 동일 지표를 지점별로 분해 -> bar_chart/horizontal_bar",
+            "KPI 드릴다운 패턴"
+          ],
+          "difficulty": "medium"
+        }
+      ]
+    },
+    {
+      "id": "VIZ-27",
+      "name": "SVG 렌더링 품질 검증",
+      "description": "생성된 SVG의 기술적 품질 검증 (viewBox, 폰트, 색상, 반응형 등)",
+      "cases": [
+        {
+          "id": "VIZ-27-001",
+          "query": "지점별 대출 잔액 상위 5개",
+          "target_chart": "bar_chart",
+          "verify": [
+            "SVG viewBox='0 0 600 400' (chart_config.yaml 기준)",
+            "폰트: Malgun Gothic",
+            "색상 팔레트: #1a56db 계열",
+            "차트 제목 존재 (한글, 20자 이내)",
+            "축 라벨, 값 표시 존재"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-27-002",
+          "query": "월별 거래 건수 추이",
+          "target_chart": "line_chart",
+          "verify": [
+            "데이터 포인트가 선으로 연결",
+            "X축 라벨(월명), Y축 라벨(건수)",
+            "그리드 라인 또는 축선 존재",
+            "SVG 구조가 유효 (닫히지 않은 태그 없음)"
+          ],
+          "difficulty": "medium"
+        },
+        {
+          "id": "VIZ-27-003",
+          "query": "전체 고객 수",
+          "target_chart": "info_card",
+          "verify": [
+            "카드형 레이아웃 SVG",
+            "숫자가 크게 표시 (font-size 충분)",
+            "제목/라벨 포함",
+            "배경색/테두리 존재"
+          ],
+          "difficulty": "easy"
+        },
+        {
+          "id": "VIZ-27-004",
+          "query": "한글 긴 이름 테스트: 고객프로필의 선호채널분류코드별 마케팅등급코드별 건수",
+          "target_chart": "heatmap",
+          "verify": [
+            "긴 한글 라벨이 잘리지 않거나 적절히 줄임",
+            "텍스트 오버플로우 없음",
+            "차트 영역이 라벨에 의해 밀려나지 않음"
+          ],
+          "difficulty": "hard",
+          "notes": "한글 장문 라벨 렌더링 스트레스 테스트"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_cases": 108,
+    "by_category": {
+      "VIZ-01 DATA_EXTRACTION+시각화": 5,
+      "VIZ-02 DATA_ANALYSIS+시각화": 5,
+      "VIZ-03 info_card": 5,
+      "VIZ-04 info_card 경계": 5,
+      "VIZ-05 시각화스킵(none)": 5,
+      "VIZ-06 비데이터의도회귀": 5,
+      "VIZ-07 취소중단": 4,
+      "VIZ-08 line_chart": 4,
+      "VIZ-09 bar_chart": 5,
+      "VIZ-10 horizontal_bar": 3,
+      "VIZ-11 grouped_bar": 3,
+      "VIZ-12 stacked_bar": 3,
+      "VIZ-13 pie_chart": 4,
+      "VIZ-14 donut_chart": 3,
+      "VIZ-15 scatter_plot": 3,
+      "VIZ-16 waterfall_chart": 3,
+      "VIZ-17 heatmap": 4,
+      "VIZ-18 flowchart": 3,
+      "VIZ-19 timeline": 3,
+      "VIZ-20 mind_map": 3,
+      "VIZ-21 org_chart": 2,
+      "VIZ-22 process_diagram": 2,
+      "VIZ-23 venn_diagram": 3,
+      "VIZ-24 matrix_chart": 3,
+      "VIZ-25 value_chain": 2,
+      "VIZ-26 복합시나리오": 3,
+      "VIZ-27 SVG렌더링품질": 4
+    },
+    "chart_type_coverage": {
+      "info_card": ["VIZ-03-*", "VIZ-04-003"],
+      "line_chart": ["VIZ-08-*", "VIZ-01-004"],
+      "bar_chart": ["VIZ-09-*", "VIZ-01-001", "VIZ-01-002"],
+      "horizontal_bar": ["VIZ-10-*"],
+      "grouped_bar": ["VIZ-11-*"],
+      "stacked_bar": ["VIZ-12-*"],
+      "pie_chart": ["VIZ-13-*", "VIZ-01-005"],
+      "donut_chart": ["VIZ-14-*"],
+      "scatter_plot": ["VIZ-15-*"],
+      "waterfall_chart": ["VIZ-16-*"],
+      "heatmap": ["VIZ-17-*"],
+      "flowchart": ["VIZ-18-*"],
+      "timeline": ["VIZ-19-*"],
+      "mind_map": ["VIZ-20-*"],
+      "org_chart": ["VIZ-21-*"],
+      "process_diagram": ["VIZ-22-*"],
+      "venn_diagram": ["VIZ-23-*"],
+      "matrix_chart": ["VIZ-24-*"],
+      "value_chain": ["VIZ-25-*"],
+      "none": ["VIZ-05-*", "VIZ-06-*"]
+    },
+    "seeded_table_coverage": {
+      "TB_ADW_COM001M": ["VIZ-01-001", "VIZ-10-*", "VIZ-17-*", "VIZ-21-001"],
+      "TB_ADW_CSC101M": ["VIZ-01-002", "VIZ-03-003", "VIZ-04-005", "VIZ-08-001", "VIZ-13-004", "VIZ-17-002"],
+      "TB_ADW_DEP201P": ["VIZ-03-004", "VIZ-09-001", "VIZ-10-002", "VIZ-14-002", "VIZ-15-001"],
+      "TB_ADW_LNB301M": ["VIZ-01-001", "VIZ-01-003", "VIZ-03-001", "VIZ-09-002", "VIZ-11-001", "VIZ-13-001", "VIZ-17-001"],
+      "TB_ADW_CRD401M": ["VIZ-01-005", "VIZ-10-003", "VIZ-14-001", "VIZ-23-001"],
+      "TB_ADW_TRX701L": ["VIZ-01-004", "VIZ-05-005", "VIZ-12-001", "VIZ-17-003", "VIZ-17-004"],
+      "TB_ADW_FXD501L": ["VIZ-09-004"],
+      "TB_ADW_FXB502M": ["VIZ-08-002", "VIZ-08-004"],
+      "TB_ADW_FND601P": ["VIZ-09-003", "VIZ-13-003", "VIZ-15-002", "VIZ-24-003"],
+      "TB_ADW_FND602P": ["VIZ-15-002", "VIZ-24-003"],
+      "TB_ADW_INS803M": ["VIZ-13-002", "VIZ-19-003"],
+      "TB_ADW_PNB904P": ["VIZ-09-005"],
+      "TB_ADW_RSK1101M": ["VIZ-20-002"],
+      "TB_ADW_MKT1201M": ["VIZ-14-003", "VIZ-19-001"],
+      "TB_ADW_MKT1202M": ["VIZ-15-003", "VIZ-22-002", "VIZ-23-003"],
+      "TB_ADW_FIN1306S": ["VIZ-16-*", "VIZ-24-001"],
+      "TB_ADW_WMB1401M": ["VIZ-21-002"]
+    },
+    "priority": {
+      "P0_must_verify": [
+        "VIZ-01-001: DATA_EXTRACTION에서 시각화 되는지 (핵심 변경점)",
+        "VIZ-03-001: info_card가 뜨는지 (신규 기능)",
+        "VIZ-02-001: DATA_ANALYSIS에서 analyzer+visualizer 둘 다 실행되는지",
+        "VIZ-06-001: 비데이터 의도에서 시각화 미진입 회귀 확인"
+      ],
+      "P1_should_verify": [
+        "VIZ-04-001: 2행 시계열이 info_card 아닌 차트로 나오는지",
+        "VIZ-05-001: 0행 결과에서 시각화 스킵되는지",
+        "VIZ-07-004: 취소 후 재질의 정상 동작",
+        "VIZ-08-001~004: line_chart 렌더링",
+        "VIZ-09-001~005: bar_chart 렌더링",
+        "VIZ-13-001: pie_chart 렌더링",
+        "VIZ-16-001: waterfall_chart (FIN1306S 손익)",
+        "VIZ-17-001: heatmap (지점x대출유형)"
+      ],
+      "P2_nice_to_verify": [
+        "VIZ-10~12: horizontal_bar, grouped_bar, stacked_bar",
+        "VIZ-14~15: donut_chart, scatter_plot",
+        "VIZ-18~25: 다이어그램 유형 (flowchart, timeline, mind_map 등)",
+        "VIZ-26: 멀티턴 복합 시나리오",
+        "VIZ-27: SVG 렌더링 품질"
+      ]
+    },
+    "quick_verification_flow": [
+      "1. python -m src.main 으로 UI 서버 실행",
+      "2. VIZ-01-001 '이번 달 지점별 대출 건수 알려줘' -> 막대 차트 확인 (P0)",
+      "3. VIZ-03-001 '전체 대출 잔액 합계 알려줘' -> info_card 확인 (P0)",
+      "4. VIZ-02-001 '최근 3개월 지점별 대출 현황 분석해줘' -> 분석+차트 확인 (P0)",
+      "5. VIZ-06-001 '안녕하세요' -> 시각화 없이 텍스트만 확인 (P0)",
+      "6. VIZ-08-002 '최근 20일간 USD 환율 추이' -> line_chart 확인 (P1)",
+      "7. VIZ-17-001 '지점별 대출유형별 건수 분포' -> heatmap 확인 (P1)",
+      "8. VIZ-16-001 '강남지점 손익 구조 분석해줘' -> waterfall 확인 (P1)",
+      "위 8건으로 핵심 변경점 + 주요 차트 유형 커버"
+    ]
+  }
+}

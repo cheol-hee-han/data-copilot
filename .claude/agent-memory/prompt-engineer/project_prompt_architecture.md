@@ -40,6 +40,20 @@ reason 계층도 동일하게 `.replace()` 기반이므로 `.format()` / `{{doub
 - reason 계층: system=system.txt 내용 ({variable} 치환), user는 노드마다 다름
 - user.txt는 입력 데이터와 요청만 포함해야 함 (역할 정의는 system.txt에만)
 
+## continue_orchestrator 프롬프트 구현 완료 (2026-04-17)
+
+- 파일 경로:
+  - `resources/prompts/interpret/continue_orchestrator_system.txt`
+  - `resources/prompts/interpret/continue_orchestrator_user.txt`
+- 블록 구조: [ROLE], [RULES], [HALLUCINATION_GUARD], [EXAMPLES], [OUTPUT_CONTRACT], [TASK]
+- User 템플릿 3개 섹션: [이전 턴 스냅샷], [대화 이력], [사용자 발화]
+  - 변수: {turn_snapshots_block}, {conversation_history}, {user_message}
+- 출력 스키마 5개 필드: reference_turn_seq, route, continue_hint, updated_intent, reasoning
+- route 4가지: rerun / modify / analyze_only / fallback
+- 퓨샷 7개 시나리오: rerun(포맷변환), modify(조건추가), analyze_only, fallback(주제이탈), modify(오래된턴), rerun(시각화), fallback(스냅샷없음)
+- system_prompts.py 등록: CONTINUE_ORCHESTRATOR_SYSTEM, CONTINUE_ORCHESTRATOR_USER (interpret/ 계층)
+- 변수 치환 방식: .format() 단일 중괄호 (기존 패턴과 동일)
+
 ## 알려진 이슈
 
 - recovery_agent_system.txt의 응답 형식 JSON이 {{double braces}}로 작성되어 있음 — 버그 가능성, 확인 필요

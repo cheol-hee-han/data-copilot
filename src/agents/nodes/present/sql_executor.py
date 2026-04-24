@@ -43,7 +43,7 @@ from src.utils.tracker.dispatch import (
 logger = get_logger(__name__)
 
 
-async def execute_sql_node(
+async def sql_executor_node(
     state: PipelineState,
 ) -> dict:
     """검증된 SQL을 실행한다."""

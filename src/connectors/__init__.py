@@ -1,5 +1,7 @@
 """외부 시스템 커넥터 패키지.
 
+작성자: 한철희 / 최종수정: 2026-04-20 16:27:03
+
 구조:
     interfaces.py  — 커넥터 추상 인터페이스
                      (BaseConnector, SearchConnector, DatabaseConnector)

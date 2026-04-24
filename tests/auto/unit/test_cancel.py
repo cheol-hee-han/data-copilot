@@ -274,7 +274,7 @@ class TestCancelRouting:
         from src.agents.graph.pipeline import _route_after_result_finalizer
         reason = ReasoningState(validated_sql="SELECT 1")
         state = self._state(reason=reason)
-        assert _route_after_result_finalizer(state) == "execute_sql"
+        assert _route_after_result_finalizer(state) == "sql_executor"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -325,7 +325,7 @@ class TestResultFinalizerCancelled:
             knowledge_items=[
                 KnowledgeItem(
                     key="term:여신",
-                    knowledge_id="K1",
+                    id="K1",
                     status=ConfidenceStatus.CONFIRMED,
                     value="대출",
                 ),

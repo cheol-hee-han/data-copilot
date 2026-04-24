@@ -1,9 +1,65 @@
 # 판단/평가 노드 데이터 흐름 및 State 설계 검토
 
-> 작성일: 2026-04-02 | 최종 수정: 2026-04-13
-> 범위: Reason 계층 6개 판단 노드 + Interpret/Present 계층 2개 노드
+> 작성일: 2026-04-02 | 최종 수정: 2026-04-20
+> 범위: Reason 계층 8개 + Interpret 계층 4개(turn_reset/intent_classifier/query_normalizer/clarification_handler) + 멀티턴 라우터(continue_orchestrator) + Present 계층 6개(sql_executor/analyzer/visualizer/formatter/simple_responder/error_end) + 종료 훅(save_turn_snapshot)
 > 근거: 소스코드 전수 검토 (state.py, 각 노드 .py, 프롬프트 .txt)
 > v1.1 (2026-04-13): 현행 코드 기준 재검증 — join_keys 미구현 반영, code_map/preprocessed_input/CANDIDATE 포함/loop_guard 반영 완료 상태 표기
+> v1.2 (2026-04-20): **v2.4 노드 데이터 흐름 추가** — turn_reset SSoT, continue_orchestrator (CONTINUE 4-Way + handoff_note + state hydration), visualizer (analyzer에서 분리 시 필요 데이터 흐름), save_turn_snapshot 영속화 흐름. result_finalizer에 target_db_resolver 통합 흐름 추가. Reason/Present 노드 명칭(sql_executor/analyzer/visualizer/formatter)과 handoff_note·previous_turn_sql 소비 경로 반영.
+
+---
+
+## 목차
+
+- [0. v2.4 신규 노드 데이터 흐름 (요약)](#0-v24-신규-노드-데이터-흐름-요약) — turn_reset / continue_orchestrator / visualizer / save_turn_snapshot 4종 데이터 공급 매트릭스
+- [1. 노드별 데이터 공급 현황 분석](#1-노드별-데이터-공급-현황-분석) — Reason 8 + Present 핵심 노드의 입력 데이터·소스·공급 상태
+- [2. 데이터 형태(직렬화) 적정성 평가](#2-데이터-형태직렬화-적정성-평가) — 프롬프트 변수 직렬화의 우수/개선 사례
+- [3. State 구조 설계 평가](#3-state-구조-설계-평가) — ReasoningState/PipelineState 잘된 부분 및 미흡한 부분
+- [4. 노드 간 데이터 흐름 정합성 검증](#4-노드-간-데이터-흐름-정합성-검증) — Happy Path / Recovery / SQL Fix / CONTINUE 흐름 검증
+- [5. 추가 발견 문제 (비판적 검토 결과)](#5-추가-발견-문제-비판적-검토-결과) — 서브에이전트 코드 리뷰 발견 항목
+- [6. 종합 개선 우선순위 (검증 후 최종)](#6-종합-개선-우선순위-검증-후-최종) — 우선순위 테이블
+
+---
+
+## 0. v2.4 신규 노드 데이터 흐름 (요약)
+
+### 0.1 turn_reset_node (엔트리, 규칙 기반)
+
+| 필요 데이터 | 소스 | 공급 상태 | 비고 |
+|-------------|------|-----------|------|
+| `intent_norm` 설정 | `settings` | ✅ | normalization 활성 여부에 따라 초기화 범위 결정 |
+| 보존 대상 | `conversation_history`, `turn_snapshots`, `session_id`, `current_user_message_seq` | ✅ | SSoT (`PipelineState.turn_reset_updates()`)에서 명시적 보존 |
+| 초기화 대상 | reason 전체, route, handoff_note, pending_signals, sql_result, result_data, visualization, analysis_result, formatted_response, error_message, status, trace_log 일부 | ✅ | 단일 classmethod 호출 — 노드별 복제 금지 |
+| 산출 | `turn_id` 신규 발급 | ✅ | UUID, 트레이싱 키 |
+
+### 0.2 continue_orchestrator_node (멀티턴 라우터, LLM 직접)
+
+| 필요 데이터 | 소스 | 공급 상태 | 비고 |
+|-------------|------|-----------|------|
+| `user_input`, `conversation_history` | PipelineState | ✅ | 직전 턴 맥락 LLM에게 직렬화 |
+| `turn_snapshots` | PipelineState (세션 영속) | ✅ | 비어있으면 `error_end` 직행 (상류 회귀 금지) |
+| `current_user_message_seq` | PipelineState | ✅ | reference_turns 기록 키 |
+| 산출 | `route`, `handoff_note`, `reference_turns`, `continue_context` | ✅ | LLM 판정 + state hydration (route별 차등 — REFINE 만 hydration 스킵) |
+| 산출 (REGENERATE) | `reason.previous_turn_sql/explanation`, `reason.knowledge_items`, `reason.target_db`, `normalized_query` | ✅ | route-agnostic 전량 복원 (Phase 3 §3.6) |
+| 산출 (REDISPLAY/ANALYZE) | `result_data` (+ ANALYZE: `analysis_query`) | ✅ | sql_executor 우회용 hydration |
+| 폴백 | LLM 파싱 오류 | ✅ | `error_end` 직행 |
+
+### 0.3 visualizer_node (시각화 단독, LLM 직접)
+
+| 필요 데이터 | 소스 | 공급 상태 | 비고 |
+|-------------|------|-----------|------|
+| `result_data` | sql_executor 또는 hydrated (REDISPLAY) | ✅ | columns/rows/row_count/summary |
+| `analysis_result` | analyzer (있을 때) | ✅ | 인사이트 기반 차트 유형 힌트 |
+| `intent` | PipelineState | ✅ | DATA_EXTRACTION 시 시각화 보수적 판단 |
+| `handoff_note` | continue_orchestrator (REDISPLAY) | ✅ | "막대→파이 변경" 등 시각화 변경 지시 직접 주입 |
+| 산출 | `visualization` (svg_code, chart_type, title) | ✅ | LLM 실패 시 chart_generator 템플릿 폴백 |
+
+### 0.4 save_turn_snapshot_node (종료 훅, 규칙 기반)
+
+| 필요 데이터 | 소스 | 공급 상태 | 비고 |
+|-------------|------|-----------|------|
+| `turn_id`, `current_user_message_seq` | PipelineState | ✅ | snapshot 저장 키 |
+| 영속 대상 | `result_data`, `visualization`, `analysis_result`, `reason.validated_sql`, `reason.sql_explanation`, `normalized_query`, `reason.target_db`, `reason.target_db_decision` | ✅ | message_store에 turn 단위 저장 (CONTINUE hydration 소스) |
+| 실패 턴 | `error_message`, `reason.failure_type` | ✅ | 최소 메타도 영속화 (실패 패턴 분석/회귀 기반) |
 
 ---
 
@@ -114,7 +170,9 @@
 | `reason.dead_ends` | recovery_agent | **정상** | `format_dead_ends_text()` |
 | `reason.failure_reason` | sql_validator | **정상** | 재시도 시 fix 피드백 |
 | `preprocessed_input` | interpret 계층 | **정상** | user 메시지 |
-| dialect | connector_manager | **정상** | DB 기반 자동 결정 |
+| dialect | target_db_resolver / connector_manager | **정상** | `target_db` → `SQL_GENERATOR_SYSTEM_{POSTGRES,SYBASE_IQ,IMPALA,ORACLE}` 선택 (v2.4) |
+| `reason.previous_turn_sql/explanation` | continue_orchestrator (REGENERATE) | **정상** | Phase 3 §3.6 — `{previous_sql}` placeholder 주입 (v2.4) |
+| `handoff_note` | continue_orchestrator (REGENERATE/REFINE) | **정상** | 시스템 프롬프트 `{handoff_note}` consumer opt-in (v2.4) |
 
 **프롬프트 직렬화 형태 분석**:
 
@@ -173,6 +231,9 @@
 | `reason.candidate_tables[*].sample_rows` | context_retriever | **정상** | 샘플 현황 |
 | `reason.loop_guard` | 각 노드 누적 | **정상** | 종료 조건 |
 | `reason.hypotheses` | reasoning_preparer / 자체 | **정상** | 가설 관리 |
+| `reason.previous_turn_sql/explanation` | continue_orchestrator (REGENERATE) | **정상** | Phase 3 §3.6 — `{previous_sql}` 주입 (v2.4) |
+| `handoff_note` | continue_orchestrator (REGENERATE) | **정상** | recovery_agent 시스템 프롬프트 `{handoff_note}` consumer (v2.4) |
+| REGENERATE × non-local_fix 차단 | router | **정상** | local_fix 실패만 허용, 그 외 conclude_failure 직행 (Phase 3 §14.3.5) |
 
 **프롬프트 직렬화 형태 — 가장 충실한 맥락 전달**:
 - 8개 placeholder 모두 별도 빌더 함수로 구조화되어 있어 **데이터 형태가 가장 잘 조립됨**.
@@ -195,6 +256,15 @@
 | `reason.loop_guard` | 각 노드 | **정상** | 요약 통계 |
 | `reason.dead_ends` | recovery_agent | **정상** | 실패 요약 |
 | `reason.exploration_summary` | recovery_agent (give_up) | **정상** | LLM 총평 |
+| `reason.target_db_decision` | target_db_resolver | **정상** | FORCED/SINGLE/AMBIGUOUS/NO_SELECTION 4-state SSoT (v2.4) |
+| `reason.target_db` | target_db_resolver | **정상** | dialect 확정값 (sql_executor 위임용) |
+| `reason.target_db_choices` | target_db_resolver (AMBIGUOUS) | **정상** | 사용자 명확화 후보 (T5 trigger) |
+
+**v2.4 target_db_resolver 통합**:
+- result_finalizer는 SQL 확정 직후 `target_db_resolver.resolve()`를 호출하여 4-state Decision을 산출.
+- FORCED/SINGLE → `reason.target_db` 확정 후 sql_executor로 진행.
+- AMBIGUOUS → `pending_signals`에 T5(execution-time DB 선택) trigger 추가, clarification_handler로 분기.
+- NO_SELECTION → `failure_type=structural`로 폴백 (사용 가능한 DB 없음).
 
 **문제**:
 - `_build_context_info()`에서 **CONFIRMED 상태의 `table:*` KI만** 사용하여 ContextInfo를 구성.
@@ -384,6 +454,24 @@ sql_validator(SEMANTIC_LOCAL) → sql_generator(재시도) → sql_validator
 |------|-----------|--------|
 | validator→generator | failure_reason(fix 피드백), failure_type | **정상** |
 | generator 내부 | fix_section에 failure_reason 주입 | **정상** |
+
+### 4.4 CONTINUE 흐름 (v2.4 멀티턴 라우팅)
+
+```
+turn_reset → intent_classifier(=CONTINUE) → continue_orchestrator → {REDISPLAY|ANALYZE|REGENERATE|REFINE}
+```
+
+| 구간 | 전달 데이터 | 정합성 |
+|------|-----------|--------|
+| turn_reset→intent | conversation_history, turn_snapshots 보존 + reason/route/handoff_note 초기화 | **정상** (SSoT classmethod) |
+| intent→orchestrator | intent=CONTINUE 판정 | **정상** |
+| orchestrator→REDISPLAY | route, handoff_note, result_data hydration | **정상** (visualizer 직행) |
+| orchestrator→ANALYZE | route, handoff_note, result_data + analysis_query hydration | **정상** (analyzer 직행) |
+| orchestrator→REGENERATE | route, handoff_note, knowledge_items + previous_turn_sql + target_db 전량 복원 | **정상** (Phase 3 §3.6 route-agnostic) |
+| orchestrator→REFINE | route, handoff_note만 (state hydration 스킵 — 재계산이 필요한 경로) | **정상** (오염 방지) |
+| 모든 종료 | save_turn_snapshot에서 turn_id 단위 영속화 | **정상** (다음 턴 CONTINUE의 hydration 소스) |
+
+**REGENERATE × non-local_fix 가드**: REGENERATE 경로에서 SQL 재생성에 실패하더라도 `failure_type != local_fix`이면 recovery_agent를 우회하여 conclude_failure로 직행. 직전 턴 SQL이 잘못된 경우 무한 fix 루프를 차단 (Phase 3 §14.3.5).
 
 ---
 

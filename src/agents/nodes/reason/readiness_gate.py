@@ -10,7 +10,6 @@ context_retriever 조기 탈출과 라우팅 로직의 단일 진실 공급원�
     EXPLORE   → EXPLORING   → context_retriever (추가 탐색)
     GENERATE  → GENERATING  → sql_generator (SQL 생성)
     REPLAN    → REPLANNING  → recovery_agent (ReAct 복구 루프)
-    ASK_USER  → VERIFYING   → result_finalizer (사용자 확인)
     TERMINATE → DONE        → result_finalizer (강제 종료)
 
 라우팅 함수(pipeline.py)는 reason.phase만 읽어서 다음 노드를 결정한다.
@@ -117,7 +116,6 @@ async def readiness_gate_node(state: PipelineState) -> dict:
         Phase.GENERATING: "sql_generator",
         Phase.REPLANNING: "recovery_agent",
         Phase.DONE: "result_finalizer",
-        Phase.VERIFYING: "result_finalizer",
     }
     _next = _phase_to_next.get(
         reason.phase, "recovery_agent",

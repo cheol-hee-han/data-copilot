@@ -1,0 +1,156 @@
+────────────────────────────────
+## 예제 9: heatmap (히트맵 — 요일 × 시간대 거래량)
+────────────────────────────────
+
+데이터:
+컬럼: [요일, 오전(09-12), 오후(12-18), 저녁(18-22), 심야(22-09)]
+행: [
+  ("월", 120, 280, 180,  40),
+  ("화", 140, 310, 200,  50),
+  ("수", 160, 330, 220,  55),
+  ("목", 150, 300, 210,  45),
+  ("금", 180, 360, 260,  70)
+]
+(단위: 건)
+
+계산 과정 (모델 내부 참조):
+  격자: 5열(요일) × 4행(시간대)
+  셀 영역: x=[150, 700] (너비 550, 5열 → 셀 폭 110)
+           y=[80, 400] (높이 320, 4행 → 셀 높이 80)
+  좌측 마진(150-90=60)에 시간대 라벨, 상단(80)에 요일 라벨
+  값 범위: 40 ~ 360
+  색 단계 (5단계, 파랑 계열):
+    0-50    : #eff6ff (매우 옅음)
+    51-150  : #bfdbfe (옅음)
+    151-250 : #60a5fa (중간)
+    251-350 : #2563eb (진함)   → 텍스트 색 흰색
+    351+    : #1e3a8a (매우 진함) → 텍스트 색 흰색
+
+  요일 X좌표 (셀 좌측): 월=150, 화=260, 수=370, 목=480, 금=590
+  요일 X중심: 월=205, 화=315, 수=425, 목=535, 금=645
+  시간대 Y좌표 (셀 상단): 오전=80, 오후=160, 저녁=240, 심야=320
+  시간대 Y중심: 오전=120, 오후=200, 저녁=280, 심야=360
+
+  셀별 색상 매핑:
+    월 오전 120 #bfdbfe / 오후 280 #2563eb / 저녁 180 #60a5fa / 심야  40 #eff6ff
+    화 오전 140 #bfdbfe / 오후 310 #2563eb / 저녁 200 #60a5fa / 심야  50 #eff6ff
+    수 오전 160 #60a5fa / 오후 330 #2563eb / 저녁 220 #60a5fa / 심야  55 #bfdbfe
+    목 오전 150 #bfdbfe / 오후 300 #2563eb / 저녁 210 #60a5fa / 심야  45 #eff6ff
+    금 오전 180 #60a5fa / 오후 360 #1e3a8a / 저녁 260 #2563eb / 심야  70 #bfdbfe
+
+  값 글자 색: 진한배경(#2563eb, #1e3a8a)에는 white, 그 외는 #1f2937
+  컬러 스케일 범례: 하단 좌→우, 5단계 사각형 + 라벨
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">요일×시간대 거래량 히트맵 (건)</text>
+
+  <!-- 요일 라벨 (상단) -->
+  <text x="205" y="68" text-anchor="middle" font-size="16" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">월</text>
+  <text x="315" y="68" text-anchor="middle" font-size="16" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">화</text>
+  <text x="425" y="68" text-anchor="middle" font-size="16" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">수</text>
+  <text x="535" y="68" text-anchor="middle" font-size="16" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">목</text>
+  <text x="645" y="68" text-anchor="middle" font-size="16" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">금</text>
+
+  <!-- 시간대 라벨 (좌측) -->
+  <text x="140" y="125" text-anchor="end" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">오전</text>
+  <text x="140" y="205" text-anchor="end" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">오후</text>
+  <text x="140" y="285" text-anchor="end" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">저녁</text>
+  <text x="140" y="365" text-anchor="end" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">심야</text>
+
+  <!-- 월요일 열 -->
+  <rect x="150" y="80" width="110" height="80" fill="#bfdbfe" stroke="white" stroke-width="2" rx="4"/>
+  <text x="205" y="125" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">120</text>
+  <rect x="150" y="160" width="110" height="80" fill="#2563eb" stroke="white" stroke-width="2" rx="4"/>
+  <text x="205" y="205" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">280</text>
+  <rect x="150" y="240" width="110" height="80" fill="#60a5fa" stroke="white" stroke-width="2" rx="4"/>
+  <text x="205" y="285" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">180</text>
+  <rect x="150" y="320" width="110" height="80" fill="#eff6ff" stroke="white" stroke-width="2" rx="4"/>
+  <text x="205" y="365" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">40</text>
+
+  <!-- 화요일 열 -->
+  <rect x="260" y="80" width="110" height="80" fill="#bfdbfe" stroke="white" stroke-width="2" rx="4"/>
+  <text x="315" y="125" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">140</text>
+  <rect x="260" y="160" width="110" height="80" fill="#2563eb" stroke="white" stroke-width="2" rx="4"/>
+  <text x="315" y="205" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">310</text>
+  <rect x="260" y="240" width="110" height="80" fill="#60a5fa" stroke="white" stroke-width="2" rx="4"/>
+  <text x="315" y="285" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">200</text>
+  <rect x="260" y="320" width="110" height="80" fill="#eff6ff" stroke="white" stroke-width="2" rx="4"/>
+  <text x="315" y="365" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">50</text>
+
+  <!-- 수요일 열 -->
+  <rect x="370" y="80" width="110" height="80" fill="#60a5fa" stroke="white" stroke-width="2" rx="4"/>
+  <text x="425" y="125" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">160</text>
+  <rect x="370" y="160" width="110" height="80" fill="#2563eb" stroke="white" stroke-width="2" rx="4"/>
+  <text x="425" y="205" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">330</text>
+  <rect x="370" y="240" width="110" height="80" fill="#60a5fa" stroke="white" stroke-width="2" rx="4"/>
+  <text x="425" y="285" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">220</text>
+  <rect x="370" y="320" width="110" height="80" fill="#bfdbfe" stroke="white" stroke-width="2" rx="4"/>
+  <text x="425" y="365" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">55</text>
+
+  <!-- 목요일 열 -->
+  <rect x="480" y="80" width="110" height="80" fill="#bfdbfe" stroke="white" stroke-width="2" rx="4"/>
+  <text x="535" y="125" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">150</text>
+  <rect x="480" y="160" width="110" height="80" fill="#2563eb" stroke="white" stroke-width="2" rx="4"/>
+  <text x="535" y="205" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">300</text>
+  <rect x="480" y="240" width="110" height="80" fill="#60a5fa" stroke="white" stroke-width="2" rx="4"/>
+  <text x="535" y="285" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">210</text>
+  <rect x="480" y="320" width="110" height="80" fill="#eff6ff" stroke="white" stroke-width="2" rx="4"/>
+  <text x="535" y="365" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">45</text>
+
+  <!-- 금요일 열 -->
+  <rect x="590" y="80" width="110" height="80" fill="#60a5fa" stroke="white" stroke-width="2" rx="4"/>
+  <text x="645" y="125" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">180</text>
+  <rect x="590" y="160" width="110" height="80" fill="#1e3a8a" stroke="white" stroke-width="2" rx="4"/>
+  <text x="645" y="205" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">360</text>
+  <rect x="590" y="240" width="110" height="80" fill="#2563eb" stroke="white" stroke-width="2" rx="4"/>
+  <text x="645" y="285" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">260</text>
+  <rect x="590" y="320" width="110" height="80" fill="#bfdbfe" stroke="white" stroke-width="2" rx="4"/>
+  <text x="645" y="365" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">70</text>
+
+  <!-- 컬러 스케일 범례 (하단) -->
+  <text x="150" y="445" font-size="14" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">낮음</text>
+  <rect x="200" y="432" width="40" height="16" fill="#eff6ff" rx="2"/>
+  <rect x="240" y="432" width="40" height="16" fill="#bfdbfe" rx="2"/>
+  <rect x="280" y="432" width="40" height="16" fill="#60a5fa" rx="2"/>
+  <rect x="320" y="432" width="40" height="16" fill="#2563eb" rx="2"/>
+  <rect x="360" y="432" width="40" height="16" fill="#1e3a8a" rx="2"/>
+  <text x="410" y="445" font-size="14" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">높음</text>
+
+  <text x="200" y="468" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">~50</text>
+  <text x="260" y="468" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">~150</text>
+  <text x="300" y="468" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">~250</text>
+  <text x="340" y="468" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">~350</text>
+  <text x="380" y="468" text-anchor="middle" font-size="12" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">350+</text>
+</svg>

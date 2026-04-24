@@ -28,7 +28,7 @@ State 변화 추적을 신규로 제공한다.
     handler.start_run(user_input=query, session_id=sid)
     result = await app.ainvoke(state, config={"callbacks": [handler]})
     handler.end_run(...)
-    handler.save()
+    handler.save(turn_seq=3)
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "label": "대화 맥락 분석 및 질의 의도 분류",
         "thinking": "질문 의도 파악 중",
     },
-    "normalize_query": {
+    "query_normalizer": {
         "phase": "interpret",
         "label": "사용자 질의 8-Slot 정규화",
         "thinking": "질문 정규화 중",
@@ -143,17 +143,22 @@ NODE_PROGRESS_MAP: dict[str, dict[str, str]] = {
         "label": "간단 응답 생성",
         "thinking": "응답 작성 중",
     },
-    "execute_sql": {
+    "sql_executor": {
         "phase": "present",
         "label": "데이터 조회",
         "thinking": "데이터베이스 조회 중",
     },
-    "analyze_data": {
+    "analyzer": {
         "phase": "present",
-        "label": "결과 분석·시각화",
+        "label": "결과 분석",
         "thinking": "데이터 분석 중",
     },
-    "format_response": {
+    "visualizer": {
+        "phase": "present",
+        "label": "시각화 생성",
+        "thinking": "시각화 생성 중",
+    },
+    "formatter": {
         "phase": "present",
         "label": "보고서 작성",
         "thinking": "결과 정리 중",
@@ -498,8 +503,8 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
             case "llm":
                 if name == "llm.call":
                     self._record_llm_call(data)
-                elif name == "llm.prompt_variables":
-                    self._merge_prompt_variables(data)
+                elif name.startswith("llm.delta."):
+                    await self._emit_llm_delta(name, data)
             case "sql":
                 self._record_sql(data)
             case "reasoning":
@@ -595,10 +600,6 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
             prompt_summary=data.get(
                 "prompt_summary", "",
             ),
-            prompt_variables=data.get(
-                "prompt_variables",
-            )
-            or {},
             prompt_tokens=data.get("prompt_tokens", 0),
             response_text=data.get("response_text", ""),
             response_tokens=data.get(
@@ -635,17 +636,6 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
             duration_ms=record.latency_ms,
             parent_seq=parent_seq,
         )
-
-    def _merge_prompt_variables(
-        self,
-        data: dict[str, Any],
-    ) -> None:
-        """직전 LLM 호출 기록에 프롬프트 치환 변수를 보강한다."""
-        variables = data.get("variables", {})
-        if self._trace.llm_calls and variables:
-            self._trace.llm_calls[-1].prompt_variables = (
-                variables
-            )
 
     def _record_sql(
         self,
@@ -758,7 +748,7 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
         self,
         output_dir: str | None = None,
         *,
-        turn_id: str = "",
+        turn_seq: int = 0,
         user_id: str = "anonymous",
         with_report: bool = True,
     ) -> list[dict[str, str]]:
@@ -766,7 +756,7 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
 
         Args:
             output_dir: 출력 디렉토리 (기본: settings 참조).
-            turn_id: 턴 식별자 (파일명에 12자 사용).
+            turn_seq: DB 메시지 seq 번호 (파일명에 4자리 zero-pad 사용).
             user_id: 사용자 식별자 (기본: anonymous).
             with_report: 보고서 생성 여부 (개별 플래그와 AND).
 
@@ -784,9 +774,9 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
         from src.utils.timezone import now_kst
 
         date_str = now_kst().strftime("%Y%m%d")
-        tid = turn_id.replace("-", "")[:12] if turn_id else self._run_id[:12]
+        seq_str = f"{turn_seq:04d}"
         sid = self._trace.session_id or self._run_id
-        prefix = f"{date_str}_{user_id}_{sid}_{tid}"
+        prefix = f"{date_str}_{user_id}_{sid}_{seq_str}"
 
         data = self._trace.model_dump(mode="json")
         saved_files: list[dict[str, str]] = []
@@ -921,9 +911,6 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
                 prompt_summary=call_data.get(
                     "prompt_summary", "",
                 ),
-                prompt_variables=call_data.get(
-                    "prompt_variables", {},
-                ),
                 prompt_tokens=call_data.get(
                     "prompt_tokens", 0,
                 ),
@@ -1031,6 +1018,52 @@ class DataCopilotCallbackHandler(AsyncCallbackHandler):
             )
         except Exception as e:
             logger.debug("WebSocket progress 전파 실패", error=str(e))
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # LLM 토큰 스트리밍 (analyzer / visualize)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    async def _emit_llm_delta(
+        self,
+        name: str,
+        data: dict[str, Any],
+    ) -> None:
+        """`llm.delta.*` 이벤트를 WebSocket `llm_delta` 메시지로 전송한다.
+
+        네이밍 규약은 Anthropic SSE (`content_block_delta` + `index`) 및
+        Vercel AI SDK v5 (`start`/`delta`/`end`) 표준에 정합한다.
+        페이로드 구조:
+            {type:"llm_delta", turn_id, part_id, part_type?, event, text?, ...}
+        """
+        if self._on_event is None:
+            return
+
+        event = name.rsplit(".", 1)[-1]  # "start" / "chunk" / "end" / "reset"
+        # chunk → delta 네이밍 정규화 (Vercel AI SDK v5)
+        ws_event = "delta" if event == "chunk" else event
+
+        payload: dict[str, Any] = {
+            "type": "llm_delta",
+            "turn_id": data.get("turn_id", ""),
+            "part_id": data.get("part_id", ""),
+            "event": ws_event,
+        }
+        part_type = data.get("part_type")
+        if part_type:
+            payload["part_type"] = part_type
+        if ws_event == "delta":
+            payload["text"] = data.get("text", "")
+        if ws_event == "reset":
+            payload["reason"] = data.get("reason", "")
+        if ws_event == "end":
+            for k in ("cancelled", "error", "error_code"):
+                if k in data:
+                    payload[k] = data[k]
+
+        try:
+            await self._on_event(payload)
+        except Exception as e:
+            logger.debug("WebSocket llm_delta 전파 실패", error=str(e))
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 유틸리티

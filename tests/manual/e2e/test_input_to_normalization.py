@@ -44,7 +44,7 @@ async def run_pipeline_front(
     from src.services.input_sanitizer import sanitize
     from src.agents.nodes.interpret.history_resolver import resolve_history_node
     from src.agents.nodes.interpret.intent_classifier import classify_intent_node
-    from src.agents.nodes.interpret.query_normalizer import normalize_query_node
+    from src.agents.nodes.interpret.query_normalizer import query_normalizer_node
     from src.services.history_resolver import HistoryDecision
     from src.config import settings
 
@@ -136,7 +136,7 @@ async def run_pipeline_front(
         return result_info
 
     print("\n[4/4] 질의 정규화 (normalize_query)")
-    norm_result = await normalize_query_node(state)
+    norm_result = await query_normalizer_node(state)
 
     nq = norm_result.get("normalized_query")
     if nq:

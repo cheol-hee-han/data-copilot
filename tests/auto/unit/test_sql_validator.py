@@ -6,7 +6,20 @@
     PII 컬럼 직접 노출 차단, LIMIT 강제(집계 쿼리 예외).
 """
 
+import pytest
+
 from src.services.sql_safety_checker import validate_sql_safety
+
+
+@pytest.fixture(autouse=True)
+def _force_pii_masking(monkeypatch):
+    """PII 마스킹을 강제 활성화한다.
+
+    .env의 PII_MASKING_ENABLED=false 설정과 무관하게
+    check_pii_columns 가 실제 동작하도록 보장한다.
+    """
+    import src.config as _cfg
+    monkeypatch.setattr(_cfg.settings, "pii_masking_enabled", True)
 
 
 def test_validate_valid_select_aggregate():

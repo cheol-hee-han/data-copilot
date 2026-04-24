@@ -88,9 +88,9 @@ button{cursor:pointer}
 .chat-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .chat-item{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:var(--r-sm);
   font-size:13px;color:var(--txt2);transition:all var(--t);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;cursor:pointer;border:none;background:none;width:100%;text-align:left}
+  cursor:pointer;border:none;background:none;width:100%;text-align:left}
 .chat-item:hover,.chat-item.active{background:var(--bg3);color:var(--txt)}
-.chat-item svg{flex-shrink:0;opacity:.4}
+.chat-item>svg{flex-shrink:0;opacity:.4}
 .sb-foot{padding:8px 9px;border-top:1px solid var(--border)}
 .set-btn{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:var(--r-sm);
   font-size:13px;color:var(--txt2);border:none;background:none;width:100%;transition:all var(--t)}
@@ -374,6 +374,11 @@ button{cursor:pointer}
 .in-ta::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .in-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
 .in-left{display:flex;align-items:center;gap:2px}
+.stream-toggle{width:28px;height:28px;border:none;background:none;border-radius:var(--r-xs);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all var(--t);color:var(--txt3)}
+.stream-toggle:hover{background:var(--bg3)}
+.stream-toggle.on{color:var(--bg-accent)}
+.stream-toggle.on:hover{color:var(--bg-accent)}
 .tb{width:28px;height:28px;border:none;background:none;color:var(--txt3);border-radius:var(--r-xs);
   display:flex;align-items:center;justify-content:center;transition:all var(--t)}
 .tb:hover{background:var(--bg3);color:var(--txt)}
@@ -680,15 +685,21 @@ button{cursor:pointer}
   pointer-events:none;animation:tipIn .15s ease}
 @keyframes tipIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
 
-/* ══ Sidebar item delete ══ */
-.chat-item{position:relative}
-.chat-item-del{position:absolute;right:4px;top:50%;transform:translateY(-50%);
-  width:22px;height:22px;border:none;background:none;color:var(--txt3);padding:0;
-  border-radius:var(--r-xs);display:none;align-items:center;justify-content:center;
-  cursor:pointer;transition:all var(--t)}
-.chat-item:hover .chat-item-del{display:flex}
-.chat-item-del:hover{background:var(--bg-accent-subtle);color:#991b1b}
-[data-theme="dim"] .chat-item-del:hover,[data-theme="dark"] .chat-item-del:hover{color:#f87171}
+/* ══ Sidebar item more-menu ══ */
+.chat-item-more{flex-shrink:0;width:22px;height:22px;border:none;background:none;color:var(--txt3);padding:0;
+  border-radius:var(--r-xs);display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all var(--t);opacity:0;pointer-events:none}
+.chat-item:hover .chat-item-more{opacity:1;pointer-events:auto}
+.chat-item-more:hover{background:var(--bg3);color:var(--txt)}
+.chat-item-menu{position:fixed;z-index:9999;
+  min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);
+  box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px 0;display:none}
+.chat-item-menu.open{display:block}
+.chat-item-menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 12px;
+  border:none;background:none;font-size:12.5px;color:var(--txt2);cursor:pointer;transition:all var(--t)}
+.chat-item-menu-item:hover{background:var(--bg3);color:var(--txt)}
+.chat-item-menu-item.danger:hover{background:var(--bg-accent-subtle);color:#991b1b}
+[data-theme="dim"] .chat-item-menu-item.danger:hover,[data-theme="dark"] .chat-item-menu-item.danger:hover{color:#f87171}
 
 /* ══ Insight toggle active ══ */
 .act-btn.insight-open{background:var(--bg-accent-subtle);color:var(--txt-accent)}
@@ -734,6 +745,26 @@ button{cursor:pointer}
 .feedback-submit{background:var(--bg-accent);border:none;color:#fff}
 .feedback-text-input{width:100%;margin-top:6px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;color:var(--txt);background:var(--bg);outline:none;font-family:var(--sans)}
 .feedback-text-input:focus{border-color:var(--bg-accent)}
+
+/* ══ Clarification card (inline, same visual tone as .feedback-popup) ══ */
+.clarification-card{background:var(--bg);border:1px solid var(--border);border-left:4px solid var(--bg-accent);
+  border-radius:var(--r-md);padding:16px;margin-top:8px;width:min(300px,80vw)}
+.clarification-card h4{margin:0 0 8px;font-size:13px;color:var(--txt);font-weight:600}
+.clarification-card .clar-option{display:block;width:100%;padding:7px 10px;margin:3px 0;
+  border:1px solid var(--border);border-radius:var(--r-sm);background:var(--bg);color:var(--txt);
+  font-size:12.5px;cursor:pointer;text-align:left;transition:all var(--t-fast)}
+.clarification-card .clar-option:hover{background:var(--bg2);border-color:var(--bg-accent)}
+.clarification-card .clar-option.selected{background:var(--bg-accent);color:#fff;border-color:var(--bg-accent)}
+.clarification-card .clar-free-input{width:100%;margin-top:5px;padding:5px 9px;border:1px solid var(--border);
+  border-radius:var(--r-sm);font-size:12.5px;color:var(--txt);background:var(--bg);outline:none;font-family:var(--sans);display:none}
+.clarification-card .clar-free-input:focus{border-color:var(--bg-accent)}
+.clarification-card .clar-free-input.visible{display:block}
+.clarification-card .clar-actions{display:flex;justify-content:flex-end;margin-top:12px}
+.clarification-card .clar-submit{padding:5px 14px;border-radius:var(--r-sm);font-size:12.5px;cursor:pointer;
+  background:var(--bg-accent);border:none;color:#fff;transition:background var(--t-fast)}
+.clarification-card .clar-submit:hover{background:var(--bg-accent-hover)}
+.clarification-card .clar-submit:disabled{opacity:.5;cursor:not-allowed}
+.clarification-card[data-submitting="1"]{opacity:.7;pointer-events:none}
 
 /* ══ Undo toast ══ */
 .toast-undo{cursor:pointer;text-decoration:underline;margin-left:8px;font-weight:600;color:var(--bg-accent)}
@@ -837,7 +868,11 @@ button{cursor:pointer}
         <div class="in-box">
           <textarea class="in-ta" id="messageInput" placeholder="데이터 요청을 입력하세요… ( / 로 명령어, Shift+Enter 줄바꿈)" rows="1"></textarea>
           <div class="in-foot">
-            <div class="in-left"></div>
+            <div class="in-left">
+              <button class="stream-toggle on" id="streamToggle" title="스트리밍 응답 켜짐">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              </button>
+            </div>
             <button class="send-btn" id="sendBtn" disabled title="전송">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             </button>
@@ -917,6 +952,13 @@ button{cursor:pointer}
       <select class="fsel" id="setTableCopy">
         <option value="tsv" selected>TSV (탭 구분 — Excel 붙여넣기용)</option>
         <option value="csv">CSV (쉼표 구분)</option>
+      </select>
+    </div>
+    <div class="fg">
+      <label class="fl">스트리밍 응답</label>
+      <select class="fsel" id="setStreaming">
+        <option value="on" selected>켜기 (답변을 실시간으로 표시)</option>
+        <option value="off">끄기 (완성본만 표시)</option>
       </select>
     </div>
     <div class="ma">
@@ -1037,7 +1079,8 @@ var MS=(function(){
       isDownloaded:x.isDownloaded||false,
       hasMetadata:x.hasMetadata||false,
       createdAt:x.createdAt||null,
-      restored:x.restored||false};
+      restored:x.restored||false,
+      clarification:x.clarification||null};
     _m.set(id,msg);_persist();return msg;
   }
   function get(id){return _m.get(id)||null;}
@@ -1110,8 +1153,8 @@ var RD=(function(){
       row.innerHTML='<div class="msg-content">'
         +'<div class="thinking-slot"></div><div class="progress-block-slot"></div>'
         +'<div class="msg-bubble bot-bubble"></div>'
-        +'<div class="result-data-slot"></div><div class="process-summary-slot"></div>'
         +'<div class="viz-slot"></div>'
+        +'<div class="result-data-slot"></div><div class="process-summary-slot"></div>'
         +'<div class="msg-actions">'
         +'<button class="act-btn" data-act="copy" title="복사">'+ICOPY+'</button>'
         +'<button class="act-btn" data-act="regen" title="재생성">'+IREGEN+'</button>'
@@ -1277,7 +1320,47 @@ var RD=(function(){
   }
   function render(msg){
     var row=ensureDOM(msg),bub=row.querySelector('.msg-bubble');
-    if(!bub)return; /* error-bubble or gap-bubble already rendered */
+    if(!bub)return;
+    /* error-bubble / gap-bubble: ensureDOM이 완성된 HTML을 이미 렌더링함 — 추가 처리 불필요 */
+    if(bub.classList.contains('error-bubble')||bub.classList.contains('gap-bubble')){autoScroll();return;}
+    /* 스트리밍 중 생성된 정상 버블이 failure로 전환된 경우 → error-bubble로 교체 */
+    if(msg.role==='assistant'&&(msg.status==='failure'||msg.turnType==='error')&&bub.classList.contains('bot-bubble')){
+      var errText=msg.text||'오류가 발생했습니다.';
+      if(msg.status==='timeout')errText=msg.text||'처리 시간이 초과되었습니다.';
+      else if(msg.status==='cancelled')errText=msg.text||'요청이 취소되었습니다.';
+      var mc=row.querySelector('.msg-content');
+      mc.innerHTML='<div class="msg-bubble error-bubble">'+esc(errText)+'</div>'
+        +'<div class="process-summary-slot"></div>'
+        +'<div class="error-footer"><button class="retry-btn" data-retry="'+msg.id+'">다시 시도</button></div>'
+        +'<div class="insight-slot"></div>';
+      /* process_summary가 있으면 error-bubble 아래에 렌더 */
+      try{renderProcessSummary(row,msg);}catch(e){console.error('[renderProcessSummary]',e);}
+      /* insight 전구: error에서도 metadata 있으면 표시 */
+      if(msg.insight||msg.hasMetadata){
+        var insBtn=document.createElement('button');insBtn.className='act-btn';insBtn.dataset.act='insight';insBtn.title='분석 과정 보기';insBtn.innerHTML='💡';
+        mc.querySelector('.error-footer').appendChild(insBtn);
+        insBtn.addEventListener('click',function(){_onInsightClick(msg.id,row,insBtn);});
+        if(msg.insight){try{renderInsight(row,msg);}catch(e){console.error('[renderInsight]',e);}}
+      }
+      /* trace 다운로드 버튼 */
+      if(msg.traceFiles&&msg.traceFiles.length){
+        var trBtn2=document.createElement('button');trBtn2.className='act-btn';trBtn2.dataset.act='download-trace';trBtn2.title='분석 리포트';
+        trBtn2.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
+        mc.querySelector('.error-footer').appendChild(trBtn2);
+        trBtn2.addEventListener('click',function(){_onTraceDownload(msg,trBtn2);});
+      }
+      mc.querySelector('.retry-btn').addEventListener('click',function(){
+        var msgs=MS.allMessages();
+        for(var i=msgs.length-1;i>=0;i--){
+          if(msgs[i].id===msg.id){
+            for(var j=i-1;j>=0;j--){
+              if(msgs[j].role==='user'){ED.resetCancel();if(!CN.send(msgs[j].text)){RD.showBanner('error','서버에 연결되어 있지 않습니다.');return;}IC2.setBusy(true);ED.startBusyTimer();return;}
+            }
+          }
+        }
+      });
+      autoScroll();return;
+    }
     if(msg.role==='assistant'){
       if(msg.status==='streaming'){
         bub.innerHTML=mdRender(msg.text)+'<span class="streaming-cursor"></span>';
@@ -1286,9 +1369,12 @@ var RD=(function(){
         bub._rawText=msg.text;
         if(msg.text){attachCodeCopy(bub);_wrapRefBlocks(bub);}
       }
-      /* ── Clarification turn: render disabled options ── */
-      if(msg.restored&&msg.turnType==='clarification'&&msg.text){
-        _renderClarificationRestored(row,msg);
+      /* ── Clarification turn: 카드 또는 레거시 텍스트 ── */
+      if(msg.restored&&msg.turnType==='clarification'){
+        if(msg.clarification){
+          bub.style.display='none';
+          _renderClarification(row,msg);
+        }
       }
     }else{
       if(msg.status==='streaming'){
@@ -1297,7 +1383,7 @@ var RD=(function(){
         bub.textContent=msg.text;
       }
     }
-    bub.style.display=(!msg.text&&msg.showThinking)?'none':'';
+    bub.style.display=(!msg.text&&msg.showThinking)?'none':(msg.restored&&msg.turnType==='clarification'&&msg.clarification)?'none':'';
     if(msg.role!=='assistant'){autoScroll();return;}
     /* AI 로고: 마지막 assistant 메시지에만 표시 */
     chat().querySelectorAll('.ai-logo.visible,.ai-logo.thinking,.ai-logo.streaming').forEach(function(l){l.classList.remove('visible','thinking','streaming');});
@@ -1828,9 +1914,11 @@ var RD=(function(){
     if(pref==='show')return '<pre style="margin-top:6px"><code class="language-sql">'+formatted+'</code></pre>';
     return '<details style="margin-top:6px"><summary>SQL 보기</summary><pre><code class="language-sql">'+formatted+'</code></pre></details>';
   }
-  /* ── renderResultTable: stream.end의 result_data를 테이블로 렌더링 ── */
+  /* ── renderResultTable: result_data를 테이블로 렌더링 ── */
   function renderResultTable(row,msg){
     if(!msg.resultData)return;
+    /* info_card 테이블 중복 방지: 카드와 동일 데이터를 표로 다시 표시하지 않는다 */
+    if(msg.visualization&&msg.visualization.chart_type==='info_card')return;
     var slot=row.querySelector('.result-data-slot');
     if(!slot||slot.children.length)return;
     var rd=msg.resultData;
@@ -2067,6 +2155,7 @@ var RD=(function(){
         var b='';
         if(vl.sql){b+='<details class="ps-sql-fold"><summary class="ps-sql-summary">실행 SQL 보기</summary><pre class="ps-sql-code"><code class="language-sql">'+esc(_formatSQL(vl.sql))+'</code></pre></details>';}
         if(vl.summary)b+='<div class="ps-kv"><span class="ps-kv-label">검증</span><span class="ps-kv-val">'+esc(vl.summary)+'</span></div>';
+        if(vl.viz_judgment)b+='<div class="ps-kv"><span class="ps-kv-label">시각화 판단</span><span class="ps-kv-val">'+esc(vl.viz_judgment)+'</span></div>';
         return b;
       });
     }
@@ -2193,6 +2282,117 @@ var RD=(function(){
       }
     });
   }
+  /* ── 명확화 카드 렌더 (Phase 2) ── */
+  function _renderClarification(row,msg){
+    var cl=msg.clarification;if(!cl||!cl.question)return;
+    var card=document.createElement('div');
+    card.className='clarification-card';
+    card.setAttribute('role','group');
+    card.setAttribute('aria-label','명확화 질문');
+    var qt=cl.question_type||'single_select';
+    var opts=cl.options||[];
+    /* 옵션 없는 single_select → free_text 폴백 */
+    if((qt==='single_select'||qt==='SINGLE_SELECT')&&!opts.length){qt='free_text';}
+    var h='<h4>'+esc(cl.question)+'</h4>';
+    if(qt==='single_select'||qt==='SINGLE_SELECT'){
+      opts.forEach(function(o,i){
+        h+='<button class="clar-option" data-idx="'+i+'">'+esc(o)+'</button>';
+      });
+      h+='<button class="clar-option" data-idx="-1">기타 (직접 입력)</button>';
+      h+='<input class="clar-free-input" placeholder="직접 입력해주세요…" />';
+      h+='<div class="clar-actions"><button class="clar-submit" disabled>제출</button></div>';
+    }else if(qt==='confirm'||qt==='CONFIRM'){
+      h+='<div class="clar-actions" style="justify-content:flex-start;gap:8px;margin-top:8px">';
+      h+='<button class="clar-submit" data-val="예" style="background:var(--bg-accent)">예</button>';
+      h+='<button class="clar-submit" data-val="아니오" style="background:var(--bg3);color:var(--txt);border:1px solid var(--border)">아니오</button>';
+      h+='</div>';
+    }else{
+      /* free_text */
+      h+='<input class="clar-free-input visible" placeholder="답변을 입력해주세요…" />';
+      h+='<div class="clar-actions"><button class="clar-submit" disabled>제출</button></div>';
+    }
+    card.innerHTML=h;
+    /* DOM 삽입: bot-bubble 숨기고 그 자리에 카드 배치 */
+    var content=row.querySelector('.msg-content');
+    var bub=row.querySelector('.bot-bubble');
+    if(bub){bub.style.display='none';}
+    if(bub&&bub.nextSibling){content.insertBefore(card,bub.nextSibling);}
+    else if(content){content.appendChild(card);}
+    /* ── 이벤트 바인딩 ── */
+    var selected=null,customText='';
+    var submitBtn=card.querySelector('.clar-submit');
+    var freeInput=card.querySelector('.clar-free-input');
+    if(qt==='single_select'||qt==='SINGLE_SELECT'){
+      card.querySelectorAll('.clar-option').forEach(function(btn){
+        btn.addEventListener('click',function(){
+          card.querySelectorAll('.clar-option').forEach(function(b){b.classList.remove('selected');});
+          btn.classList.add('selected');
+          var idx=parseInt(btn.dataset.idx);
+          if(idx===-1){
+            selected=null;
+            if(freeInput){freeInput.classList.add('visible');freeInput.focus();}
+          }else{
+            selected=opts[idx]||null;
+            if(freeInput){freeInput.classList.remove('visible');freeInput.value='';customText='';}
+          }
+          if(submitBtn)submitBtn.disabled=(!selected&&!customText);
+        });
+      });
+      if(freeInput){
+        freeInput.addEventListener('input',function(){
+          customText=freeInput.value.trim();
+          if(submitBtn)submitBtn.disabled=(!selected&&!customText);
+        });
+        freeInput.addEventListener('keydown',function(e){
+          if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(submitBtn&&!submitBtn.disabled)submitBtn.click();}
+        });
+      }
+      if(submitBtn){
+        submitBtn.addEventListener('click',function(){
+          var answer=selected||customText;
+          if(!answer)return;
+          _submitClarification(card,answer,msg);
+        });
+      }
+    }else if(qt==='confirm'||qt==='CONFIRM'){
+      card.querySelectorAll('.clar-submit').forEach(function(btn){
+        var _clicked=false;
+        btn.addEventListener('click',function(){
+          if(_clicked)return;_clicked=true;
+          _submitClarification(card,btn.dataset.val,msg);
+        });
+      });
+    }else{
+      /* free_text */
+      if(freeInput){
+        freeInput.addEventListener('input',function(){
+          customText=freeInput.value.trim();
+          if(submitBtn)submitBtn.disabled=!customText;
+        });
+        freeInput.addEventListener('keydown',function(e){
+          if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(submitBtn&&!submitBtn.disabled)submitBtn.click();}
+        });
+      }
+      if(submitBtn){
+        submitBtn.addEventListener('click',function(){
+          if(!customText)return;
+          _submitClarification(card,customText,msg);
+        });
+      }
+    }
+    autoScroll();
+  }
+  function _submitClarification(card,answer,msg){
+    card.setAttribute('data-submitting','1');
+    /* 입력창 상태 원복 — placeholder만 되돌리고, 사용자가 입력 중인 텍스트는 보존 */
+    IC2.setClarification(false);
+    /* 사용자 메시지 렌더 + 전송 */
+    resetAutoScroll();
+    RD.render(MS.create('user',answer));
+    SB.saveCurrentMessage('user',answer);
+    if(!CN.send(answer)){RD.showBanner('error','서버에 연결되어 있지 않습니다.');return;}
+    ED.resetCancel();IC2.setBusy(true);ED.startBusyTimer();
+  }
   /* ── Trace 다운로드 ── */
   function _onTraceDownload(msg,btn){
     var files=msg.traceFiles||[];
@@ -2227,7 +2427,7 @@ var RD=(function(){
       document.addEventListener('keydown',onEsc);
     },0);
   }
-  return{ensureDOM:ensureDOM,render:render,showBanner:showBanner,hideWel:hideWel,showWel:showWel,clearChat:clearChat,_updateLikeButtons:_updateLikeButtons};
+  return{ensureDOM:ensureDOM,render:render,showBanner:showBanner,hideWel:hideWel,showWel:showWel,clearChat:clearChat,_updateLikeButtons:_updateLikeButtons,_renderClarification:_renderClarification};
 })();
 
 /* ═══════════════════════════════════════
@@ -2282,12 +2482,51 @@ var ED=(function(){
     switch(data.type){
       case 'response':return handleLegacy(data);
       case 'stream':return handleStream(data);
+      case 'llm_delta':return handleLlmDelta(data);
       case 'progress':return handleProgress(data);
       case 'viz':return handleViz(data);
+      case 'result_data':return handleResultData(data);
       case 'download_ready':return handleDownloadReady(data);
       case 'status':return RD.showBanner('status',data.message||'');
       case 'error':return handleError(data);
       default:if(data.message)return handleLegacy(data);
+    }
+  }
+  /* llm_delta: analyzer/SVG 토큰 스트리밍 — rAF 배치 렌더링.
+     part_type='analysis' 은 메시지 본문에 누적, part_type='svg' 는 무시(완성본만 수신). */
+  var _llmBuf={text:'',pending:false,part:''};
+  function _llmFlush(){
+    _llmBuf.pending=false;
+    if(!_cur)return;
+    var m=MS.get(_cur);if(!m)return;
+    if(m.showThinking){
+      m.showThinking=false;
+      if(m.progress.length){m.progress.forEach(function(s){s.status='done';});m.progressCollapsed=true;}
+    }
+    m.text=_llmBuf.text;m.status='streaming';RD.render(m);
+  }
+  function _llmScheduleFlush(){
+    if(_llmBuf.pending)return;
+    _llmBuf.pending=true;
+    if(window.requestAnimationFrame)requestAnimationFrame(_llmFlush);
+    else setTimeout(_llmFlush,16);
+  }
+  function handleLlmDelta(data){
+    var part=data.part_type||'';
+    /* SVG 스트리밍은 최종 svg 이벤트(viz)로 렌더링. 중간 토큰은 무시. */
+    if(part==='svg')return;
+    /* progress/stream.start 이전에 llm_delta 가 먼저 올 수 있으므로 메시지 자동 생성. */
+    if(!_cur){
+      var msg=MS.create('assistant','',{status:'streaming',showThinking:true,thinkingLabel:'답변 작성 중'});
+      msg.progressStartTime=Date.now();_cur=msg.id;
+      RD.ensureDOM(msg);RD.render(msg);IC2.setBusy(true);
+    }
+    if(data.event==='start'){_llmBuf.text='';_llmBuf.part=part;return;}
+    if(data.event==='reset'){_llmBuf.text='';_llmScheduleFlush();return;}
+    if(data.event==='delta'){_llmBuf.text+=(data.text||'');_llmScheduleFlush();return;}
+    if(data.event==='end'){
+      /* 최종 본문은 stream.end 에서 수신된 서버 합성본이 덮어씀. 여기선 플러시만. */
+      _llmScheduleFlush();
     }
   }
   async function handleLegacy(data){
@@ -2310,7 +2549,7 @@ var ED=(function(){
     if(data.visualization){var nv=VIZ.normalize(data.visualization);if(nv){MS.update(msg.id,{visualization:nv});RD.render(msg);}}
     if(data.insight){msg.insight=data.insight;RD.render(msg);}
     /* ── Capture message_uuid from legacy response ── */
-    msg.hasMetadata=!!(data.insight||data.result_data||data.process_summary||(data.trace_files&&data.trace_files.length));
+    msg.hasMetadata=!!(data.insight||data.result_data||data.has_result_data||msg.resultData||data.process_summary||(data.trace_files&&data.trace_files.length));
     if(data.message_uuid){MS.update(msg.id,{turnId:data.message_uuid});}
     if(data.user_message_uuid){
       var allMsgs=MS.allMessages();
@@ -2348,15 +2587,41 @@ var ED=(function(){
     if(data.action==='end'&&_cur){
       var m2=MS.get(_cur);
       if(m2){
+        /* ── 명확화 분기 ── */
+        if(data.status==='awaiting_clarification'&&data.clarification_request){
+          m2.turnType='clarification';
+          m2.clarification=data.clarification_request;
+          SE.finalize(_cur);
+          if(m2.progress.length){m2.progressElapsed=(Date.now()-(m2.progressStartTime||Date.now()))/1000;m2.progressCollapsed=true;}
+          RD.render(m2);
+          RD._renderClarification(
+            document.querySelector('[data-id="'+m2.id+'"]'),m2
+          );
+          if(data.message_uuid){MS.update(m2.id,{turnId:data.message_uuid});}
+          if(data.user_message_uuid){
+            var _aMsgs=MS.allMessages();
+            for(var _ui=_aMsgs.length-1;_ui>=0;_ui--){
+              if(_aMsgs[_ui].role==='user'){MS.update(_aMsgs[_ui].id,{turnId:data.user_message_uuid});break;}
+            }
+          }
+          SB.saveCurrentMessage('assistant',m2.text);
+          IC2.setClarification(true);
+          _last=_cur;_cur=null;_cbt();IC2.setBusy(false);
+          return;
+        }
+        /* ── 기존 정상/취소/실패 end 처리 ── */
         /* ── Capture all stream.end data before finalize to minimize re-renders ── */
         if(data.insight){m2.insight=data.insight;}
         if(data.result_data){m2.resultData=data.result_data;}
         if(data.process_summary){m2.processSummary=data.process_summary;}
         if(data.trace_files&&data.trace_files.length){m2.traceFiles=data.trace_files;}
+        /* 실패/취소 상태를 finalize 전에 메시지에 반영 — SE.finalize가 status를 'done'으로 덮기 때문 */
+        if(data.status==='failure'||data.status==='error'){m2.turnType='error';}
         SE.finalize(_cur);
+        if(m2.turnType==='error'){m2.status='failure';}
         if(m2.progress.length){m2.progressElapsed=(Date.now()-(m2.progressStartTime||Date.now()))/1000;m2.progressCollapsed=true;}
         /* hasMetadata 판정: insight·result_data·process_summary·trace_files 중 하나라도 있으면 */
-        m2.hasMetadata=!!(data.insight||data.result_data||data.process_summary||(data.trace_files&&data.trace_files.length));
+        m2.hasMetadata=!!(data.insight||data.has_result_data||m2.resultData||data.process_summary||(data.trace_files&&data.trace_files.length));
         RD.render(m2);
         /* ── Capture message_uuid from stream.end ── */
         if(data.message_uuid){MS.update(m2.id,{turnId:data.message_uuid});}
@@ -2406,6 +2671,13 @@ var ED=(function(){
     var nv=VIZ.normalize(merged);
     if(nv){MS.update(id,{visualization:nv});RD.render(msg);}
   }
+  /* ── handleResultData: stream.start 직후 도착하는 result_data 즉시 렌더링 ── */
+  function handleResultData(data){
+    var id=_cur;if(!id)return;
+    var msg=MS.get(id);if(!msg)return;
+    msg.resultData=data.data;
+    RD.render(msg);
+  }
   function handleError(data){
     RD.showBanner('error',data.message||'오류가 발생했습니다.');
     _ffc();_cbt();IC2.setBusy(false);
@@ -2428,6 +2700,8 @@ var ED=(function(){
    6. IC2 — Input Controller
    ═══════════════════════════════════════ */
 var IC2=(function(){
+  var _DEFAULT_PH='데이터 요청을 입력하세요… ( / 로 명령어, Shift+Enter 줄바꿈)';
+  var _CLAR_PH='명확화 답변 대기 중… 다른 질문을 입력해도 됩니다';
   function setBusy(b){
     var inp=document.getElementById('messageInput'),
         btn=document.getElementById('sendBtn');
@@ -2442,7 +2716,11 @@ var IC2=(function(){
       setTimeout(function(){inp.focus();},0);
     }
   }
-  return{setBusy:setBusy};
+  function setClarification(on){
+    var inp=document.getElementById('messageInput');
+    inp.placeholder=on?_CLAR_PH:_DEFAULT_PH;
+  }
+  return{setBusy:setBusy,setClarification:setClarification};
 })();
 
 /* ═══════════════════════════════════════
@@ -2459,9 +2737,10 @@ var CN=(function(){
     ws.onclose=function(){if(_intentionalClose){_intentionalClose=false;return;}setStatus('disconnected');_setOffline(true);ED.forceFinish();IC2.setBusy(false);if(att<5){setTimeout(connect,1000*Math.pow(2,att));att++;}else{RD.showBanner('error','서버 연결이 끊어졌습니다. 페이지를 새로고침해 주세요.');}};
     ws.onerror=function(err){console.error('[WS]',err);};
   }
+  function _streamPref(){try{return(localStorage.getItem('pref-streaming')||'on')==='on';}catch(e){return true;}}
   function send(t,opts){
     if(ws&&ws.readyState===1){
-      var payload={text:t};
+      var payload={text:t,streaming:_streamPref()};
       if(opts)Object.assign(payload,opts);
       ws.send(JSON.stringify(payload));
       return true;
@@ -2604,9 +2883,10 @@ var SB=(function(){
     var s=_find(id);if(!s)return;
     _active=s.id;renderList();
     _stopPoll();
+    ED.forceFinish();
     SE.cancelAll();MS.clear();
     RD.clearChat();RD.hideWel();
-    IC2.setBusy(false);
+    IC2.setBusy(false);IC2.setClarification(false);
     try{
       var resp=await API.getSession(id);
       if(!resp.messages||!resp.messages.length){RD.showWel();CN.reconnectWith(id);return;}
@@ -2625,7 +2905,8 @@ var SB=(function(){
           traceFiles:t.trace_files||[],
           processSummary:t.process_summary||null,
           resultData:t.result_data_meta||null,
-          visualization:VIZ.normalize(t.visualization)
+          visualization:VIZ.normalize(t.visualization),
+          clarification:t.clarification||null
         });
         RD.render(msg);
       });
@@ -2727,7 +3008,7 @@ var SB=(function(){
   function _executeDelete(id,session){
     /* Optimistic UI removal */
     _sessions=_sessions.filter(function(x){return x.id!==id;});
-    if(_active===id){_active=null;SE.cancelAll();MS.clear();RD.clearChat();IC2.setBusy(false);}
+    if(_active===id){_active=null;ED.forceFinish();SE.cancelAll();MS.clear();RD.clearChat();IC2.setBusy(false);}
     _save();renderList();
     /* Show undo toast */
     _showUndoToast('대화가 삭제되었습니다.',function onUndo(){
@@ -2764,7 +3045,8 @@ var SB=(function(){
   function getActive(){return _active;}
   function onNewChat(){
     _stopPoll();
-    SE.cancelAll();MS.clear();RD.clearChat();IC2.setBusy(false);
+    ED.forceFinish();
+    SE.cancelAll();MS.clear();RD.clearChat();IC2.setBusy(false);IC2.setClarification(false);
     _active=null;renderList();
     CN.reconnect();
   }
@@ -2815,7 +3097,13 @@ var SB=(function(){
         h+='<div class="chat-item'+(s.id===_active?' active':'')+'" data-id="'+s.id+'" tabindex="0" role="button">'
           +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
           +'<span class="chat-item-title" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" data-tip="'+esc(s.title)+'">'+esc(s.title)+'</span>'
-          +'<button class="chat-item-del" data-del="'+s.id+'" title="삭제"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg></button>'
+          +'<button class="chat-item-more" data-more="'+s.id+'" title="더보기">'
+          +'<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>'
+          +'</button>'
+          +'<div class="chat-item-menu" data-menu="'+s.id+'">'
+          +'<button class="chat-item-menu-item" data-action="rename" data-sid="'+s.id+'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>이름 바꾸기</button>'
+          +'<button class="chat-item-menu-item danger" data-action="delete" data-sid="'+s.id+'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>삭제</button>'
+          +'</div>'
           +'</div>';
       });
     });
@@ -2825,42 +3113,66 @@ var SB=(function(){
     }
     el.innerHTML=h;
     /* ── Event bindings ── */
+    function _closeAllMenus(){el.querySelectorAll('.chat-item-menu.open').forEach(function(m){m.classList.remove('open');});}
     el.querySelectorAll('.chat-item').forEach(function(b){
-      b.addEventListener('click',function(e){if(e.target.closest('.chat-item-del'))return;loadSession(b.dataset.id);});
-      /* ── Double-click inline title edit ── */
-      var titleSpan=b.querySelector('.chat-item-title');
-      if(titleSpan){
-        titleSpan.addEventListener('dblclick',function(e){
-          e.stopPropagation();
-          var sid=b.dataset.id,s=_find(sid);if(!s)return;
-          var input=document.createElement('input');
-          input.className='chat-item-edit';input.value=s.title;
-          titleSpan.style.display='none';
-          titleSpan.parentElement.insertBefore(input,titleSpan);
-          input.focus();input.select();
-          function commit(){
-            var newTitle=input.value.trim();
-            if(newTitle&&newTitle!==s.title){
-              s.title=newTitle;_save();
-              API.updateTitle(sid,newTitle).catch(function(){});
-            }
-            input.remove();titleSpan.style.display='';
-            titleSpan.textContent=s.title;titleSpan.dataset.tip=s.title;
-          }
-          input.addEventListener('blur',commit);
-          input.addEventListener('keydown',function(ev){
-            if(ev.key==='Enter'){ev.preventDefault();commit();}
-            if(ev.key==='Escape'){input.value=s.title;commit();}
-          });
-        });
-      }
-    });
-    el.querySelectorAll('.chat-item-del').forEach(function(d){
-      d.addEventListener('click',function(e){
-        e.stopPropagation();
-        deleteSession(d.dataset.del);
+      b.addEventListener('click',function(e){
+        if(e.target.closest('.chat-item-more')||e.target.closest('.chat-item-menu'))return;
+        _closeAllMenus();
+        loadSession(b.dataset.id);
       });
     });
+    /* ── ··· More button → toggle menu (position:fixed) ── */
+    el.querySelectorAll('.chat-item-more').forEach(function(btn){
+      btn.addEventListener('click',function(e){
+        e.stopPropagation();
+        var menu=btn.parentElement.querySelector('.chat-item-menu');
+        var isOpen=menu.classList.contains('open');
+        _closeAllMenus();
+        if(!isOpen){
+          var rect=btn.getBoundingClientRect();
+          menu.style.top=rect.bottom+2+'px';
+          menu.style.left=Math.max(4,rect.right-120)+'px';
+          menu.classList.add('open');
+        }
+      });
+    });
+    /* ── Menu actions ── */
+    el.querySelectorAll('.chat-item-menu-item').forEach(function(mi){
+      mi.addEventListener('click',function(e){
+        e.stopPropagation();
+        var action=mi.dataset.action,sid=mi.dataset.sid;
+        _closeAllMenus();
+        if(action==='delete'){deleteSession(sid);}
+        if(action==='rename'){_startRename(sid);}
+      });
+    });
+    /* ── Inline rename ── */
+    function _startRename(sid){
+      var s=_find(sid);if(!s)return;
+      var item=el.querySelector('.chat-item[data-id="'+sid+'"]');if(!item)return;
+      var titleSpan=item.querySelector('.chat-item-title');if(!titleSpan)return;
+      var input=document.createElement('input');
+      input.className='chat-item-edit';input.value=s.title;
+      titleSpan.style.display='none';
+      titleSpan.parentElement.insertBefore(input,titleSpan);
+      input.focus();input.select();
+      var committed=false;
+      function commit(){
+        if(committed)return;committed=true;
+        var newTitle=input.value.trim();
+        if(newTitle&&newTitle!==s.title){
+          s.title=newTitle;_save();
+          API.updateTitle(sid,newTitle).catch(function(){});
+        }
+        input.remove();titleSpan.style.display='';
+        titleSpan.textContent=s.title;titleSpan.dataset.tip=s.title;
+      }
+      input.addEventListener('blur',commit);
+      input.addEventListener('keydown',function(ev){
+        if(ev.key==='Enter'){ev.preventDefault();commit();}
+        if(ev.key==='Escape'){input.value=s.title;commit();}
+      });
+    }
     /* ── Load more button event ── */
     var lmBtn=document.getElementById('sbLoadMore');
     if(lmBtn){lmBtn.addEventListener('click',loadMore);}
@@ -2992,6 +3304,7 @@ window.App={
     var inp=document.getElementById('messageInput');
     var t=inp.value.trim();if(!t)return;
     if(CM.tryExec(t)){inp.value='';resizeTA();return;}
+    IC2.setClarification(false);
     resetAutoScroll();
     SB.ensureSession();
     RD.render(MS.create('user',t));
@@ -3126,6 +3439,8 @@ window.App={
   btn.addEventListener('click',function(){btn.classList.contains('cancel')?App.cancelStream():App.sendMessage();});
   /* #6 — 새 대화: 기존 대화 보존 + 새 세션 / 초기화: 현재 대화 삭제 확인 */
   document.getElementById('newBtn').addEventListener('click',function(){SB.onNewChat();});
+  /* ── 사이드바 ··· 메뉴: 바깥 클릭 시 닫기 ── */
+  document.addEventListener('click',function(e){if(!e.target.closest('.chat-item-more')&&!e.target.closest('.chat-item-menu')){document.querySelectorAll('.chat-item-menu.open').forEach(function(m){m.classList.remove('open');});}});
   /* #12, #13 — 사이드바 토글 + 모바일 backdrop + 상태 저장 */
   var sbBackdrop=document.getElementById('sbBackdrop');
   function closeSidebar(){
@@ -3166,6 +3481,15 @@ window.App={
     scrollBottomBtn.style.display='none';
   });
 
+  /* ── 스트리밍 토글 버튼 (입력창 왼쪽) ── */
+  document.getElementById('streamToggle').addEventListener('click',function(){
+    var cur=_pref('pref-streaming','on');
+    var next=cur==='on'?'off':'on';
+    _setPref('pref-streaming',next);
+    _syncStreamToggle();
+    toast(next==='on'?'스트리밍 응답 켜짐':'스트리밍 응답 꺼짐');
+  });
+
   /* 설정 모달 */
   /* ── 설정 유틸 ── */
   function _pref(k,d){try{return localStorage.getItem(k)||d;}catch(e){return d;}}
@@ -3177,13 +3501,21 @@ window.App={
     document.documentElement.style.setProperty('--line-height',lh);
     var cf=_pref('pref-code-font','13');
     document.documentElement.style.setProperty('--code-fs',cf+'px');
+    _syncStreamToggle();
+  }
+  function _syncStreamToggle(){
+    var btn=document.getElementById('streamToggle');if(!btn)return;
+    var on=_pref('pref-streaming','on')==='on';
+    btn.classList.toggle('on',on);
+    btn.title=on?'스트리밍 응답 켜짐 (클릭하여 끄기)':'스트리밍 응답 꺼짐 (클릭하여 켜기)';
   }
   var _setInit={};
   document.getElementById('openSetBtn').addEventListener('click',function(){
     _setInit={theme:TM.get(),fs:_pref('dc-fontsize','14'),
       cw:_pref('pref-chat-width','700'),lh:_pref('pref-line-height','1.6'),
       cf:_pref('pref-code-font','13'),as:_pref('pref-auto-scroll','on'),
-      sd:_pref('pref-sql-display','fold'),tc:_pref('pref-table-copy','tsv')};
+      sd:_pref('pref-sql-display','fold'),tc:_pref('pref-table-copy','tsv'),
+      st:_pref('pref-streaming','on')};
     document.getElementById('setTheme').value=_setInit.theme;
     document.getElementById('setFontSize').value=_setInit.fs;
     document.getElementById('setChatWidth').value=_setInit.cw;
@@ -3192,6 +3524,7 @@ window.App={
     document.getElementById('setAutoScroll').value=_setInit.as;
     document.getElementById('setSqlDisplay').value=_setInit.sd;
     document.getElementById('setTableCopy').value=_setInit.tc;
+    document.getElementById('setStreaming').value=_setInit.st;
     document.getElementById('setModal').classList.add('open');
   });
   document.getElementById('cancelSetBtn').addEventListener('click',function(){document.getElementById('setModal').classList.remove('open');});
@@ -3206,6 +3539,7 @@ window.App={
     _setPref('pref-auto-scroll',document.getElementById('setAutoScroll').value);
     _setPref('pref-sql-display',document.getElementById('setSqlDisplay').value);
     _setPref('pref-table-copy',document.getElementById('setTableCopy').value);
+    _setPref('pref-streaming',document.getElementById('setStreaming').value);
     _applyPrefs();
     document.getElementById('setModal').classList.remove('open');
     toast('설정 저장됨');
@@ -3220,7 +3554,8 @@ window.App={
       ||document.getElementById('setCodeFont').value!==_setInit.cf
       ||document.getElementById('setAutoScroll').value!==_setInit.as
       ||document.getElementById('setSqlDisplay').value!==_setInit.sd
-      ||document.getElementById('setTableCopy').value!==_setInit.tc;
+      ||document.getElementById('setTableCopy').value!==_setInit.tc
+      ||document.getElementById('setStreaming').value!==_setInit.st;
     if(dirty){
       showConfirm({title:'설정 닫기',message:'변경사항을 저장하지 않고 닫으시겠습니까?',okText:'닫기',danger:false,onOk:function(){
         document.getElementById('setModal').classList.remove('open');

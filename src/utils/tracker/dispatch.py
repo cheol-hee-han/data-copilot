@@ -15,7 +15,6 @@ LangGraph 실행 컨텍스트 내에서만 이벤트를 전달하며,
 
 핵심 함수:
     - dispatch_tracking_event: 그래프 컨텍스트 안전 이벤트 디스패치
-    - record_prompt_variables: 직전 LLM 호출에 프롬프트 변수 보강
 
 사용법::
 
@@ -54,27 +53,23 @@ CONTEXT_RERANKED = "context.reranked"
 
 # llm.*
 LLM_CALL = "llm.call"
-LLM_PROMPT_VARIABLES = "llm.prompt_variables"
+
+# llm.delta.* — 실제 LLM 토큰 스트리밍 (analyzer / visualize)
+# 페이로드 공통 필드: turn_id, part_id, part_type ∈ {"analysis","svg"}, node
+# - start:  {turn_id, part_id, part_type, node}
+# - chunk:  {turn_id, part_id, text, node}
+# - reset:  {turn_id, part_id, node, reason}
+# - end:    {turn_id, part_id, node, cancelled?, error?, error_code?}
+LLM_DELTA_START = "llm.delta.start"
+LLM_DELTA_CHUNK = "llm.delta.chunk"
+LLM_DELTA_END = "llm.delta.end"
+LLM_DELTA_RESET = "llm.delta.reset"
 
 # sql.*
 SQL_RECORDED = "sql.recorded"
 
 # reasoning.*
 REASONING_STEP = "reasoning.step"
-
-
-async def record_prompt_variables(
-    variables: dict[str, str],
-) -> None:
-    """직전 LLM 호출 기록에 프롬프트 치환 변수를 보강한다.
-
-    ``llm_call_with_parse_retry`` 호출 직후에 사용하면
-    핸들러가 ``llm.prompt_variables`` 이벤트를 수신하여
-    마지막 ``LLMCallRecord.prompt_variables`` 에 병합한다.
-    """
-    await dispatch_tracking_event(
-        LLM_PROMPT_VARIABLES, {"variables": variables},
-    )
 
 
 async def dispatch_tracking_event(

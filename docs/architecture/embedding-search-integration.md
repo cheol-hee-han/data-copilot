@@ -1,79 +1,90 @@
-# SQL 수행이력 유사도 검색 향상 — 통합 아키텍처
+# SQL 수행이력 유사도 검색 — 통합 아키텍처
 
-> **버전**: 1.2
-> **최종 수정**: 2026-04-01
+> **버전**: 1.4
+> **최종 수정**: 2026-04-20
 > **기반 전략**: `docs/strategy-proposals/embedding-search-strategy.md`
 > **통합 대상**: data-copilot LangGraph 파이프라인
 > **작성일**: 2026-03-21
+>
+> **변경 이력**:
+> - 2026-04-20: 목차 추가 (컨텍스트 절약), v2.4 노드 명칭 정합성 확인 — context_retriever 가 sql_history Hybrid 검색의 단일 소비처임을 재확인. ES 제거(MongoDB+Qdrant 단일화) 완료 반영.
 
 ---
 
-## 1. 현황 분석 및 Gap
+## 목차
 
-### 현재 아키텍처
-
-```
-[사용자 질의]
-  → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
-  → context_retriever 노드 (reason 계층, 도구 기반 병렬 수집)
-     ├── MongoDB table_meta  ← mongo_table_query
-     ├── History DB (ILIKE)  ← history_db_query (키워드 기반)
-     ├── Qdrant biz_manual   ← qdrant_query (Dense-only, MiniLM 384-dim)
-     └── MongoDB code_meta   ← 전체 로드
-```
-
-### 식별된 Gap
-
-| # | Gap | 영향 |
-|---|-----|------|
-| 1 | `sql_history` 컬렉션이 Qdrant에 존재하나 커넥터에서 미사용 | 10,000건 임베딩 데이터 사장 |
-| 2 | 과거 SQL 검색이 PostgreSQL ILIKE 전용 | 의미 유사 쿼리 검색 불가 ("매출 현황" ↔ "revenue summary") |
-| 3 | Dense-only 벡터 검색 (MiniLM 384-dim) | 비즈니스 키워드 정확 매칭 약함, Sparse 부재 |
-| 4 | NormalizedQuery.search_keywords가 단순 문자열 | 구조화된 8-Slot 정보가 벡터 검색에 충분히 활용되지 않음 |
-| 5 | Reranker 부재 | Recall → Precision 변환 병목 |
-| 6 | 문서 보강 없이 원본 description만 임베딩 | 동의어·다국어 검색 한계 |
+- [1. 현재 아키텍처 (구현 완료 기준)](#1-현재-아키텍처-구현-완료-기준) — BGE-M3 Hybrid + Reranker 기반 검색 흐름
+- [2. 레이어 구성](#2-레이어-구성) — L-1 오프라인 ~ L3 재순위 5계층
+- [3. 핵심 설계: NormalizedQuery → sql_history 벡터 검색 쿼리 합성](#3-핵심-설계-normalizedquery--sql_history-벡터-검색-쿼리-합성) — 8-Slot에서 sql_history_search 슬롯 합성 규칙
+- [4. 하이브리드 검색 상세](#4-하이브리드-검색-상세) — Dense+Sparse Named Vectors, Qdrant RRF 융합
+- [5. History DB (ILIKE) vs Qdrant sql_history 공존](#5-history-db-ilike-vs-qdrant-sql_history-공존) — 두 검색 경로의 역할 분담 및 정합성
+- [6. 오프라인 문서 보강 (구현 우선순위 1위)](#6-오프라인-문서-보강-구현-우선순위-1위) — `enrich_sql_history.py` 동의어/다국어 보강
+- [7. Reranker 통합](#7-reranker-통합) — BGE-Reranker-v2-m3 Cross-Encoder Top-50→Top-5~10
+- [8. 파일 변경 목록](#8-파일-변경-목록) — 영향 받는 코드/설정 파일 리스트
+- [9. 구현 우선순위 (ROI 기준)](#9-구현-우선순위-roi-기준) — 단계별 도입 권장 순서
+- [변경 이력](#변경-이력) — 버전별 변경 내역
 
 ---
 
-## 2. 통합 아키텍처
+## 1. 현재 아키텍처 (구현 완료 기준)
 
-### 2.1 목표 아키텍처
+초안 작성 시점의 MiniLM 384-dim Dense-only 구조는 BGE-M3 Hybrid + Reranker 로 전면 교체되었다.
+이 문서는 현재 구현(BGE-M3 1024-dim dense + sparse named vectors)을 기준으로 기술한다.
 
 ```
 [사용자 질의]
   → query_normalizer 노드 (8-Slot 정규화, services/query_normalizer.py 위임)
   → reasoning_preparer 노드 (규칙 기반 가설 생성·탐색 계획)
-  → context_retriever 노드 (도구 기반 병렬 수집)
-     ├── MongoDB table_meta
-     ├── History DB (ILIKE)        ← 기존 유지 (키워드 매칭 보완)
-     ├── Qdrant biz_manual         ← BGE-M3 Dense
-     ├── MongoDB code_meta
-     └── ★ Qdrant sql_history     ← BGE-M3 Hybrid (Dense 0.6 + Sparse 0.4)
+  → context_retriever 노드 (reason 계층, 도구 기반 병렬 수집)
+     ├── MongoDB table_meta      ← mongo_table_query
+     ├── History DB (ILIKE)      ← history_db_query (키워드 기반, 보완용 유지)
+     ├── MongoDB code_meta       ← 전체 로드
+     ├── Qdrant biz_manual       ← BGE-M3 Dense (1024-dim)
+     └── Qdrant sql_history      ← BGE-M3 Hybrid (Dense 1024-dim + Sparse)
            → Top-50 후보
-           → ★ BGE-Reranker-v2-m3 → Top-5~10
+           → BGE-Reranker-v2-m3 Cross-Encoder → Top-5~10
   → sql_generator 노드 (보강된 컨텍스트로 SQL 생성)
 ```
 
-### 2.2 레이어 구성
+### 초안 대비 해소 현황
+
+| # | 초안 시점 Gap | 해소 방법 | 상태 |
+|---|---|---|---|
+| 1 | `sql_history` 컬렉션 미사용 | `QdrantConnector.search_sql_history()` 추가, `context_retriever` 호출 | ✅ |
+| 2 | 과거 SQL 검색이 PostgreSQL ILIKE 전용 | Qdrant sql_history 벡터 검색 + ILIKE 병행 (§5) | ✅ |
+| 3 | Dense-only (MiniLM 384-dim) | BGE-M3 Dense(1024) + Sparse Named Vectors, RRF 융합 | ✅ |
+| 4 | NormalizedQuery가 벡터 검색에 미활용 | `SearchKeywords.sql_history_search` 슬롯 합성 (§3) | ✅ |
+| 5 | Reranker 부재 | BGE-Reranker-v2-m3 통합, `settings.reranker_enabled` 제어 | ✅ |
+| 6 | 문서 보강 없이 원본만 임베딩 | `enrich_sql_history.py` 오프라인 배치로 동의어·다국어 보강 (§6, 폐쇄망 §9) | ✅ |
+
+---
+
+## 2. 레이어 구성
+
+§1의 아키텍처는 아래 5개 레이어로 구성된다.
 
 | 레이어 | 컴포넌트 | 역할 | 파일 |
 |--------|---------|------|------|
-| **L-1: 오프라인** | Document Enrichment | LLM 기반 동의어·다국어 보강 | `devtools/scripts/enrich_sql_history.py` |
-| **L0: 쿼리 합성** | NormalizedQuery → 벡터 쿼리 | 구조화된 슬롯에서 비즈니스 목적 문장 합성 | `src/services/query_normalizer.py` (합성 로직 포함 예정) |
+| **L-1: 오프라인** | Document Enrichment | LLM 기반 동의어·다국어 보강 (온라인 Claude / 폐쇄망 자체 LLM) | `devtools/scripts/enrich_sql_history.py` |
+| **L0: 쿼리 합성** | NormalizedQuery → 벡터 쿼리 | 구조화된 8-Slot 슬롯에서 비즈니스 목적 문장 합성 | `src/services/query_normalizer.py` |
 | **L1: 임베딩** | QdrantConnector 내장 (BGE-M3) | Dense(1024-dim) + Sparse 동시 생성 | `src/connectors/impl/qdrant_connector.py` |
-| **L2: 하이브리드 검색** | QdrantConnector | Dense(0.6) + Sparse(0.4) → RRF | `src/connectors/impl/qdrant_connector.py` |
+| **L2: 하이브리드 검색** | QdrantConnector | Dense + Sparse prefetch → Qdrant RRF | `src/connectors/impl/qdrant_connector.py` |
 | **L3: 재순위** | Reranker (BGE-Reranker-v2-m3) | Cross-Encoder Top-50 → Top-5~10 | `src/connectors/impl/reranker.py` |
 
-### 2.3 모델 스택
+> **폐쇄망에서의 L-1**: Claude API 미사용. `enrich_sql_history.py` 가 `LLM_PROVIDER=openai_compatible`
+> (Solar Pro 2 / Qwen3.5 등) 경로로 동일하게 동작. 오프라인 `mode=generate-desc` 1회 실행으로
+> 동의어·영문 표현 보강 완료. 상세 절차: `docs/guides/closed-network-runbook.md` §9.
+
+### 모델 스택
 
 | 용도 | 모델 | 크기 | 특성 |
 |------|------|------|------|
 | **임베딩** | BAAI/bge-m3 | 570M / ~2GB | Dense(1024) + Sparse + ColBERT, 100개 언어 |
 | **재순위** | BAAI/bge-reranker-v2-m3 | ~560M / ~2GB | Cross-Encoder, 한/영 모두 지원 |
-| **문서 보강** | Claude / GPT-4o (온라인) | - | 오프라인 1회 수행, 동의어·다국어 표현 생성 |
+| **문서 보강** | 온라인: Claude / 폐쇄망: Solar Pro 2 등 자체 LLM | - | 오프라인 1회 수행, 동의어·다국어 표현 생성 |
 
-> BGE-M3는 폐쇄망에서도 로컬 모델 파일로 바로 사용 가능하다.
-> fastembed 의존성을 제거하고 FlagEmbedding(BGE-M3)으로 전면 전환한다.
+BGE-M3 · Reranker 가중치는 폐쇄망 반입 시 `deploy/offline-bundle/build.sh` 에서 HuggingFace
+허브로부터 일괄 수집되어 `/opt/bdp/data-copilot/models/` 에 배치된다 (fastembed 미사용, FlagEmbedding 단일 스택).
 
 ---
 
@@ -318,3 +329,4 @@ Reranker 모델이 없거나 비활성화 상태면 벡터 검색 스코어 기�
 | 1.1 | 2026-04-01 | v3 파이프라인 리팩터링 반영: Context Service → context_retriever 노드, SQL Generator → sql_generator 노드, SearchQueryBuilder → query_normalizer 서비스 통합, 임베딩·재순위 QdrantConnector 통합, 파일 경로 현행화 (reranker.py 위치 변경, ContextInfo → models/context.py), 구현 상태 칼럼 추가 |
 | 1.2 | 2026-04-02 | planner → reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용) |
 | 1.3 | 2026-04-13 | ES(ElasticSearch) 참조를 MongoDB로 일괄 교체 — ES 제거 반영 |
+| 1.4 | 2026-04-15 | MiniLM 384-dim 기준 초안 서술 제거, BGE-M3 1024-dim + Sparse Named Vectors 현 구현 기준 재서술. §1 "현재 아키텍처" 로 통합, §2 레이어 구성 중심 재편. 폐쇄망 LLM(Solar Pro 2 등)으로 문서 보강 경로 명시 |

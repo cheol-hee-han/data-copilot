@@ -3,7 +3,6 @@
 테스트 대상:
   - calculate_readiness: 0.0~1.0 준비도 점수 계산
   - all_critical_confirmed: critical 항목 전체 해소 여부
-  - should_ask_user: ASK_USER 발동 조건
   - evaluate_readiness: 다음 행동 판정 (SSOT)
 
 실제 환경에서 실행 — Mock 없음.
@@ -36,7 +35,6 @@ from src.services.confidence_scorer import (
     all_critical_confirmed,
     calculate_readiness,
     evaluate_readiness,
-    should_ask_user,
 )
 from tests.conftest import get_test_logger, log_test_case
 
@@ -322,92 +320,6 @@ class TestAllCriticalConfirmed:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# should_ask_user
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class TestShouldAskUser:
-    """should_ask_user 함수 테스트."""
-
-    def test_no_conflicted_returns_false(self):
-        """CONFLICTED 항목이 없으면 False."""
-        items = [
-            _ki("k1", ConfidenceStatus.CONFIRMED),
-            _ki("k2", ConfidenceStatus.PROBABLE),
-        ]
-        reason = _reason(knowledge_items=items)
-        result = should_ask_user(reason)
-        passed = result is False
-        log_test_case(logger, "no_conflicted", items, False, result, passed)
-        assert passed
-
-    def test_conflicted_single_table_reference_does_not_trigger(self):
-        """CONFLICTED지만 다른 테이블 언급이 없으면 추론 진행 (False)."""
-        ki = _ki("k1", ConfidenceStatus.CONFLICTED, evidence=["단순 모호성 설명"])
-        reason = _reason(knowledge_items=[ki])
-        result = should_ask_user(reason)
-        passed = result is False
-        log_test_case(logger, "conflicted_same_table", ki, False, result, passed)
-        assert passed
-
-    def test_conflicted_two_different_tables_triggers(self):
-        """CONFLICTED + critical + 서로 다른 두 테이블 언급 → True."""
-        ki = _ki(
-            "measure:잔액",
-            ConfidenceStatus.CONFLICTED,
-            is_critical=True,
-            evidence=[
-                "TB_LOAN_ACNT 사용 시 일별 잔액",
-                "TB_DEPOSIT_ACNT 사용 시 월별 잔액",
-            ],
-        )
-        reason = _reason(knowledge_items=[ki])
-        result = should_ask_user(reason)
-        passed = result is True
-        log_test_case(logger, "two_tables_conflict", ki, True, result, passed)
-        assert passed
-
-    def test_conflicted_non_critical_does_not_trigger(self):
-        """critical=False인 CONFLICTED는 사용자 확인 불필요."""
-        ki = KnowledgeItem(
-            key="k1",
-            status=ConfidenceStatus.CONFLICTED,
-            is_critical=False,
-            evidence=["TB_A 연관", "TB_B 연관"],
-        )
-        reason = _reason(knowledge_items=[ki])
-        result = should_ask_user(reason)
-        passed = result is False
-        log_test_case(logger, "non_critical_conflict", ki, False, result, passed)
-        assert passed
-
-    def test_empty_state_returns_false(self):
-        """지식 항목이 없으면 False."""
-        reason = _reason()
-        result = should_ask_user(reason)
-        passed = result is False
-        log_test_case(logger, "empty_state", {}, False, result, passed)
-        assert passed
-
-    def test_conflicted_with_three_tables_triggers(self):
-        """세 개 이상의 테이블 참조도 True."""
-        ki = _ki(
-            "measure:지표",
-            ConfidenceStatus.CONFLICTED,
-            is_critical=True,
-            evidence=[
-                "TB_LOAN 관련",
-                "TB_DEPOSIT 관련",
-                "TB_BOND 관련",
-            ],
-        )
-        reason = _reason(knowledge_items=[ki])
-        result = should_ask_user(reason)
-        passed = result is True
-        log_test_case(logger, "three_tables_conflict", ki, True, result, passed)
-        assert passed
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # evaluate_readiness
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -472,8 +384,8 @@ class TestEvaluateReadiness:
         log_test_case(logger, "explore_pending_steps", {}, "EXPLORE", verdict, passed)
         assert passed
 
-    def test_ask_user_when_unresolvable_conflict(self):
-        """탐색 완료 후 CONFLICTED + 다중 테이블 → ASK_USER."""
+    def test_conflicted_triggers_replan(self):
+        """탐색 완료 후 CONFLICTED + 다중 테이블 → REPLAN."""
         ki = _ki(
             "measure:잔액",
             ConfidenceStatus.CONFLICTED,
@@ -482,8 +394,8 @@ class TestEvaluateReadiness:
         )
         reason = _reason(knowledge_items=[ki], execution_plan=[])
         verdict = evaluate_readiness(reason)
-        passed = verdict == ReadinessVerdict.ASK_USER
-        log_test_case(logger, "ask_user_conflict", ki, "ASK_USER", verdict, passed)
+        passed = verdict == ReadinessVerdict.REPLAN
+        log_test_case(logger, "conflicted_replan", ki, "REPLAN", verdict, passed)
         assert passed
 
     def test_replan_when_low_score_no_pending(self):

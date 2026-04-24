@@ -365,6 +365,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "flagembedding" },
+    { name = "gunicorn", marker = "sys_platform != 'win32'" },
     { name = "httpx" },
     { name = "impyla" },
     { name = "langchain-core" },
@@ -410,9 +411,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
-prod = [
-    { name = "gunicorn" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -420,7 +418,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "flagembedding", specifier = ">=1.3.0" },
-    { name = "gunicorn", marker = "extra == 'prod'", specifier = ">=23.0.0" },
+    { name = "gunicorn", marker = "sys_platform != 'win32'", specifier = ">=23.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "impyla", specifier = ">=0.20.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
@@ -462,7 +460,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=13.0" },
 ]
-provides-extras = ["prod", "dev"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "datasets"
@@ -680,7 +678,7 @@ name = "gunicorn"
 version = "25.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "packaging" },
+    { name = "packaging", marker = "sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/f4/e78fa054248fab913e2eab0332c6c2cb07421fca1ce56d8fe43b6aef57a4/gunicorn-25.3.0.tar.gz", hash = "sha256:f74e1b2f9f76f6cd1ca01198968bd2dd65830edc24b6e8e4d78de8320e2fe889", size = 634883, upload-time = "2026-03-27T00:00:26.092Z" }
 wheels = [

@@ -66,7 +66,7 @@ class PostgresConnector(DatabaseConnector):
             port=settings.postgres_db_port,
             database=settings.postgres_db_name,
         )
-        self._engine = create_async_engine(
+        engine = create_async_engine(
             url,
             echo=False,
             pool_size=settings.db_pool_size,
@@ -78,6 +78,19 @@ class PostgresConnector(DatabaseConnector):
                 "command_timeout": settings.db_query_timeout,
             },
         )
+
+        # 실접속 검증 — 풀에서 커넥션을 꺼내 TCP 핸드셰이크를 수행
+        from sqlalchemy import text
+
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception:
+            await engine.dispose()
+            raise
+
+        self._engine = engine
+        logger.info("Postgres 공통 DB 연결 완료")
 
     async def disconnect(self) -> None:
         """DB 연결을 종료한다."""

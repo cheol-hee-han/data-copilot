@@ -223,8 +223,8 @@ class TestClearQueryAccuracy:
 class TestAmbiguousQueryHandling:
     """모호한 질의에 대한 처리."""
 
-    def test_01_conflicted_triggers_ask_user(self):
-        """다중 테이블 충돌 항목 → ASK_USER 판정."""
+    def test_01_conflicted_triggers_replan(self):
+        """다중 테이블 충돌 항목 → REPLAN 판정."""
         state = _state(
             knowledge_items=[
                 _ki(
@@ -241,7 +241,7 @@ class TestAmbiguousQueryHandling:
         )
         assert has_conflicted_items(state.reason)
         v = evaluate_readiness(state.reason)
-        assert v == ReadinessVerdict.ASK_USER
+        assert v == ReadinessVerdict.REPLAN
 
     def test_02_ambiguity_detected_in_normalized(self):
         """모호한 출력 범위 감지 — measures 비어있고 포괄 키워드."""
@@ -262,21 +262,6 @@ class TestAmbiguousQueryHandling:
             hypotheses=[_hyp()],
         )
         assert has_conflicted_items(state.reason)
-
-    def test_04_conflicted_generates_signals(self):
-        """충돌 → AmbiguitySignal 생성."""
-        from src.agents.nodes.reason.result_finalizer import (
-            _build_conflicted_signals,
-        )
-        items = [
-            _ki(
-                "코드값", ConfidenceStatus.CONFLICTED,
-                evidence=["A: 01=정상", "B: 01=활성"],
-            ),
-        ]
-        signals = _build_conflicted_signals(items)
-        assert len(signals) >= 1
-        assert "코드값" in signals[0].question
 
     def test_05_low_confidence_triggers_replan(self):
         """낮은 확신도 → REPLAN 판정."""
@@ -457,35 +442,7 @@ class TestExceptionHandling:
 class TestClarificationQuestions:
     """사용자 명확화 질문 테스트."""
 
-    @pytest.mark.asyncio
-    async def test_01_verifying_phase_triggers_question(self):
-        """VERIFYING + CONFLICTED → AmbiguitySignal 생성."""
-        state = _state(
-            phase=Phase.VERIFYING,
-            knowledge_items=[
-                _ki("코드", ConfidenceStatus.CONFLICTED,
-                     evidence=["출처A", "출처B"]),
-            ],
-        )
-        r = await result_finalizer_node(state)
-        signals = r.get("pending_signals", [])
-        assert len(signals) >= 1
-        assert any("코드" in s.question for s in signals)
-
-    @pytest.mark.asyncio
-    async def test_02_no_conflict_no_question(self):
-        """충돌 없음 → 질문 없음."""
-        state = _state(
-            phase=Phase.VERIFYING,
-            knowledge_items=[
-                _ki("x", ConfidenceStatus.CONFIRMED, 0.9),
-            ],
-            validated_sql="SELECT 1",
-        )
-        r = await result_finalizer_node(state)
-        assert not r.get("pending_signals")
-
-    def test_03_pipeline_pending_signals_flag(self):
+    def test_01_pipeline_pending_signals_flag(self):
         """PipelineState: pending_signals 설정."""
         from src.agents.models.clarification import (
             AmbiguitySignal, AmbiguityType, ConfidenceLevel,
@@ -501,32 +458,9 @@ class TestClarificationQuestions:
         state = _state(pending_signals=[signal])
         assert len(state.pending_signals) == 1
 
-    def test_04_multiple_conflicts_all_signaled(self):
-        """복수 충돌 → 모두 AmbiguitySignal 생성."""
-        from src.agents.nodes.reason.result_finalizer import (
-            _build_conflicted_signals,
-        )
-        items = [
-            _ki("a", ConfidenceStatus.CONFLICTED, evidence=["e1"]),
-            _ki("b", ConfidenceStatus.CONFLICTED, evidence=["e2"]),
-        ]
-        signals = _build_conflicted_signals(items)
-        questions = " ".join(s.question for s in signals)
-        assert "a" in questions and "b" in questions
-
-    def test_05_ask_user_verdict_phase_mapping(self):
-        """ASK_USER → VERIFYING phase."""
-        from src.services.confidence_scorer import (
-            VERDICT_TO_PHASE,
-        )
-        assert (
-            VERDICT_TO_PHASE[ReadinessVerdict.ASK_USER]
-            == Phase.VERIFYING
-        )
-
     @pytest.mark.asyncio
-    async def test_06_evaluator_sets_verifying(self):
-        """readiness_gate가 추론 불가 충돌 시 VERIFYING 설정."""
+    async def test_02_conflicted_flows_to_replan(self):
+        """CONFLICTED 항목 → readiness_gate에서 REPLANNING 전환."""
         state = _state(
             knowledge_items=[_ki(
                 "x", ConfidenceStatus.CONFLICTED,
@@ -535,30 +469,9 @@ class TestClarificationQuestions:
             hypotheses=[_hyp()],
         )
         r = await readiness_gate_node(state)
-        assert r["reason"].phase == Phase.VERIFYING
+        assert r["reason"].phase == Phase.REPLANNING
 
-    def test_07_finalizer_pending_status(self):
-        """명확화 시 final_status=pending."""
-        # test_01에서 이미 검증
-        pass
-
-    def test_08_question_includes_evidence(self):
-        """질문에 근거 정보 포함."""
-        from src.agents.nodes.reason.result_finalizer import (
-            _build_conflicted_signals,
-        )
-        items = [
-            _ki(
-                "STATUS_CD", ConfidenceStatus.CONFLICTED,
-                evidence=["코드메타: 01=정상", "매뉴얼: 01=활성"],
-            ),
-        ]
-        signals = _build_conflicted_signals(items)
-        q = signals[0].question
-        assert "코드메타" in q
-        assert "매뉴얼" in q
-
-    def test_09_no_clarification_on_success(self):
+    def test_03_no_clarification_on_success(self):
         """성공 시 명확화 없음."""
         state = _state(
             validated_sql="SELECT 1",
@@ -566,7 +479,7 @@ class TestClarificationQuestions:
         )
         assert not state.pending_signals
 
-    def test_10_no_clarification_on_failure(self):
+    def test_04_no_clarification_on_failure(self):
         """실패 시 명확화 없음."""
         state = _state(
             final_status=FinalStatus.FAILURE,
@@ -690,7 +603,7 @@ class TestSessionTurnManagement:
     def test_02_phase_transitions(self):
         """phase 전환 패턴."""
         phases = [
-            Phase.PLANNING, Phase.EXPLORING, Phase.VERIFYING,
+            Phase.PLANNING, Phase.EXPLORING,
             Phase.GENERATING, Phase.VALIDATING, Phase.REPLANNING, Phase.DONE,
         ]
         for p in phases:

@@ -47,7 +47,7 @@ _NODE_LAYER: dict[str, str] = {
     "resolve_history": "interpret",
     "intent_classifier": "interpret",
     "classify_intent": "interpret",  # 하위호환
-    "normalize_query": "interpret",
+    "query_normalizer": "interpret",
     "clarify": "interpret",
     "reasoning_preparer": "reason",
     "context_explorer": "reason",
@@ -59,9 +59,10 @@ _NODE_LAYER: dict[str, str] = {
     "sql_validator": "reason",
     "recovery_planner": "reason",
     "result_finalizer": "reason",
-    "execute_sql": "present",
-    "analyze_data": "present",
-    "format_response": "present",
+    "sql_executor": "present",
+    "analyzer": "present",
+    "visualizer": "present",
+    "formatter": "present",
 }
 
 _EVENT_ICONS: dict[str, str] = {
@@ -545,7 +546,7 @@ def render_state_evolution(
 _NODE_DISPLAY: dict[str, str] = {
     "intent_classifier": "Intent Classification",
     "classify_intent": "Intent Classification",  # 하위호환
-    "normalize_query": "Query Normalization",
+    "query_normalizer": "Query Normalization",
     "reasoning_preparer": "Reasoning Preparer",
     "context_retriever": "Context Retriever",
     "context_interpreter": "Context Interpretation",
@@ -553,9 +554,10 @@ _NODE_DISPLAY: dict[str, str] = {
     "recovery_agent": "Recovery Agent",
     "sql_generator": "SQL Generation",
     "sql_validator": "SQL Validation",
-    "execute_sql": "SQL Execution",
-    "analyze_data": "Data Analysis",
-    "format_response": "Response Formatting",
+    "sql_executor": "SQL Execution",
+    "analyzer": "Data Analysis",
+    "visualizer": "Visualization",
+    "formatter": "Response Formatting",
     "preprocess": "Preprocess",
     "resolve_history": "History Resolution",
     "clarify": "Clarification",
@@ -788,6 +790,22 @@ def _render_inputs(
     step_type: str,
 ) -> None:
     """step의 inputs를 Markdown으로 렌더링한다."""
+    # 신형 스키마: prompt_variables 가 있으면 프롬프트 변수별 섹션으로
+    prompt_variables = (
+        inputs.get("prompt_variables") if isinstance(inputs, dict) else None
+    )
+    if isinstance(prompt_variables, dict) and prompt_variables:
+        _render_prompt_variables(lines, prompt_variables)
+        extras = {
+            k: v for k, v in inputs.items() if k != "prompt_variables"
+        }
+        if extras:
+            lines.append("► **부가 입력**")
+            for key, val in extras.items():
+                _render_kv(lines, key, val, indent=2)
+            lines.append("")
+        return
+
     if step_type == "recovery":
         # Recovery: 7개 입력을 각각 ► 소제목 형식으로
         _render_recovery_inputs(lines, inputs)
@@ -806,6 +824,59 @@ def _render_inputs(
     for key, val in inputs.items():
         _render_kv(lines, key, val, indent=2)
     lines.append("")
+
+
+def _render_prompt_variables(
+    lines: list[str],
+    variables: dict[str, Any],
+) -> None:
+    """프롬프트 치환 변수를 변수별 섹션으로 렌더링한다.
+
+    각 변수는 ``► **{var_name}**`` 헤더 아래 값을 코드블록/인라인으로 표시한다.
+    긴 텍스트·줄바꿈 포함 값·dict/list 는 코드블록으로 원본 그대로 보존한다.
+    """
+    lines.append("► **프롬프트 입력 ([INPUT] 치환 변수)**")
+    lines.append("")
+    for var_name, value in variables.items():
+        lines.append(f"**`{{{var_name}}}`**")
+        _render_variable_value(lines, value)
+        lines.append("")
+
+
+def _render_variable_value(
+    lines: list[str],
+    value: Any,
+) -> None:
+    """프롬프트 변수 값 하나를 타입·길이에 맞게 렌더링한다."""
+    if value is None:
+        lines.append("  (없음)")
+        return
+    if isinstance(value, str):
+        if not value.strip():
+            lines.append("  (없음)")
+            return
+        if len(value) <= 120 and "\n" not in value:
+            lines.append(f"  {value}")
+            return
+        lines.append("")
+        lines.append("```")
+        for line in value.split("\n"):
+            lines.append(line)
+        lines.append("```")
+        return
+    if isinstance(value, (int, float, bool)):
+        lines.append(f"  {value}")
+        return
+    # dict / list → JSON 코드블록
+    lines.append("")
+    lines.append("```json")
+    try:
+        lines.append(
+            json.dumps(value, ensure_ascii=False, indent=2, default=str),
+        )
+    except (TypeError, ValueError):
+        lines.append(str(value))
+    lines.append("```")
 
 
 def _render_recovery_inputs(
@@ -849,6 +920,25 @@ def _render_output(
     step_type: str,
 ) -> None:
     """step의 output을 Markdown으로 렌더링한다."""
+    # 신형 스키마: raw_response 가 있으면 원본 응답 우선 렌더링
+    raw_response = (
+        output.get("raw_response") if isinstance(output, dict) else None
+    )
+    if isinstance(raw_response, str) and raw_response.strip():
+        _render_raw_response(lines, raw_response)
+        parsed = output.get("parsed")
+        if isinstance(parsed, dict) and parsed:
+            lines.append("◄ **파싱 요약**")
+            for key, val in parsed.items():
+                _render_kv(lines, key, val, indent=2)
+            lines.append("")
+        # recovery/validation 전용 부가 필드는 기존 렌더러로 보강
+        if step_type == "recovery":
+            _render_recovery_output(lines, output)
+        elif step_type == "validation":
+            _render_validation_layers(lines, output)
+        return
+
     # LLM vs rule 라벨
     if step_type == "rule_decision":
         lines.append("◄ **판단**")
@@ -935,6 +1025,32 @@ def _render_output(
     for key, val in remaining.items():
         _render_kv(lines, key, val, indent=2)
 
+    lines.append("")
+
+
+def _render_raw_response(
+    lines: list[str],
+    raw_response: str,
+) -> None:
+    """LLM 원본 응답을 JSON 코드블록으로 렌더링한다.
+
+    JSON 파싱이 성공하면 pretty-print 하고, 실패하면 원본 텍스트를 그대로
+    보존한다. [OUTPUT_CONTRACT] 에 정의된 형식을 재구성할 수 있도록 절단하지
+    않는다.
+    """
+    lines.append("◄ **LLM 원본 응답 ([OUTPUT_CONTRACT])**")
+    lines.append("")
+    stripped = raw_response.strip()
+    lines.append("```json")
+    try:
+        parsed_obj = json.loads(stripped)
+        lines.append(
+            json.dumps(parsed_obj, ensure_ascii=False, indent=2),
+        )
+    except (json.JSONDecodeError, ValueError):
+        for line in raw_response.split("\n"):
+            lines.append(line)
+    lines.append("```")
     lines.append("")
 
 

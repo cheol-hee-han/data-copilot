@@ -1,6 +1,6 @@
 [Unit]
 Description=Data Copilot - NL to SQL AI Agent
-Documentation=file:/opt/data-copilot/deploy/systemd/README.md
+Documentation=file:/opt/bdp/data-copilot/deploy/systemd/README.md
 After=network-online.target
 Wants=network-online.target
 
@@ -8,11 +8,11 @@ Wants=network-online.target
 Type=notify
 User=datacopilot
 Group=datacopilot
-WorkingDirectory=/opt/data-copilot
-EnvironmentFile=/opt/data-copilot/.env
+WorkingDirectory=/opt/bdp/data-copilot
+EnvironmentFile=/opt/bdp/data-copilot/.env
 
-# gunicorn 실행 (설정은 /opt/data-copilot/gunicorn.conf.py 참조)
-ExecStart=/opt/data-copilot/.venv/bin/gunicorn -c gunicorn.conf.py src.main:app
+# gunicorn 실행 (설정은 /opt/bdp/data-copilot/gunicorn.conf.py 참조)
+ExecStart=/opt/bdp/data-copilot/.venv/bin/gunicorn -c gunicorn.conf.py src.main:app
 
 # 재시작 정책
 Restart=on-failure

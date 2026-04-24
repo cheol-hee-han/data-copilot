@@ -1,0 +1,62 @@
+────────────────────────────────
+## 예제 8: mind_map (마인드맵)
+────────────────────────────────
+
+데이터:
+유형: 마인드맵
+중심: "AI 기술"
+가지: [
+  ("머신러닝", ["지도학습", "비지도학습", "강화학습"]),
+  ("딥러닝", ["CNN", "RNN", "Transformer"]),
+  ("응용 분야", ["자연어처리", "컴퓨터비전", "로보틱스"])
+]
+
+레이아웃:
+  중심 노드: (400, 240)
+  좌측 가지 2개: 리프 텍스트 x=90 (text-anchor=end → 좌측으로 약 80px 확장 → x≈10 안전)
+  우측 가지 1개: 리프 텍스트 x=710 (text-anchor=start → 우측으로 약 80px 확장 → x≈790 안전)
+  ※ 리프 텍스트가 viewBox(0~800) 밖으로 잘리지 않도록 여유 확보 필수
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 중심 노드 -->
+  <rect x="335" y="215" width="130" height="50" rx="25" fill="#1a56db" stroke="none"/>
+  <text x="400" y="245" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">AI 기술</text>
+
+  <!-- === 가지 1: 머신러닝 (좌상) === -->
+  <path d="M335,230 C270,230 240,120 200,120" fill="none" stroke="#1a56db" stroke-width="2.5" opacity="0.6"/>
+  <rect x="140" y="100" width="110" height="38" rx="19" fill="#dbeafe" stroke="#1a56db" stroke-width="1.5"/>
+  <text x="195" y="124" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">머신러닝</text>
+  <!-- 하위 -->
+  <path d="M140,109 C115,109 105,70 95,70" fill="none" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="90" y="74" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">지도학습</text>
+  <path d="M140,119 C110,119 100,119 95,119" fill="none" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="90" y="123" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">비지도학습</text>
+  <path d="M140,129 C115,129 105,168 95,168" fill="none" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="90" y="172" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">강화학습</text>
+
+  <!-- === 가지 2: 딥러닝 (좌하) === -->
+  <path d="M335,250 C270,250 240,370 200,370" fill="none" stroke="#f59e0b" stroke-width="2.5" opacity="0.6"/>
+  <rect x="145" y="351" width="100" height="38" rx="19" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="195" y="375" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">딥러닝</text>
+  <!-- 하위 -->
+  <path d="M145,360 C115,360 105,320 95,320" fill="none" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="90" y="324" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">CNN</text>
+  <path d="M145,370 C110,370 100,370 95,370" fill="none" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="90" y="374" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">RNN</text>
+  <path d="M145,380 C115,380 105,420 95,420" fill="none" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="90" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">Transformer</text>
+
+  <!-- === 가지 3: 응용 분야 (우측) === -->
+  <path d="M465,240 C530,240 560,240 600,240" fill="none" stroke="#10b981" stroke-width="2.5" opacity="0.6"/>
+  <rect x="575" y="221" width="110" height="38" rx="19" fill="#d1fae5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="630" y="245" text-anchor="middle" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">응용 분야</text>
+  <!-- 하위 -->
+  <path d="M685,230 C695,230 700,180 710,180" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="715" y="184" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">자연어처리</text>
+  <path d="M685,240 C700,240 705,240 710,240" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="715" y="244" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">컴퓨터비전</text>
+  <path d="M685,250 C695,250 700,300 710,300" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>
+  <text x="715" y="304" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">로보틱스</text>
+</svg>

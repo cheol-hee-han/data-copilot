@@ -9,18 +9,19 @@
 흐름:
   사용자 입력 → intent_classifier
     → [pending_signals?] → clarification_handler (interrupt/resume)
-    → [비데이터?] → simple_responder → format_response → END
-    → normalize_query (8-Slot)
+    → [비데이터?] → simple_responder → formatter → END
+    → query_normalizer (8-Slot)
     → [reason 계층 추론 루프]
         reasoning_preparer → context_retriever → context_interpreter
         → readiness_gate → recovery_agent (재계획)
             → context_retriever (기존 파이프라인 재진입)
         → sql_generator → sql_validator
         → result_finalizer
-    → execute_sql
-    → [분석 필요?]
-        ├─ YES → analyze_data → format_response
-        └─ NO → format_response
+    → sql_executor
+    → [DATA_ANALYSIS + needs_analyzer?]
+        ├─ YES → analyzer → visualizer → formatter
+        └─ NO  → visualizer → formatter
+            (DATA_EXTRACTION / DATA_ANALYSIS + needs_analyzer=false 포함)
     → 응답 반환
 
   sanitize는 runner.py에서 1회 실행 (preprocess 노드 제거).
@@ -49,6 +50,7 @@ from src.agents.models.user_messages import (
     REPHRASE_GUIDE,
 )
 from src.agents.state.state import (
+    ContinueRoute,
     FailureType,
     IntentType,
     Phase,
@@ -60,8 +62,11 @@ from src.agents.state.state import (
 from src.agents.nodes.interpret.intent_classifier import (
     intent_classifier_node,
 )
+from src.agents.nodes.interpret.continue_orchestrator import (
+    continue_orchestrator_node,
+)
 from src.agents.nodes.interpret.query_normalizer import (
-    normalize_query_node,
+    query_normalizer_node,
 )
 
 # ── 통합 명확화 노드 ──
@@ -96,11 +101,15 @@ from src.agents.nodes.reason.result_finalizer import (
 )
 
 # ── Present 계층 노드 ──
-from src.agents.nodes.present.sql_executor import execute_sql_node
-from src.agents.nodes.present.analyzer import analyze_data_node
-from src.agents.nodes.present.formatter import format_response_node
+from src.agents.nodes.present.sql_executor import sql_executor_node
+from src.agents.nodes.present.analyzer import analyzer_node
+from src.agents.nodes.present.visualizer import visualizer_node
+from src.agents.nodes.present.formatter import formatter_node
 from src.agents.nodes.present.simple_responder import (
     simple_responder_node,
+)
+from src.agents.nodes.present.save_turn_snapshot import (
+    save_turn_snapshot,
 )
 
 from src.agents.graph.cancel import with_cancel_check
@@ -125,8 +134,9 @@ def _route_after_intent_classifier(
 
     1. pending_signals → clarification_handler (UNSURE / AMBIGUOUS)
     2. 에러 → error_end
-    3. 비데이터 의도 (CASUAL_TALK / META_QUESTION) → simple_responder
-    4. 데이터 의도 → normalize_query 또는 reasoning_preparer
+    3. CONTINUE_ORCHESTRATION_PENDING → continue_orchestrator (이전 스냅샷 있는 CONTINUE)
+    4. 비데이터 의도 (CASUAL_TALK / META_QUESTION) → simple_responder
+    5. 데이터 의도 → query_normalizer 또는 reasoning_preparer
     """
     if state.pending_signals:
         return "clarification_handler"
@@ -134,6 +144,10 @@ def _route_after_intent_classifier(
         return "error_end"
     if state.status == QueryStatus.ERROR:
         return "error_end"
+
+    # CONTINUE + 이전 스냅샷 존재 → 오케스트레이터로 라우팅
+    if state.status == QueryStatus.CONTINUE_ORCHESTRATION_PENDING:
+        return "continue_orchestrator"
 
     # 비데이터 의도 → 경량 응답 노드에서 직접 처리
     if state.intent in (
@@ -148,7 +162,7 @@ def _route_after_intent_classifier(
 def _next_after_intent() -> str:
     """의도 분류 후 데이터 처리 경로."""
     if settings.normalization_enabled:
-        return "normalize_query"
+        return "query_normalizer"
     return "reasoning_preparer"
 
 
@@ -171,7 +185,6 @@ _PHASE_TO_ROUTE: dict[Phase, str] = {
     Phase.EXPLORING: "explore",
     Phase.GENERATING: "generate_sql",
     Phase.REPLANNING: "recovery",
-    Phase.VERIFYING: "ask_user",
     Phase.DONE: "conclude_failure",
 }
 
@@ -196,14 +209,18 @@ def _route_after_sql_generator(
 ) -> str:
     """sql_generator 후 라우팅.
 
-    4가지 분기:
+    5가지 분기:
       1. GENERATION_FAILED + force-generate → conclude_failure (재시도 불가)
-      2. GENERATION_FAILED → recovery_agent (정보 보충 후 재시도)
-      3. pending_signals → clarification_handler (Cross-DB INFER)
-      4. 정상 → sql_validator (검증)
+      2. GENERATION_FAILED + REGENERATE → conclude_failure (재료 복원 완료 상태,
+         recovery_agent의 추가 탐색이 무의미하여 조기 종료 — §4.4.7)
+      3. GENERATION_FAILED → recovery_agent (정보 보충 후 재시도)
+      4. pending_signals → clarification_handler (Cross-DB INFER)
+      5. 정상 → sql_validator (검증)
     """
     if state.reason.failure_type == FailureType.GENERATION_FAILED:
         if state.reason.is_force_generated:
+            return "conclude_failure"
+        if state.route == ContinueRoute.REGENERATE:
             return "conclude_failure"
         return "replan"
     if state.pending_signals:
@@ -223,8 +240,22 @@ def _route_after_sql_validator(
       4. SQL_STRUCTURAL / EMPTY_RESULT / DB_ERROR → recovery_agent
       5. fast-path 실패 → context_retriever (정상 탐색 전환)
       6. 기타 / 한계 초과 → result_finalizer (실패 처리)
+
+    Phase 3 §14.3.5 가드:
+      REGENERATE 는 "직전 턴 재료 그대로 재작성" 전제이므로 local_fix 가능 실패
+      (SQL_SYNTAX/SQL_SEMANTIC_LOCAL) 만 허용한다. 그 외 실패(STRUCTURAL,
+      EMPTY_RESULT, DB_ERROR 등) 는 전제가 깨진 신호이므로 recovery_agent 로
+      진입해 dead_ends 를 누적하는 대신 즉시 conclude_failure 로 직행한다.
     """
     ft = state.reason.failure_type
+
+    # Phase 3 §14.3.5 — REGENERATE × non-local_fix 실패 조기 차단.
+    if state.route == ContinueRoute.REGENERATE and ft not in {
+        None,
+        FailureType.SQL_SYNTAX,
+        FailureType.SQL_SEMANTIC_LOCAL,
+    }:
+        return "conclude_failure"
 
     match ft:
         case None:
@@ -310,12 +341,10 @@ def _route_after_result_finalizer(
     """
     if state.status == QueryStatus.CANCELLED:
         return "error_end"
-    if state.pending_signals:
-        return "clarification_handler"
     if state.error_message:
         return "error_end"
     if state.reason.validated_sql:
-        return "execute_sql"
+        return "sql_executor"
     return "error_end"
 
 
@@ -326,20 +355,26 @@ def _route_after_result_finalizer(
 def _route_after_execution(
     state: PipelineState,
 ) -> str:
-    """SQL 실행 후 라우팅."""
+    """SQL 실행 후 라우팅.
+
+    DATA_ANALYSIS + needs_analyzer=true  → analyzer → visualizer → formatter
+    DATA_ANALYSIS + needs_analyzer=false → visualizer → formatter  (analyzer 스킵)
+    그 외                                → visualizer → formatter
+    """
     if state.status in (QueryStatus.ERROR, QueryStatus.CANCELLED):
         return "error_end"
-    if state.intent == IntentType.DATA_ANALYSIS:
-        return "analyze_data"
-    return "format_response"
+    if state.intent == IntentType.DATA_ANALYSIS and state.needs_analyzer:
+        return "analyzer"
+    return "visualizer"
 
 
 # ── clarification_handler 후속 라우팅 ──
 
 _VALID_RETURN_TARGETS = frozenset({
     "intent_classifier",
-    "normalize_query", "sql_generator",
-    "readiness_gate", "result_finalizer",
+    "query_normalizer",
+    "recovery_agent",
+    "continue_orchestrator",
 })
 
 # 배포 과도기 호환 — 기존 세션의 source_node가 구 이름일 수 있음
@@ -380,7 +415,16 @@ def _handle_error(state: PipelineState) -> dict:
     LangGraph 노드로 등록되어 error_end 경로에서 호출된다.
     CANCELLED 상태는 기존 cancel 메시지를 보존한다.
     SQL 재시도 소진 여부에 따라 다른 안내 메시지를 반환한다.
+
+    error_end는 format_response를 거치지 않으므로,
+    process_summary를 여기서 직접 생성하여 프론트엔드 전구 아이콘에 노출한다.
     """
+    from src.services.process_summary_builder import (
+        build_process_summary,
+    )
+
+    process_summary = build_process_summary(state)
+
     # CANCELLED: 이미 설정된 cancel 메시지를 보존
     if state.status == QueryStatus.CANCELLED:
         return {
@@ -389,6 +433,7 @@ def _handle_error(state: PipelineState) -> dict:
                 or "요청이 중단되었습니다."
             ),
             "status": QueryStatus.CANCELLED,
+            "process_summary": process_summary,
         }
 
     error_msg = state.error_message or ERR_GENERIC
@@ -407,6 +452,7 @@ def _handle_error(state: PipelineState) -> dict:
     return {
         "formatted_response": user_message,
         "status": QueryStatus.ERROR,
+        "process_summary": process_summary,
     }
 
 
@@ -449,7 +495,12 @@ def build_pipeline() -> StateGraph:
     # ── Interpret 계층 ──
     _cc = with_cancel_check
     workflow.add_node("intent_classifier", _cc(intent_classifier_node))
-    workflow.add_node("normalize_query", _cc(normalize_query_node))
+    # continue_orchestrator: 정적 엣지 금지 (설계 §4.3 제약 1).
+    # Command(goto=...) 반환값만으로 라우팅하므로 add_edge/add_conditional_edges 없음.
+    workflow.add_node(
+        "continue_orchestrator", continue_orchestrator_node,
+    )
+    workflow.add_node("query_normalizer", _cc(query_normalizer_node))
 
     # ── 통합 명확화 노드 ──
     workflow.add_node("clarification_handler", clarification_handler_node)
@@ -465,9 +516,11 @@ def build_pipeline() -> StateGraph:
     workflow.add_node("result_finalizer", result_finalizer_node)
 
     # ── Present 계층 ──
-    workflow.add_node("execute_sql", _cc(execute_sql_node))
-    workflow.add_node("analyze_data", _cc(analyze_data_node))
-    workflow.add_node("format_response", _cc(format_response_node))
+    workflow.add_node("sql_executor", _cc(sql_executor_node))
+    workflow.add_node("analyzer", _cc(analyzer_node))
+    workflow.add_node("visualizer", _cc(visualizer_node))
+    workflow.add_node("formatter", _cc(formatter_node))
+    workflow.add_node("save_turn_snapshot", save_turn_snapshot)
     workflow.add_node("simple_responder", simple_responder_node)
     workflow.add_node("error_end", _handle_error)
 
@@ -486,15 +539,16 @@ def build_pipeline() -> StateGraph:
         _route_after_intent_classifier,
         {
             "clarification_handler": "clarification_handler",
+            "continue_orchestrator": "continue_orchestrator",
             "simple_responder": "simple_responder",
-            "normalize_query": "normalize_query",
+            "query_normalizer": "query_normalizer",
             "reasoning_preparer": "reasoning_preparer",
             "error_end": "error_end",
         },
     )
 
     workflow.add_conditional_edges(
-        "normalize_query",
+        "query_normalizer",
         _route_after_normalize,
         {
             "error_end": "error_end",
@@ -517,7 +571,6 @@ def build_pipeline() -> StateGraph:
             "generate_sql": "sql_generator",
             "recovery": "recovery_agent",
             "conclude_failure": "result_finalizer",
-            "ask_user": "result_finalizer",
             "clarification_handler": "clarification_handler",
         },
     )
@@ -529,6 +582,7 @@ def build_pipeline() -> StateGraph:
             "sql_validator": "sql_validator",
             "clarification_handler": "clarification_handler",
             "replan": "recovery_agent",
+            "conclude_failure": "result_finalizer",
         },
     )
 
@@ -560,8 +614,7 @@ def build_pipeline() -> StateGraph:
         "result_finalizer",
         _route_after_result_finalizer,
         {
-            "execute_sql": "execute_sql",
-            "clarification_handler": "clarification_handler",
+            "sql_executor": "sql_executor",
             "error_end": "error_end",
         },
     )
@@ -578,18 +631,20 @@ def build_pipeline() -> StateGraph:
 
     # ── Present 엣지 ──
     workflow.add_conditional_edges(
-        "execute_sql",
+        "sql_executor",
         _route_after_execution,
         {
-            "analyze_data": "analyze_data",
-            "format_response": "format_response",
+            "analyzer": "analyzer",
+            "visualizer": "visualizer",
             "error_end": "error_end",
         },
     )
 
-    workflow.add_edge("analyze_data", "format_response")
-    workflow.add_edge("simple_responder", "format_response")
-    workflow.add_edge("format_response", END)
+    workflow.add_edge("analyzer", "visualizer")
+    workflow.add_edge("visualizer", "formatter")
+    workflow.add_edge("simple_responder", "formatter")
+    workflow.add_edge("formatter", "save_turn_snapshot")
+    workflow.add_edge("save_turn_snapshot", END)
     workflow.add_edge("error_end", END)
 
     return workflow

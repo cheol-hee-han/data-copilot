@@ -30,3 +30,4 @@ libffi-devel
 # ── 기타 런타임 편의 ──
 tar
 rsync
+ca-certificates

@@ -394,6 +394,9 @@ def generate_chart_from_result(
     labels = [str(row.get(label_col, f"항목{i+1}")) for i, row in enumerate(result.rows)]
     values = [float(row.get(value_col, 0)) for row in result.rows]
 
+    if chart_type == VisualizationType.INFO_CARD:
+        return _generate_info_card(result, title)
+
     generators = {
         VisualizationType.BAR_CHART: generate_bar_chart,
         VisualizationType.STACKED_BAR: generate_bar_chart,
@@ -406,3 +409,82 @@ def generate_chart_from_result(
         return ""
 
     return gen(labels, values, title)
+
+
+def _generate_info_card(
+    result: SQLResult,
+    title: str,
+) -> str:
+    """info_card 템플릿 폴백 — 단순 KPI 카드 SVG 생성."""
+    if not result.rows:
+        return ""
+
+    row = result.rows[0]
+    items: list[tuple[str, str]] = []
+    for col in result.columns:
+        val = row.get(col, "")
+        if isinstance(val, float):
+            items.append((col, f"{val:,.2f}"))
+        elif isinstance(val, int):
+            items.append((col, f"{val:,}"))
+        else:
+            items.append((col, str(val)))
+
+    # 2행인 경우 2번째 행도 포함
+    if len(result.rows) == 2:
+        row2 = result.rows[1]
+        items2: list[tuple[str, str]] = []
+        for col in result.columns:
+            val = row2.get(col, "")
+            if isinstance(val, float):
+                items2.append((col, f"{val:,.2f}"))
+            elif isinstance(val, int):
+                items2.append((col, f"{val:,}"))
+            else:
+                items2.append((col, str(val)))
+
+    n = len(items)
+    font = (
+        "'Malgun Gothic','맑은 고딕',sans-serif"
+    )
+
+    parts = [
+        '<svg xmlns="http://www.w3.org/2000/svg"'
+        ' viewBox="0 0 800 500">',
+        f'<text x="400" y="35"'
+        f' font-family="{font}"'
+        f' font-size="20" font-weight="bold"'
+        f' fill="#1f2937" text-anchor="middle">'
+        f'{html.escape(title)}</text>',
+    ]
+
+    card_w = min(300, 700 // max(n, 1))
+    total_w = card_w * n + 20 * (n - 1)
+    start_x = (800 - total_w) // 2
+
+    for i, (label, val) in enumerate(items):
+        x = start_x + i * (card_w + 20)
+        parts.append(
+            f'<rect x="{x}" y="80"'
+            f' width="{card_w}" height="200"'
+            f' rx="12" fill="#f8fafc"'
+            f' stroke="#e2e8f0" stroke-width="1"/>'
+        )
+        cx = x + card_w // 2
+        parts.append(
+            f'<text x="{cx}" y="150"'
+            f' font-family="{font}"'
+            f' font-size="16" fill="#6b7280"'
+            f' text-anchor="middle">'
+            f'{html.escape(label)}</text>'
+        )
+        parts.append(
+            f'<text x="{cx}" y="210"'
+            f' font-family="{font}"'
+            f' font-size="32" font-weight="700"'
+            f' fill="#1f2937" text-anchor="middle">'
+            f'{html.escape(val)}</text>'
+        )
+
+    parts.append("</svg>")
+    return "\n".join(parts)

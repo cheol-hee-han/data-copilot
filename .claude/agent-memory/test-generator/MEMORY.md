@@ -4,3 +4,4 @@
 - [Test Patterns](feedback_test_patterns.md) — 이 프로젝트의 단위 테스트 작성 규칙 및 패턴
 - [Config Extra Ignore Fix](feedback_config_extra_ignore.md) — .env에 stale ES 필드가 있어 Settings 로딩 실패 → extra="ignore" 추가로 해결
 - [Pure Function Test Patterns](feedback_pure_fn_test_patterns.md) — raw_result 타입 제약, Windows 인코딩, 빈 컨테이너 falsy 동작 주의사항
+- [Pipeline Node Rename History](project_node_rename.md) — execute_sql→sql_executor, normalize_query→query_normalizer 개명. _VALID_RETURN_TARGETS 허용 목록 포함

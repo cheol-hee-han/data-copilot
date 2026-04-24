@@ -1,0 +1,638 @@
+# ============================================================
+# business_rules.yaml — 시딩 데이터 정합성 제약
+# ============================================================
+# 용도: 시딩 시 데이터의 논리적 일관성 확보
+#   - 날짜 순서 (실행일 < 만기일)
+#   - 금액 관계 (상환액 ≤ 원금)
+#   - 상태 전이 (해지=04면 해지일 NOT NULL)
+#   - 크로스 테이블 합산 정합성
+#   - 카디널리티 절대 제약
+#   - 파생값 관계
+#
+# 사용 방식:
+#   1. 시딩 시 generator에 제약 전달 → 값 생성 시 제약 만족하도록
+#   2. 시딩 후 99_VERIFICATION_SQL.md로 검증
+#
+# 표기 규칙:
+#   - expr: SQL-like boolean expression (검증용)
+#   - condition: 특정 조건 (A='X')
+#   - requires: 해당 조건 하에 만족해야 할 것
+#   - severity: hard(필수) | soft(권고) | quality_defect(의도적 위반 허용)
+# ============================================================
+
+version: 1
+last_updated: 2026-04-22
+
+# ════════════════════════════════════════════
+# 1. 날짜 순서 제약 (date_order)
+# ════════════════════════════════════════════
+date_order_rules:
+  # ── 고객 ──
+  - table: CSC001M
+    id: csc001m_date_01
+    expr: "BRTH_YMD <= NEW_YMD"
+    note: "출생일 ≤ 고객 신규일"
+    severity: hard
+
+  - table: CSC001M
+    id: csc001m_date_02
+    condition: "CSCLS_YMD IS NOT NULL"
+    expr: "NEW_YMD < CSCLS_YMD"
+    note: "신규일 < 해지일"
+    severity: hard
+
+  # ── 계좌 (DPG) ──
+  - table: DPG001M
+    id: dpg001m_date_01
+    expr: "NEW_YMD <= ETCL_BASE_YMD"
+    note: "계좌 개설일은 현재 기준 이전"
+    severity: hard
+
+  - table: DPG001M
+    id: dpg001m_date_02
+    condition: "EXPR_YMD IS NOT NULL"
+    expr: "NEW_YMD <= EXPR_YMD"
+    note: "개설일 ≤ 만기일"
+    severity: hard
+
+  - table: DPG001M
+    id: dpg001m_date_03
+    condition: "CLS_YMD IS NOT NULL"
+    expr: "NEW_YMD <= CLS_YMD"
+    note: "개설일 ≤ 해지일"
+    severity: hard
+
+  # ── 정기예금 ──
+  - table: DPF001M
+    id: dpf001m_date_01
+    expr: "OPEN_YMD < MAT_YMD"
+    note: "정기예금 개설일 < 만기일"
+    severity: hard
+
+  # ── 대출 ──
+  - table: LNB001M
+    id: lnb001m_date_01
+    expr: "APLY_YMD <= APPR_YMD"
+    note: "신청일 ≤ 승인일"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb001m_date_02
+    expr: "APPR_YMD <= EXEC_YMD"
+    note: "승인일 ≤ 실행일"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb001m_date_03
+    expr: "EXEC_YMD < MAT_YMD"
+    note: "실행일 < 만기일"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb001m_date_04
+    condition: "FULL_RPY_YMD IS NOT NULL"
+    expr: "EXEC_YMD <= FULL_RPY_YMD"
+    note: "완제일은 실행일 이후"
+    severity: hard
+
+  # 주담대 심사
+  - table: LNH002M
+    id: lnh002m_date_01
+    expr: "APLY_YMD <= DECID_YMD"
+    note: "신청 ≤ 의사결정"
+    severity: hard
+
+  # 연체
+  - table: LNO001M
+    id: lno001m_date_01
+    expr: "OVDU_STRT_YMD >= EXEC_YMD"
+    note: "연체 시작일 ≥ 대출 실행일 (다른 테이블)"
+    severity: hard
+    cross_ref: "LNB001M.EXEC_YMD via LON_NO"
+
+  - table: LNO001M
+    id: lno001m_date_02
+    condition: "OVDU_END_YMD IS NOT NULL"
+    expr: "OVDU_STRT_YMD <= OVDU_END_YMD"
+    note: "연체 시작 ≤ 종료"
+    severity: hard
+
+  # 카드
+  - table: CLN001M
+    id: cln001m_date_01
+    expr: "JOIN_YMD <= ETCL_BASE_YMD"
+    note: "카드회원 가입일 ≤ 현재"
+    severity: hard
+
+  - table: CLN002M
+    id: cln002m_date_01
+    expr: "ISS_YMD <= EXPR_YMD"
+    note: "카드 발급일 ≤ 유효기간"
+    severity: hard
+
+  - table: CLN002M
+    id: cln002m_date_02
+    condition: "CNCL_YMD IS NOT NULL"
+    expr: "ISS_YMD <= CNCL_YMD"
+    note: "발급일 ≤ 해지일"
+    severity: hard
+
+  # 카드 매출
+  - table: SLE001L
+    id: sle001l_date_01
+    expr: "TRN_YMD <= ETCL_BASE_YMD"
+    note: "매출 발생일 ≤ 현재"
+    severity: hard
+
+  # 퇴직연금
+  - table: RPC001M
+    id: rpc001m_date_01
+    expr: "JOIN_YMD <= ETCL_BASE_YMD"
+    severity: hard
+
+  - table: RPC013L
+    id: rpc013l_date_01
+    expr: "PAY_STRT_YMD <= ETCL_BASE_YMD OR PAY_STRT_YMD >= ETCL_BASE_YMD"
+    note: "연금 수령 개시일 (과거 또는 미래 모두 가능)"
+    severity: soft
+
+  # 신탁
+  - table: TRS001M
+    id: trs001m_date_01
+    expr: "CONTRACT_YMD <= MAT_YMD"
+    severity: hard
+
+  - table: TRS001M
+    id: trs001m_date_02
+    condition: "TERM_YMD IS NOT NULL"
+    expr: "CONTRACT_YMD <= TERM_YMD"
+    severity: hard
+
+  # 외환
+  - table: FXC003L
+    id: fxc003l_date_01
+    expr: "REQ_YMD <= SETTLE_YMD"
+    note: "송금 신청 ≤ 결제일"
+    severity: hard
+
+  - table: FXC021M
+    id: fxc021m_date_01
+    expr: "ISS_YMD <= EXPR_YMD"
+    note: "LC 개설 ≤ 만기"
+    severity: hard
+
+  # 전자금융 이체
+  - table: EBS001L
+    id: ebs001l_date_01
+    expr: "TRN_TS <= ETCL_JOB_TS"
+    note: "이체 시각 ≤ ETL 시각"
+    severity: hard
+
+  # 파생
+  - table: DRV001M
+    id: drv001m_date_01
+    expr: "TRADE_YMD <= MAT_YMD"
+    severity: hard
+
+# ════════════════════════════════════════════
+# 2. 금액 범위·관계 제약 (amount_bounds)
+# ════════════════════════════════════════════
+amount_rules:
+  # ── 대출 금액 제약 ──
+  - table: LNB001M
+    id: lnb001m_amt_01
+    expr: "LON_BAL >= 0"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb001m_amt_02
+    expr: "LON_BAL <= LN_AMT"
+    note: "잔액은 실행금액 이하"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb001m_amt_03
+    expr: "INT_AMT_ACCU >= 0"
+    note: "누적이자 음수 불가"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb001m_amt_04
+    expr: "LN_AMT > 0"
+    severity: hard
+
+  # ── 수신 잔액 ──
+  - table: DPG001M
+    id: dpg001m_amt_01
+    expr: "BAL >= 0"
+    note: "예금 잔액 음수 불가 (마이너스 통장 제외)"
+    severity: hard
+    exceptions: "마이너스 통장 상품 제외"
+
+  # 정기예금 만기시 잔액 > 가입금액
+  - table: DPF001M
+    id: dpf001m_amt_01
+    condition: "STATUS_CD = '02'"
+    expr: "BAL >= INIT_AMT"
+    note: "만기 도래 정기예금 잔액 ≥ 초기 가입금액 (이자 가산)"
+    severity: soft
+
+  # ── 연체 금액 (cross_table) ──
+  - table: LNO001M
+    id: lno001m_amt_01
+    expr: "OVDU_PRN_AMT >= 0 AND OVDU_INT_AMT >= 0"
+    severity: hard
+
+  - table: LNO001M
+    id: lno001m_amt_02
+    cross_table: LNB001M
+    expr: "LNO001M.OVDU_PRN_AMT <= LNB001M.LON_BAL"
+    join_key: LON_NO
+    note: "연체 원금 ≤ 대출 잔액"
+    severity: hard
+
+  # ── 대손 처리 ──
+  - table: LNO007L
+    id: lno007l_amt_01
+    cross_table: LNB001M
+    expr: "LNO007L.WRITE_OFF_AMT <= LNB001M.LON_BAL"
+    join_key: LON_NO
+    note: "상각액 ≤ 대출 잔액"
+    severity: hard
+
+  - table: LNO008M
+    id: lno008m_amt_01
+    cross_table: LNO007L
+    expr: "LNO008M.RECOV_AMT <= LNO007L.WRITE_OFF_AMT"
+    join_key: LON_NO
+    note: "회수금 ≤ 상각금"
+    severity: hard
+
+  # ── 카드 한도·사용액 ──
+  - table: CLN002M
+    id: cln002m_amt_01
+    expr: "CARD_LIM > 0"
+    severity: hard
+
+  - table: CLN002M
+    id: cln002m_amt_02
+    expr: "CUR_USE_AMT <= CARD_LIM"
+    note: "현재 사용액 ≤ 한도"
+    severity: hard
+
+  # 카드 매출 금액
+  - table: SLE001L
+    id: sle001l_amt_01
+    expr: "TRN_AMT > 0"
+    severity: hard
+
+  - table: SLE001L
+    id: sle001l_amt_02
+    condition: "TRN_TCD = '03'"  # 할부
+    expr: "INSTL_MTH BETWEEN 2 AND 36"
+    note: "할부 2~36개월"
+    severity: hard
+
+  # ── 퇴직연금 ──
+  - table: RPC008M
+    id: rpc008m_amt_01
+    expr: "ANNUAL_PAID <= 9000000"
+    note: "연금 납입 한도 연 900만원 (세액공제 대상)"
+    severity: hard
+
+  - table: RPD002M
+    id: rpd002m_amt_01
+    expr: "ANNUAL_PAID <= 18000000"
+    note: "IRP 납입 연 1,800만원 한도"
+    severity: hard
+
+  # ── 외환 ──
+  - table: FXC017L
+    id: fxc017l_amt_01
+    condition: "RPT_TCD = '04'"
+    expr: "USD_AMT >= 5000"
+    note: "지급수단 신고는 USD 5,000 이상"
+    severity: hard
+
+  # ── 이체 한도 ──
+  - table: EBB011M
+    id: ebb011m_amt_01
+    expr: "DAY_LIM >= TRN_LIM"
+    note: "일한도 ≥ 1회한도"
+    severity: hard
+
+  - table: EBB011M
+    id: ebb011m_amt_02
+    condition: "TEMP_UP_LIM IS NOT NULL"
+    expr: "TEMP_UP_LIM >= DAY_LIM"
+    note: "임시 증액 ≥ 일반 한도"
+    severity: hard
+
+# ════════════════════════════════════════════
+# 3. 상태 전이 제약 (status_transitions)
+# ════════════════════════════════════════════
+status_rules:
+  # ── 계좌 상태 ──
+  - table: DPG001M
+    id: dpg001m_stat_01
+    condition: "LDGR_SCD = '04'"  # 해지
+    requires: "CLS_YMD IS NOT NULL"
+    note: "해지 계좌는 해지일 필수"
+    severity: hard
+
+  - table: DPG001M
+    id: dpg001m_stat_02
+    condition: "LDGR_SCD IN ('01','02','03')"  # 정상/휴면직전/휴면
+    requires: "CLS_YMD IS NULL"
+    note: "활성 계좌는 해지일 NULL"
+    severity: hard
+
+  - table: DPG001M
+    id: dpg001m_stat_03
+    condition: "LDGR_SCD = '04'"  # 해지
+    requires: "BAL = 0"
+    note: "해지 계좌 잔액 0"
+    severity: hard
+
+  # ── 대출 상태 ──
+  - table: LNB001M
+    id: lnb001m_stat_01
+    condition: "STATUS_CD = '05'"  # 완제
+    requires: "LON_BAL = 0 AND FULL_RPY_YMD IS NOT NULL"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb001m_stat_02
+    condition: "STATUS_CD IN ('01','02','03','04')"  # 정상/연체/상각/소송
+    requires: "FULL_RPY_YMD IS NULL"
+    severity: hard
+
+  # ── 카드 상태 ──
+  - table: CLN002M
+    id: cln002m_stat_01
+    condition: "CARD_STAT_CD = '04'"  # 해지
+    requires: "CNCL_YMD IS NOT NULL AND CUR_USE_AMT = 0"
+    severity: hard
+
+  - table: CLN002M
+    id: cln002m_stat_02
+    condition: "CARD_STAT_CD = '02'"  # 정지
+    requires: "STOP_YMD IS NOT NULL"
+    severity: hard
+
+  # ── 연체 상태 ──
+  - table: LNO001M
+    id: lno001m_stat_01
+    condition: "STATUS_CD = '99'"  # 정상화
+    requires: "OVDU_END_YMD IS NOT NULL AND OVDU_PRN_AMT = 0"
+    note: "정상화된 연체는 종료일 + 원금 0"
+    severity: hard
+
+  # ── 퇴직연금 수령 ──
+  - table: RPC013L
+    id: rpc013l_stat_01
+    condition: "PAY_STAT = '02'"  # 지급중
+    requires: "PAY_STRT_YMD IS NOT NULL"
+    severity: hard
+
+  # ── LC 상태 ──
+  - table: FXC021M
+    id: fxc021m_stat_01
+    condition: "LC_STATUS = '04'"  # 취소
+    requires: "ISS_YMD IS NOT NULL AND EXPR_YMD >= ISS_YMD"
+    severity: hard
+
+# ════════════════════════════════════════════
+# 4. 크로스 테이블 합산 정합성 (cross_table_consistency)
+# ════════════════════════════════════════════
+cross_table_rules:
+  # ── 정기예금 잔액 정합성 ──
+  - id: dpf_bal_consistency
+    tables: [DPF001M, DPF003P]
+    expr: "DPF001M.BAL = (SELECT MAX(BAL) FROM DPF003P WHERE ACN = DPF001M.ACN AND BASE_YMD = (SELECT MAX(BASE_YMD) FROM DPF003P WHERE ACN = DPF001M.ACN))"
+    note: "정기예금 현잔액 = 일별잔액 최신값"
+    severity: hard
+
+  # ── 대출 잔액 vs 연체 원금 ──
+  - id: lnb_ovdue_consistency
+    tables: [LNB001M, LNO001M]
+    expr: "LNB001M.LON_BAL = LNO001M.OVDU_PRN_AMT + LNB001M.NORMAL_BAL"
+    note: "대출 잔액 = 연체 원금 + 정상 잔액"
+    severity: soft
+    cross_ref: "LON_NO"
+
+  # ── 카드 회원 vs 카드 ──
+  - id: cln_member_card_consistency
+    tables: [CLN001M, CLN002M]
+    expr: "COUNT(CLN002M.CARD_NO_ALTR WHERE CLN002M.MBR_NO = CLN001M.MBR_NO) >= 1"
+    condition: "CLN001M.MBR_STAT_CD = '01'"
+    note: "활성 회원은 카드 1장 이상"
+    severity: soft
+
+  # ── STR/CTR 이관 ──
+  - id: str_aml_consistency
+    tables: [CSK008L, AML002L]
+    expr: "CSK008L.ESCL_AML_YN = 'Y' → EXISTS (AML002L WHERE AML002L.SRC_CSK_STR_NO = CSK008L.STR_NO)"
+    note: "CSK에서 FIU 이관 플래그 Y면 AML에 이관 레코드 있어야"
+    severity: hard
+
+  - id: ctr_aml_consistency
+    tables: [CSK009L, AML003L]
+    expr: "CSK009L.ESCL_AML_YN = 'Y' → EXISTS (AML003L WHERE AML003L.SRC_CSK_CTR_NO = CSK009L.CTR_NO)"
+    severity: hard
+
+  # ── FDS → 사기피해 ──
+  - id: fds_fraud_consistency
+    tables: [EBS021M, EBS022M]
+    expr: "EBS021M.VERDICT_CD = '02' (부정확정) → 일부 비율 EBS022M에 SRC_FDS_NO로 연계"
+    note: "FDS 확정건 중 일부가 사기피해 신고로 이관"
+    severity: soft
+
+  # ── 마트 집계 정합성 ──
+  - id: mvp_bal_consistency
+    tables: [DPG001M, MVP001S]
+    expr: "SUM(DPG001M.BAL WHERE MNGM_BRCD = X) = MVP001S.EOD_BAL WHERE BRCD = X AND BASE_YMD = Y"
+    note: "부점별 수신 마트 잔액 = 원장 잔액 합"
+    severity: hard
+
+  # ── 여신 마트 정합성 ──
+  - id: mvn_bal_consistency
+    tables: [LNB001M, MVN001S]
+    expr: "SUM(LNB001M.LON_BAL WHERE EXEC_BRCD = X) = MVN001S.EOD_BAL WHERE BRCD = X"
+    severity: hard
+
+  # ── 카드 포인트 ──
+  - id: card_point_consistency
+    tables: [CLN002M, SLE001L, CLN030M]
+    expr: "CLN030M.POINT_BAL = SUM(earned_points) - SUM(used_points) from ledger"
+    note: "포인트 잔액 = 적립 - 사용"
+    severity: hard
+
+# ════════════════════════════════════════════
+# 5. 코드 값 제약 (code_value_constraints)
+# ════════════════════════════════════════════
+code_rules:
+  # 고객 구분
+  - table: CSC001M
+    id: csc_corp_01
+    condition: "CST_TCD = '03'"  # 법인
+    requires: "EXISTS (CSC002M WHERE CSN = CSC001M.CSN)"
+    note: "법인 고객은 CSC002M에 상세 있어야"
+    severity: hard
+
+  - table: CSC001M
+    id: csc_minor_01
+    condition: "BRTH_YMD > DATE_SUB(CURRENT_DATE, INTERVAL 19 YEAR)"
+    requires: "CST_TCD = '02'"  # 미성년
+    severity: hard
+
+  # 대출 유형-상품 연계
+  - table: LNB001M
+    id: lnb_type_prod_01
+    condition: "LON_TCD = '01'"  # 주담대
+    requires: "EXISTS (LNH001M WHERE LON_NO = LNB001M.LON_NO)"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb_type_prod_02
+    condition: "LON_TCD = '02'"  # 전세
+    requires: "EXISTS (LNJ001M WHERE LON_NO = LNB001M.LON_NO)"
+    severity: hard
+
+  - table: LNB001M
+    id: lnb_type_prod_03
+    condition: "LON_TCD = '03'"  # 신용
+    requires: "EXISTS (LNC001M WHERE LON_NO = LNB001M.LON_NO)"
+    severity: hard
+
+  # 담보대출 → 담보 필수
+  - table: LNH001M
+    id: lnh_collateral_01
+    requires: "EXISTS (LNM001M WHERE LON_NO = LNH001M.LON_NO)"
+    note: "주담대는 담보 필수"
+    severity: hard
+
+  # 카드 회원 유형
+  - table: CLN001M
+    id: cln_type_01
+    condition: "MBR_TCD IN ('01','02','05')"  # 개인
+    requires: "NOT EXISTS (CSC002M WHERE CSN = CLN001M.CSN AND CORP_TCD IS NOT NULL)"
+    severity: soft
+
+  # 연체 단계
+  - table: LNO001M
+    id: lno_stage_01
+    condition: "OVDU_DAYS >= 90"
+    requires: "STATUS_CD IN ('02','03')"  # 연체 or 상각
+    severity: hard
+
+# ════════════════════════════════════════════
+# 6. 카디널리티 절대 제약 (hard cardinality limits)
+# ════════════════════════════════════════════
+cardinality_hard_limits:
+  # 고객당 주거래은행 1개만
+  - parent: CSC001M
+    child: CSC034M
+    condition: "MAIN_BANK_YN = 'Y'"
+    max: 1
+    note: "주거래 설정은 1개"
+    severity: hard
+
+  # 카드 1장당 활성 상태 1개
+  - table: CLN002M
+    unique_cols: [CARD_NO_ALTR, CARD_STAT_CD]
+    condition: "CARD_STAT_CD = '01'"
+    max_count: 1
+    severity: hard
+
+  # 계좌 PK 유일성
+  - table: DPG001M
+    unique_cols: [ACN]
+    severity: hard
+
+  # 고객 전행 CSN 유일
+  - table: CSC001M
+    unique_cols: [CSN]
+    severity: hard
+
+# ════════════════════════════════════════════
+# 7. 파생값 관계 (computed_relations)
+# ════════════════════════════════════════════
+computed_rules:
+  # NPL = stage2 + stage3 잔액
+  - tables: [RSK022M, MVN009S]
+    id: npl_computed
+    expr: "MVN009S.NPL_BAL = SUM(RSK022M.BAL WHERE STAGE >= 2)"
+    severity: hard
+
+  # CIR = 비용/수익 (재무)
+  - table: FNA029M
+    id: cir_computed
+    expr: "CIR = COST / REVENUE"
+    severity: hard
+
+  # 적립비율 = PlanAsset / PBO
+  - table: RPI003M
+    id: funding_ratio_computed
+    expr: "FUND_RTO = PLAN_ASSET / PROJ_BEN_OBLIG * 100"
+    severity: hard
+
+  # 이체한도 임시 = 일한도 * 1.5 ~ 2.0
+  - table: EBB011M
+    id: temp_lim_range
+    condition: "TEMP_UP_LIM IS NOT NULL"
+    expr: "TEMP_UP_LIM BETWEEN DAY_LIM * 1.2 AND DAY_LIM * 3.0"
+    severity: soft
+
+# ════════════════════════════════════════════
+# 8. V2 품질 결함 허용 비율 (quality_defects)
+# ════════════════════════════════════════════
+quality_defect_tolerances:
+  - defect_type: missing_fk
+    max_ratio: 0.005
+    note: "FK 참조 결손 최대 0.5%"
+
+  - defect_type: date_inconsistency
+    max_ratio: 0.002
+    note: "날짜 순서 위반 최대 0.2% (의도적)"
+
+  - defect_type: amount_negative
+    max_ratio: 0.001
+    note: "음수 금액 0.1%"
+
+  - defect_type: code_unknown
+    max_ratio: 0.003
+    note: "enum 외 코드값 0.3%"
+
+  - defect_type: duplicate_row
+    max_ratio: 0.002
+    tables_applied: [CSC006M, DPG022L, EBS001L]
+
+# ════════════════════════════════════════════
+# 메타 정보
+# ════════════════════════════════════════════
+meta:
+  total_rules: 70  # 대략 (실제는 아래 자동 집계)
+  categories:
+    - date_order_rules
+    - amount_rules
+    - status_rules
+    - cross_table_rules
+    - code_rules
+    - cardinality_hard_limits
+    - computed_rules
+    - quality_defect_tolerances
+  coverage:
+    domains_covered: [CSC, CSI, CSK, DPG, DPF, DPD, DPB, DPN, DPY,
+                      LNB, LNH, LNJ, LNC, LNK, LNW, LNO, LNM, LNG,
+                      CLN, SLE,
+                      RPC, RPD, RPI, TRS, FND, DRV,
+                      FXC, FXR, FXD,
+                      EBB, EBM, EBS, EBA, EBO,
+                      RSK, AML, MKT, FNA, MVP, MVN]
+  usage_notes:
+    - "severity=hard 규칙은 시딩 시 반드시 만족"
+    - "severity=soft 규칙은 권고 수준 (95% 이상 만족 권장)"
+    - "quality_defect 카테고리는 의도적 위반 허용 (v2 특성)"
+    - "cross_table 규칙은 시딩 후 SQL 검증 필수"
+    - "computed 규칙은 시딩 시 자동 계산하거나 시딩 후 UPDATE"

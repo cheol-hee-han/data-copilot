@@ -2,7 +2,7 @@
   "version": "1.0",
   "created": "2026-03-29",
   "description": "시딩된 실제 데이터 기반 NL-to-SQL 테스트 질의 — 난이도별 10개 × 3등급 = 30건",
-  "target": "Docker 데이터소스(PG/ES/Qdrant/MongoDB) + LLM API",
+  "target": "Docker 데이터소스(PG/Qdrant/MongoDB) + LLM API",
   "total_cases": 30,
   "seeded_tables": {
     "고객": {
@@ -13,8 +13,9 @@
       },
       "TB_ADW_CSC102H": {
         "alt_name": "고객이력",
-        "rows": 500,
-        "pk": "EDPS_CSN + STD_DT"
+        "rows": 1500,
+        "pk": "EDPS_CSN + STD_DT",
+        "note": "고객당 3개월 스냅샷(M-2, M-1, M-0), ~15% 고객 등급 변동 포함"
       },
       "TB_ADW_CSP103M": {
         "alt_name": "고객프로필-마케팅",
@@ -147,7 +148,7 @@
           "id": "EASY-01",
           "query": "전체 고객 수 알려줘",
           "expected_tables": ["TB_ADW_CSC101M"],
-          "expected_sql_pattern": "SELECT COUNT(*) FROM biz_schema.TB_ADW_CSC101M",
+          "expected_sql_pattern": "SELECT COUNT(*) FROM ADWOWN.TB_ADW_CSC101M",
           "focus": "단순 COUNT, 조건 없음",
           "challenge": "없음 — 가장 기본적인 질의"
         },
@@ -155,9 +156,9 @@
           "id": "EASY-02",
           "query": "현재 연체 중인 대출 건수",
           "expected_tables": ["TB_ADW_LNB301M"],
-          "expected_sql_pattern": "SELECT COUNT(*) ... WHERE OVDU_GRD_CD >= '03' OR OVDU_DY_CN > 0",
-          "focus": "연체 판정 기준 코드값 매핑",
-          "challenge": "OVDU_GRD_CD 코드 체계 파악 필요"
+          "expected_sql_pattern": "SELECT COUNT(*) ... WHERE OVDU_GRD_CD IS NOT NULL OR OVDU_DY_CN > 0",
+          "focus": "연체 판정 기준 코드값 매핑 (OVDU_GRD_CD: A~E 알파벳 등급)",
+          "challenge": "OVDU_GRD_CD 코드 체계 파악 필요 — 코드값은 A(정상)/B(요주의)/C(고정)/D(회수의문)/E(추정손실)"
         },
         {
           "id": "EASY-03",
@@ -171,7 +172,7 @@
           "id": "EASY-04",
           "query": "지점이 몇 개야?",
           "expected_tables": ["TB_ADW_COM001M"],
-          "expected_sql_pattern": "SELECT COUNT(*) FROM biz_schema.TB_ADW_COM001M",
+          "expected_sql_pattern": "SELECT COUNT(*) FROM ADWOWN.TB_ADW_COM001M",
           "focus": "마스터 테이블 단순 카운트",
           "challenge": "없음"
         },
@@ -211,17 +212,17 @@
           "id": "EASY-09",
           "query": "퇴직연금 총 적립금 합계",
           "expected_tables": ["TB_ADW_PNB904P"],
-          "expected_sql_pattern": "SELECT SUM(TOT_BAL_AMT) FROM biz_schema.TB_ADW_PNB904P",
+          "expected_sql_pattern": "SELECT SUM(TOT_BAL_AMT) FROM ADWOWN.TB_ADW_PNB904P",
           "focus": "SUM 단순 집계",
           "challenge": "없음"
         },
         {
           "id": "EASY-10",
-          "query": "이번 달 거래 건수 알려줘",
+          "query": "3월 거래 건수 알려줘",
           "expected_tables": ["TB_ADW_TRX701L"],
-          "expected_sql_pattern": "SELECT COUNT(*) ... WHERE TR_DT >= '2026-03-01'",
-          "focus": "날짜 필터 + 파티션 테이블",
-          "challenge": "이번 달 → 날짜 범위 변환"
+          "expected_sql_pattern": "SELECT COUNT(*) ... WHERE TR_DT >= '2026-03-01' AND TR_DT < '2026-04-01'",
+          "focus": "날짜 필터",
+          "challenge": "월 지정 → 날짜 범위 변환 (시딩 데이터 범위: 2025-04 ~ 2026-03)"
         }
       ]
     },
@@ -268,7 +269,7 @@
           "expected_join": "EDPS_CSN",
           "expected_sql_pattern": "JOIN + WHERE 연체조건 + GROUP BY CUS_GRD_CD",
           "focus": "연체 판정 + 등급 분포",
-          "challenge": "연체 판정 기준 (OVDU_GRD_CD or OVDU_DY_CN), DISTINCT 고객"
+          "challenge": "연체 판정 기준 (OVDU_GRD_CD A~E 알파벳 or OVDU_DY_CN > 0), DISTINCT 고객"
         },
         {
           "id": "NORM-05",
@@ -317,12 +318,12 @@
         },
         {
           "id": "NORM-09",
-          "query": "지난달 지점별 손익 현황 보여줘",
+          "query": "2월 지점별 손익 현황 보여줘",
           "expected_tables": ["TB_ADW_FIN1306S", "TB_ADW_COM001M"],
           "expected_join": "BLNG_BRCD",
           "expected_sql_pattern": "JOIN + WHERE BASE_YM = '202602' + PIVOT or GROUP BY",
           "focus": "손익항목 피벗 + 지점명 조인",
-          "challenge": "PL_ITEM_CD 피벗 (NII, NFI, OPEX 등), 지난달 날짜 계산"
+          "challenge": "PL_ITEM_CD 피벗 (NII, NFI, OPEX 등), 시딩 데이터 BASE_YM 범위: 202507~202603"
         },
         {
           "id": "NORM-10",
@@ -347,8 +348,8 @@
           "expected_tables": ["TB_ADW_LNB301M"],
           "expected_sql_pattern": "CTE: 월별 SUM(OVDU_AMT) / SUM(LN_BAL_AMT) × 100",
           "focus": "계수산출식 분해 (연체율 = 연체원금/여신잔액×100)",
-          "challenge": "Neo4j 온톨로지에서 연체율 산출식 조회 → 분자/분모 매핑 → 월별 집계",
-          "type_challenges": ["TYPE-2: OVDU_GRD_CD 미정의 코드(0A) 처리"]
+          "challenge": "연체율 산출식(연체원금/여신잔액×100) 분자/분모 매핑 → 월별 집계. Qdrant 업무매뉴얼 또는 MongoDB 용어사전에서 산출식 확인",
+          "type_challenges": ["TYPE-2: OVDU_GRD_CD 미정의 코드(F/Z) 처리"]
         },
         {
           "id": "HARD-02",
@@ -361,7 +362,7 @@
             "TB_ADW_INS803M"
           ],
           "expected_sql_pattern": "다중 LEFT JOIN 또는 UNION ALL + SUM per product type",
-          "focus": "5개 상품 테이블 통합 — 예금+펀드+보험 = 자산, 대출 = 부채",
+          "focus": "5개 상품 테이블 통합 — 예금(BAL_AMT)+펀드(BAL_AMT)+보험(INS_AMT, 보험금액) = 자산, 대출(LN_BAL_AMT) = 부채",
           "challenge": "포트폴리오 개념 해석, 자산/부채 구분, 순자산 계산",
           "type_challenges": [
             "TYPE-4: DEP201P(T+0) vs DEP202S(T+1) 선택",
@@ -422,12 +423,13 @@
           "query": "고객 이탈 위험군 뽑아줘",
           "expected_tables": [
             "TB_ADW_CSC101M",
-            "TB_ADW_TRX701L",
-            "TB_ADW_DEP201P"
+            "TB_ADW_DEP201P",
+            "TB_ADW_TRX701L"
           ],
+          "expected_join": "CSC101M↔DEP201P: EDPS_CSN, DEP201P↔TRX701L: ACN (간접 조인)",
           "expected_sql_pattern": "거래빈도 감소 + 잔액 감소 + 등급 하락 복합 조건",
           "focus": "이탈 위험의 업무적 정의 추론 — 명확한 정의 없음",
-          "challenge": "clarification 또는 다중 조건 조합 (최근 3개월 거래 0건, 잔액 50% 이하 감소 등)",
+          "challenge": "clarification 또는 다중 조건 조합. TRX701L은 ACN 기준이므로 DEP201P를 경유해야 고객(EDPS_CSN)과 연결됨",
           "type_challenges": [
             "TYPE-4: CSC101M vs CSC102H 이력 비교 필요할 수 있음"
           ]
@@ -451,9 +453,9 @@
             "TB_ADW_DEP201P",
             "TB_ADW_LNB301M"
           ],
-          "expected_sql_pattern": "이력 비교(CSC102H self-join 또는 LAG) + 원인 추정(잔액 감소, 연체 발생 등)",
-          "focus": "이력 테이블 활용 + 원인 추론",
-          "challenge": "등급 변동 감지(이전 vs 현재), 원인은 분석 영역이라 SQL만으로 한계",
+          "expected_sql_pattern": "이력 비교(CSC102H self-join 또는 LAG OVER(PARTITION BY EDPS_CSN ORDER BY STD_DT)) + 원인 추정(잔액 감소, 연체 발생 등)",
+          "focus": "이력 테이블 활용 + 원인 추론 (CSC102H에 3개월분 스냅샷 존재)",
+          "challenge": "등급 변동 감지(이전 vs 현재 STD_DT 비교), 원인은 분석 영역이라 SQL만으로 한계",
           "type_challenges": [
             "TYPE-1: JOIN_DT vs RGST_DT 컬럼명 불일치",
             "TYPE-4: CUS_GRD_CD vs MKT_GRD_CD 기준 상이"
@@ -470,7 +472,7 @@
           "expected_join": "BLNG_BRCD",
           "expected_sql_pattern": "CTE: 지점별 SUM(LN_BAL_AMT) / SUM(BAL_AMT) × 100",
           "focus": "계수산출식 (예대율 = 여신잔액/수신잔액×100)",
-          "challenge": "Neo4j 예대율 산출식 조회 → 분자(여신)/분모(수신) 매핑 → 지점별 집계",
+          "challenge": "예대율 산출식(여신잔액/수신잔액×100) 분자(LN_BAL_AMT)/분모(BAL_AMT) 매핑 → 지점별 집계. Qdrant 업무매뉴얼에서 산출식 확인",
           "type_challenges": [
             "TYPE-4: DEP201P(T+0) vs DEP202S(T+1) 어느 잔액 기준?"
           ]
@@ -488,7 +490,7 @@
   },
   "notes": [
     "HARD 케이스 중 HARD-05, HARD-07은 clarification 분기가 예상되는 의도적 모호 질의",
-    "TYPE-2 불완전 메타: 시딩 데이터에 ~3% 미정의 코드가 포함되어 있으나 ES/MongoDB 코드 메타에는 미등록",
+    "TYPE-2 불완전 메타: 시딩 데이터에 ~3% 미정의 코드가 포함되어 있으나 MongoDB 코드 메타에는 미등록",
     "TYPE-4 값 불일치: T+0/T+1 테이블, 승인/실행 금액, 원금/평가액 차이가 테스트 포인트",
     "모든 금액 컬럼은 원(KRW) 단위, 환율은 원/외화 단위"
   ]

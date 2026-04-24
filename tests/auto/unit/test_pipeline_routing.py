@@ -139,10 +139,10 @@ class TestRouteAfterIntentClassifier:
         state = _make_state(intent=IntentType.DATA_EXTRACTION)
         result = _route_after_intent_classifier(state)
 
-        passed = result in ("normalize_query", "reasoning_preparer")
+        passed = result in ("query_normalizer", "reasoning_preparer")
         log_test_case(logger, "test_data_extraction", "DATA_EXTRACTION",
-                      "normalize_query or reasoning_preparer", result, passed)
-        assert result in ("normalize_query", "reasoning_preparer")
+                      "query_normalizer or reasoning_preparer", result, passed)
+        assert result in ("query_normalizer", "reasoning_preparer")
 
     def test_pending_signals_takes_priority_over_error(self):
         """pending_signals는 ERROR 상태보다 우선한다."""
@@ -232,7 +232,6 @@ class TestRouteAfterReadinessGate:
         ("EXPLORING", "explore"),
         ("GENERATING", "generate_sql"),
         ("REPLANNING", "recovery"),
-        ("VERIFYING", "ask_user"),
         ("DONE", "conclude_failure"),
     ])
     def test_phase_routing(self, phase: str, expected_route: str):
@@ -606,18 +605,6 @@ class TestRouteAfterResultFinalizer:
                       "CANCELLED + validated_sql", "error_end", result, passed)
         assert result == "error_end"
 
-    def test_pending_signals_routes_to_clarification(self):
-        """pending_signals가 있으면 clarification_handler로 라우팅된다."""
-        from src.agents.graph.pipeline import _route_after_result_finalizer
-
-        state = _make_state(pending_signals=[_make_signal()])
-        result = _route_after_result_finalizer(state)
-
-        passed = result == "clarification_handler"
-        log_test_case(logger, "test_finalizer_pending_signals",
-                      "pending_signals", "clarification_handler", result, passed)
-        assert result == "clarification_handler"
-
     def test_error_message_routes_to_error_end(self):
         """error_message가 있으면 error_end로 라우팅된다."""
         from src.agents.graph.pipeline import _route_after_result_finalizer
@@ -630,18 +617,18 @@ class TestRouteAfterResultFinalizer:
                       "error_message", "error_end", result, passed)
         assert result == "error_end"
 
-    def test_validated_sql_routes_to_execute_sql(self):
-        """validated_sql이 있으면 execute_sql로 라우팅된다."""
+    def test_validated_sql_routes_to_sql_executor(self):
+        """validated_sql이 있으면 sql_executor로 라우팅된다."""
         from src.agents.graph.pipeline import _route_after_result_finalizer
 
         reason = _make_reason(validated_sql="SELECT 1 FROM dual")
         state = _make_state(reason=reason)
         result = _route_after_result_finalizer(state)
 
-        passed = result == "execute_sql"
+        passed = result == "sql_executor"
         log_test_case(logger, "test_finalizer_validated_sql",
-                      "validated_sql present", "execute_sql", result, passed)
-        assert result == "execute_sql"
+                      "validated_sql present", "sql_executor", result, passed)
+        assert result == "sql_executor"
 
     def test_no_sql_no_error_routes_to_error_end(self):
         """validated_sql도 error_message도 없으면 error_end로 라우팅된다."""
@@ -709,24 +696,42 @@ class TestRouteAfterExecution:
                       "CANCELLED", "error_end", result, passed)
         assert result == "error_end"
 
-    def test_data_analysis_intent_routes_to_analyze_data(self):
-        """DATA_ANALYSIS 의도는 analyze_data로 라우팅된다."""
+    def test_data_analysis_intent_routes_to_analyzer(self):
+        """DATA_ANALYSIS + needs_analyzer=True 의도는 analyzer로 라우팅된다."""
         from src.agents.graph.pipeline import _route_after_execution
         from src.agents.state.state import IntentType, QueryStatus
 
         state = _make_state(
             intent=IntentType.DATA_ANALYSIS,
             status=QueryStatus.EXECUTED,
+            needs_analyzer=True,
         )
         result = _route_after_execution(state)
 
-        passed = result == "analyze_data"
+        passed = result == "analyzer"
         log_test_case(logger, "test_exec_analysis",
-                      "DATA_ANALYSIS", "analyze_data", result, passed)
-        assert result == "analyze_data"
+                      "DATA_ANALYSIS+needs_analyzer", "analyzer", result, passed)
+        assert result == "analyzer"
 
-    def test_data_extraction_intent_routes_to_format_response(self):
-        """DATA_EXTRACTION 의도는 format_response로 라우팅된다."""
+    def test_data_analysis_without_needs_analyzer_routes_to_visualizer(self):
+        """DATA_ANALYSIS이지만 needs_analyzer=False면 visualizer로 스킵 라우팅된다 (opt-in)."""
+        from src.agents.graph.pipeline import _route_after_execution
+        from src.agents.state.state import IntentType, QueryStatus
+
+        state = _make_state(
+            intent=IntentType.DATA_ANALYSIS,
+            status=QueryStatus.EXECUTED,
+            needs_analyzer=False,
+        )
+        result = _route_after_execution(state)
+
+        passed = result == "visualizer"
+        log_test_case(logger, "test_exec_analysis_optin_false",
+                      "DATA_ANALYSIS+needs_analyzer=False", "visualizer", result, passed)
+        assert result == "visualizer"
+
+    def test_data_extraction_intent_routes_to_visualizer(self):
+        """DATA_EXTRACTION 의도는 visualizer로 라우팅된다."""
         from src.agents.graph.pipeline import _route_after_execution
         from src.agents.state.state import IntentType, QueryStatus
 
@@ -736,10 +741,10 @@ class TestRouteAfterExecution:
         )
         result = _route_after_execution(state)
 
-        passed = result == "format_response"
+        passed = result == "visualizer"
         log_test_case(logger, "test_exec_extraction",
-                      "DATA_EXTRACTION", "format_response", result, passed)
-        assert result == "format_response"
+                      "DATA_EXTRACTION", "visualizer", result, passed)
+        assert result == "visualizer"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -751,10 +756,7 @@ class TestRouteAfterClarify:
 
     @pytest.mark.parametrize("source_node", [
         "intent_classifier",
-        "normalize_query",
-        "sql_generator",
-        "readiness_gate",
-        "result_finalizer",
+        "query_normalizer",
     ])
     def test_valid_source_node_returns_to_it(self, source_node: str):
         """유효한 source_node로 올바르게 복귀한다."""
@@ -870,12 +872,12 @@ class TestRouteAfterClarify:
 
         signals = [
             _make_signal(
-                source_node="normalize_query",
+                source_node="intent_classifier",
                 turn_id="turn-x",
                 answer="첫 응답",
             ),
             _make_signal(
-                source_node="sql_generator",
+                source_node="query_normalizer",
                 turn_id="turn-x",
                 answer="두 번째 응답",
             ),
@@ -886,13 +888,13 @@ class TestRouteAfterClarify:
         )
         result = _route_after_clarify(state)
 
-        passed = result == "sql_generator"
+        passed = result == "query_normalizer"
         log_test_case(
             logger, "test_clarify_latest_signal",
-            "2개 시그널, 마지막=sql_generator",
-            "sql_generator", result, passed,
+            "2개 시그널, 마지막=query_normalizer",
+            "query_normalizer", result, passed,
         )
-        assert result == "sql_generator"
+        assert result == "query_normalizer"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1059,7 +1061,7 @@ class TestBuildResult:
 
             def record_sql(self, data): pass
             def end_run(self, **kwargs): pass
-            def save(self, **kwargs): pass
+            def save(self, **kwargs): return []
 
         return _FakeHandler()
 

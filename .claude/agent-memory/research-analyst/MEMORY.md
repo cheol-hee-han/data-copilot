@@ -19,3 +19,5 @@
 - [project_depends_on_wave_scheduling.md](project_depends_on_wave_scheduling.md) — depends_on+wave scheduling 패턴 확정 (2026-04-04): LLMCompiler(ICML 2024)가 정식 선례, LangGraph 공식은 flat List[str]만 제공, Data Copilot 권고=패턴 A, 보고서 위치 포함
 - [project_langgraph_tool_node_patterns.md](project_langgraph_tool_node_patterns.md) — LangGraph tool-as-node 패턴 확정 (2026-04-04): 단일 ToolNode가 공식 권장, Data Copilot은 커스텀 노드(State 직접 갱신), ToolNode v1/v2 차이, 보고서 위치 포함
 - [project_conversation_history.md](project_conversation_history.md) — PostgreSQL 대화 이력 하이브리드 2-계층 확정 (2026-04-05): Checkpointer BYTEA 불투명→별도 JSONB 테이블 필수, conversation_turns 월별파티션+audit.agent_actions INSERT-only RLS, 보고서 위치 포함
+- [project_multiturn_context_management.md](project_multiturn_context_management.md) — LangGraph+NL2SQL 멀티턴 컨텍스트 관리 (2026-04-16): TurnSnapshot 패턴+Dual-Channel State 권고, CoE-SQL/Track-SQL 근거, observation masking이 LLM summarization보다 우월
+- [project_continue_orchestrator.md](project_continue_orchestrator.md) — CONTINUE 오케스트레이터 노드 설계 (2026-04-16): 5개 라우팅 카테고리, SParC 4종 턴 관계 분류, CoE-SQL 편집 체인 기준, LangGraph Command 패턴

@@ -62,7 +62,9 @@ def _connect(conninfo: str):
 
 IMPERFECTION_RATE = 0.03  # TYPE-2: 약 3%에 미정의 코드값 삽입
 
-TODAY = date(2026, 3, 21)
+# 시드 실행 시점을 기준일로 사용 — 실 런타임 CURRENT_DATE 와 일치시켜
+# `WHERE STD_DT = CURRENT_DATE` 류 LLM 생성 SQL 이 데이터에 매칭되도록 한다.
+TODAY = date.today()
 STD_DT = TODAY
 
 # PK 컬럼명 → SQL 타입 매핑 (requirements doc 섹션 4 기반)
@@ -1418,6 +1420,9 @@ def _insert_customers(cur) -> list[str]:
     TYPE-1: CSC101M / CSC102H / CSP103M 컬럼 70~80% 겹침
     TYPE-2: CUS_GRD_CD에 99/NULL (~3%)
     TYPE-4: JOIN_DT vs RGST_DT, CUS_GRD_CD vs MKT_GRD_CD
+
+    CSC102H는 3개월 스냅샷(M-2, M-1, M-0) 적재.
+    약 15% 고객은 기간 내 등급 변동이 발생하여 HARD-09 테스트 지원.
     """
     N_CUST = 500
     edps_csn_list: list[str] = []
@@ -1457,19 +1462,35 @@ def _insert_customers(cur) -> list[str]:
              gender, age_grp, cus_grd, tel, email),
         )
 
-        # CSC102H (이력 — TYPE-4: RGST_DT = JOIN_DT, 컬럼명만 다름)
+        # CSC102H (이력 — 3개월 스냅샷, TYPE-4: RGST_DT = JOIN_DT)
         addr = (
             random.choice(FAKE_ADDRS) if ctype != "02"
             else f"서울시 영등포구 여의도동 {random.randint(1, 100)}"
         )
-        cur.execute(
-            "INSERT INTO ADWOWN.TB_ADW_CSC102H "
-            "(EDPS_CSN, STD_DT, CSM, CUS_DCD, RGST_DT, BLNG_BRCD, "
-            "GNDR_DCD, AGE_GRP_CD, CUS_GRD_CD, CUS_ADR, PHONE_NO) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (csn, STD_DT, name, ctype, join_dt, brch_cd,
-             gender, age_grp, cus_grd, addr, tel),
-        )
+        # 약 15% 고객은 기간 내 등급 하락 발생 (HARD-09 테스트용)
+        has_grade_change = random.random() < 0.15
+        if has_grade_change and cus_grd and cus_grd not in ("99",):
+            grd_idx = CUST_GRADES.index(cus_grd) if cus_grd in CUST_GRADES else 2
+            prev_grd = CUST_GRADES[max(0, grd_idx - 1)]  # 이전: 더 좋은 등급
+        else:
+            prev_grd = cus_grd
+
+        history_dates = [
+            STD_DT - timedelta(days=60),  # M-2
+            STD_DT - timedelta(days=30),  # M-1
+            STD_DT,                       # M-0 (현재)
+        ]
+        for h_idx, h_dt in enumerate(history_dates):
+            # M-0은 현재 등급, M-2/M-1은 이전 등급
+            h_grd = prev_grd if h_idx < 2 else cus_grd
+            cur.execute(
+                "INSERT INTO ADWOWN.TB_ADW_CSC102H "
+                "(EDPS_CSN, STD_DT, CSM, CUS_DCD, RGST_DT, BLNG_BRCD, "
+                "GNDR_DCD, AGE_GRP_CD, CUS_GRD_CD, CUS_ADR, PHONE_NO) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (csn, h_dt, name, ctype, join_dt, brch_cd,
+                 gender, age_grp, h_grd, addr, tel),
+            )
 
         # CSP103M (마케팅 전용 — TYPE-4: MKT_GRD_CD ≠ CUS_GRD_CD)
         pref_ch = random.choice(PREF_CHANNELS)
@@ -1484,7 +1505,7 @@ def _insert_customers(cur) -> list[str]:
         edps_csn_list.append(csn)
 
     print(f"  TB_ADW_CSC101M   : {N_CUST:>5}건  (TYPE-2 미정의 등급 {type2_cnt}건)")
-    print(f"  TB_ADW_CSC102H   : {N_CUST:>5}건")
+    print(f"  TB_ADW_CSC102H   : {N_CUST * 3:>5}건  (3개월 스냅샷, ~15% 등급 변동)")
     print(f"  TB_ADW_CSP103M   : {N_CUST:>5}건")
     return edps_csn_list
 

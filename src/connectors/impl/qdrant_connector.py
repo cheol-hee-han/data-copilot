@@ -130,16 +130,25 @@ class QdrantConnector(SearchConnector):
 
         from qdrant_client import AsyncQdrantClient
 
-        self._client = AsyncQdrantClient(
+        client = AsyncQdrantClient(
             host=settings.qdrant_host,
             port=settings.qdrant_port,
             timeout=settings.qdrant_request_timeout,
         )
+
+        # 실접속 검증 — lazy client가 실제 TCP 핸드셰이크를 수행하도록 강제
+        try:
+            await client.get_collections()
+        except Exception:
+            await client.close()
+            raise
+
+        self._client = client
         logger.info("Qdrant 연결 완료")
 
-        # 임베딩 전용 단일 워커 executor 생성
+        # 임베딩 전용 executor (워커 수는 settings 로 조정; 기본 2)
         self._embed_executor = ThreadPoolExecutor(
-            max_workers=1,
+            max_workers=settings.qdrant_embed_workers,
             thread_name_prefix="qdrant-embed",
         )
 

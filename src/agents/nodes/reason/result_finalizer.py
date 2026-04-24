@@ -1,29 +1,21 @@
 """result_finalizer 노드 — 성공/실패 최종 출력 구성.
 
-작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+작성자: 한철희 / 최종수정: 2026-04-16
 
-reason 계층의 마지막 노드. 3가지 분기로 최종 출력을 구성한다:
-    1. VERIFYING (CONFLICTED 해소) → 명확화 질문 생성, 대기 상태로 전환
-    2. 성공 (validated_sql 존재) → 탐색 요약 기록
-    3. 실패 → dead_ends 기반 실패 상세 기록, QueryStatus.ERROR 설정
+reason 계층의 마지막 노드. 성공/실패를 판정하고 최종 출력을 구성한다:
+    1. 성공 (validated_sql 존재) → 탐색 요약 기록
+    2. 실패 → dead_ends 기반 실패 상세 기록, QueryStatus.ERROR 설정
 
 핵심 함수:
     - result_finalizer_node: 메인 노드 함수
     - _build_success_summary: 성공 시 탐색 과정 요약 문자열
     - _build_failure_output: 실패 시 dead_ends 기반 상세 정보
-    - _build_conflicted_signals: CONFLICTED 항목 → 명확화 AmbiguitySignal 생성
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.agents.models.clarification import (
-    AmbiguitySignal,
-    AmbiguityType,
-    ConfidenceLevel,
-    QuestionType,
-)
 from src.agents.nodes.reason.sql_generator import (
     _build_assumption_signals,
 )
@@ -36,14 +28,12 @@ from src.agents.state.state import (
     QueryStatus,
     SelectionStatus,
 )
-from src.utils.sql_formatter import format_sql_tabular
 
 
 async def result_finalizer_node(state: PipelineState) -> dict:
     """성공/실패에 따라 최종 응답을 구성한다.
 
     CANCELLED → 부분 결과 포함 취소 메시지,
-    VERIFYING(CONFLICTED 해소 필요) → 명확화 질문 생성 후 대기,
     validated_sql 존재 → 성공 요약, 나머지 → 실패 상세 기록.
     """
     reason = state.reason.model_copy(deep=True)
@@ -58,23 +48,6 @@ async def result_finalizer_node(state: PipelineState) -> dict:
         updates["formatted_response"] = reason.exploration_summary
         updates["error_message"] = reason.exploration_summary
         return updates
-
-    # ── T5: CONFLICTED → AmbiguitySignal 생성 ──
-    # 전략 §2.3 T5: CONFLICTED 항목을 AmbiguitySignal로 변환하여
-    # clarification_handler 통합 경로로 처리
-    if state.reason.phase == Phase.VERIFYING:
-        conflicted = [
-            ki for ki in reason.knowledge_items
-            if ki.status == ConfidenceStatus.CONFLICTED
-        ]
-        if conflicted:
-            signals = _build_conflicted_signals(
-                conflicted,
-            )
-            reason.final_status = FinalStatus.PENDING
-            updates["reason"] = reason
-            updates["pending_signals"] = signals
-            return updates
 
     # SQL 검증 성공
     if reason.validated_sql:
@@ -147,26 +120,22 @@ def _build_success_summary(
 def _build_failure_output(
     reason: ReasoningState,
 ) -> str:
-    """실패 시 dead_ends와 미해소 용어를 포함한 상세 정보를 조립한다."""
-    parts: list[str] = ["SQL 생성 실패"]
+    """실패 시 마지막 실패 원인만 간결하게 표시한다.
 
+    상세 추론 과정은 프로세스 요약(전구 아이콘)에서 확인 가능하므로
+    사용자 응답에는 최종 실패 사유 한 줄만 노출한다.
+    """
     if reason.dead_ends:
-        parts.append("시도한 접근 방식:")
-        for de in reason.dead_ends:
-            parts.append(f"  - `{de.failure_type.value}` {de.reason}")
+        last_reason = reason.dead_ends[-1].reason.split("\n")[0].strip()
+        if last_reason:
+            return f"요청하신 데이터를 조회하지 못했습니다.\n({last_reason})"
 
-    unresolved = reason.get_unresolved_knowledge()
-    if unresolved:
-        terms = ", ".join(ki.key for ki in unresolved)
-        parts.append(f"확인하지 못한 정보: {terms}")
+    if reason.failure_reason:
+        first_line = reason.failure_reason.split("\n")[0].strip()
+        if first_line:
+            return f"요청하신 데이터를 조회하지 못했습니다.\n({first_line})"
 
-    if reason.generated_sql and not reason.validated_sql:
-        parts.append(
-            "부분 SQL (미검증): "
-            f"{format_sql_tabular(reason.generated_sql or '')}",
-        )
-
-    return "\n".join(parts)
+    return "요청하신 데이터를 조회하기 어렵습니다."
 
 
 def _build_cancel_summary(
@@ -192,59 +161,3 @@ def _build_cancel_summary(
 
     return " ".join(parts)
 
-
-def _build_conflicted_signals(
-    conflicted_items: list,
-) -> list[AmbiguitySignal]:
-    """CONFLICTED 항목을 AmbiguitySignal 리스트로 변환한다.
-
-    output_scope CONFLICTED는 SINGLE_SELECT (선택지 제시),
-    나머지는 FREE_TEXT로 사용자 확인을 요청한다.
-    """
-    signals: list[AmbiguitySignal] = []
-
-    for ki in conflicted_items:
-        if ki.key == "output_scope":
-            signals.append(AmbiguitySignal(
-                source_node="result_finalizer",
-                ambiguity_type=AmbiguityType.INTENT,
-                decision="ASK",
-                confidence=ConfidenceLevel.LOW,
-                question=(
-                    "어떤 데이터를 뽑아야 할지 "
-                    "좀 더 구체적으로 알려주시겠어요?"
-                ),
-                question_type=QuestionType.SINGLE_SELECT,
-                options=[
-                    "기본 정보 목록 (번호, 이름 등)",
-                    "집계/요약 (건수, 합계, 평균 등)",
-                    "상세 내역 (거래일자, 금액 등)",
-                ],
-                reasoning="출력 범위가 불명확합니다",
-            ))
-        else:
-            evidence_text = ", ".join(ki.evidence)
-            signals.append(AmbiguitySignal(
-                source_node="result_finalizer",
-                ambiguity_type=AmbiguityType.CONFLICT,
-                decision="ASK",
-                confidence=ConfidenceLevel.LOW,
-                question=(
-                    f"'{ki.key}' 항목에 상충되는 "
-                    f"정보가 있습니다: {evidence_text}"
-                    "\n어떤 정보가 맞는지 "
-                    "확인해 주시겠어요?"
-                ),
-                options=ki.evidence if ki.evidence else [],
-                question_type=(
-                    QuestionType.SINGLE_SELECT
-                    if ki.evidence
-                    else QuestionType.FREE_TEXT
-                ),
-                reasoning=(
-                    f"{ki.key} 항목의 정보가 "
-                    "상충됩니다"
-                ),
-            ))
-
-    return signals

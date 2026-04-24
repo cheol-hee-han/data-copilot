@@ -228,7 +228,7 @@ class TestFormatHistoryCompatibility:
         assert "답변1" in result
 
     def test_clarification_type_filtered(self):
-        """type='clarification'인 항목은 제외된다."""
+        """type='clarification'인 항목은 [명확화] 태그와 함께 포함된다."""
         from src.services.intent_classifier import _format_history
 
         history = [
@@ -240,8 +240,9 @@ class TestFormatHistoryCompatibility:
         result = _format_history(history)
         assert "일반 질문" in result
         assert "후속 질문" in result
-        assert "명확화 질문" not in result
-        assert "명확화 답변" not in result
+        # clarification 항목은 제외되지 않고 [명확화] 태그로 구분되어 포함됨
+        assert "[명확화]" in result
+        assert "명확화 질문" in result
 
     def test_missing_type_defaults_to_query(self):
         """type 키가 없으면 기본값 'query'로 처리 (필터 통과)."""

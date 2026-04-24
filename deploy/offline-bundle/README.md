@@ -65,7 +65,7 @@ sudo bash ../deploy/offline-bundle/install.sh
 `install.sh` 가 수행하는 작업:
 1. Python 3.12 설치 여부 확인 (없으면 번들 tarball로 설치 — 선택)
 2. OS RPM 설치 (`dnf install -y ./os-packages/*.rpm`)
-3. 앱 소스를 `/opt/data-copilot/` 로 배치
+3. 앱 소스를 `/opt/bdp/data-copilot/` 로 배치
 4. `uv sync --frozen --offline --find-links ./wheels/` 로 `.venv` 재현
 5. 모델 가중치를 `EMBEDDING_MODEL_CACHE_PATH` 경로로 복사
 6. 서비스 계정·권한 설정

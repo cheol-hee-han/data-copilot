@@ -8,7 +8,7 @@
 # 필요 환경변수:
 #   PGHOST, PGPORT(옵션), PGUSER, PGPASSWORD(옵션), PGDATABASE
 #
-# 실행 위치: 프로젝트 루트(/opt/data-copilot) 에서 실행 권장
+# 실행 위치: 프로젝트 루트(/opt/bdp/data-copilot) 에서 실행 권장
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
 

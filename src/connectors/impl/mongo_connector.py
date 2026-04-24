@@ -155,11 +155,21 @@ class MongoConnector(SearchConnector):
             f"@{settings.mongo_host}:{settings.mongo_port}"
             f"/{settings.mongo_database}?authSource=admin"
         )
-        self._client = AsyncIOMotorClient(
+        client = AsyncIOMotorClient(
             connection_uri,
             serverSelectionTimeoutMS=settings.mongo_request_timeout * 1000,
         )
-        self._db = self._client[settings.mongo_database]
+        db = client[settings.mongo_database]
+
+        # 실접속 검증 — lazy client가 실제 TCP 핸드셰이크를 수행하도록 강제
+        try:
+            await db.command("ping")
+        except Exception:
+            client.close()
+            raise
+
+        self._client = client
+        self._db = db
         logger.info("MongoDB 연결 완료", database=settings.mongo_database)
 
     async def disconnect(self) -> None:

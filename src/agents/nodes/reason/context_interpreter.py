@@ -48,16 +48,20 @@ from src.agents.nodes.system_prompts import (
     CONTEXT_INTERPRETER_SYSTEM,
 )
 from src.config import settings
+from src.agents.nodes.thinking_modes import LLMNode
 from src.utils.llm import llm_call_with_parse_retry, ParseError
 from src.utils.llm.prompt import render_prompt
 from src.agents.nodes.reason.tools import _TABLE_META_TOOLS
 from src.utils.logger import get_logger
-from src.utils.truncate import truncate_trace
+from src.utils.truncate import truncate_trace, truncate_log
+from src.utils.tracker import (
+    LLMInteraction,
+    build_llm_reasoning_payload,
+    llm_failure_sentinel,
+)
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
-    record_prompt_variables,
     DECISION_TABLE_COMPARISON,
-    LLM_PROMPT_VARIABLES,
     REASONING_STEP,
 )
 
@@ -121,7 +125,9 @@ async def context_interpreter_node(state: PipelineState) -> dict:
         getattr(nq, "rewritten_query", "")
         if nq else ""
     )
-    batch_result = await _interpret_batch(
+    from src.agents.utils.handoff import normalize_handoff_note
+
+    batch_result, interactions = await _interpret_batch(
         execution_plan,
         state.preprocessed_input,
         time_slot,
@@ -129,6 +135,7 @@ async def context_interpreter_node(state: PipelineState) -> dict:
         rewritten_query=rewritten,
         session_id=state.session_id,
         turn_id=state.turn_id,
+        handoff_note=normalize_handoff_note(state.handoff_note),
     )
 
     # 1. _apply_batch_insights — step.insight 설정
@@ -208,8 +215,9 @@ async def context_interpreter_node(state: PipelineState) -> dict:
     # 6. _cleanup_rejected_knowledge — rejected 테이블 관련 KI 정리
     _cleanup_rejected_knowledge(explored_tables, knowledge_items)
 
-    # 7. _dedup_knowledge_items
-    knowledge_items.extend(batch_result.knowledge_updates)
+    # 7. LLM UPDATE 항목을 기존 KI에 병합 (id 매칭, 신규 생성 없음)
+    _merge_updates_into_items(knowledge_items, batch_result.knowledge_updates)
+    # 방어: 이론상 id 중복 없어야 하나, 과거 데이터/이상 상태 대비 dedup 1회
     _dedup_knowledge_items(knowledge_items)
 
     # 8. _promote_sampled_confidence
@@ -240,54 +248,73 @@ async def context_interpreter_node(state: PipelineState) -> dict:
         if t.selection_status == SelectionStatus.REJECTED
     ]
     _ki_updates = [
-        f"{ki.knowledge_id}: {ki.key} → {ki.status.value}" for ki in knowledge_items
+        f"{ki.id}: {ki.key} → {ki.status.value}" for ki in knowledge_items
     ]
     _key_insights = discovered_facts[-5:] if discovered_facts else []
 
     _hyp = reason.current_hypothesis
-    await dispatch_tracking_event(
-        REASONING_STEP,
-        {
-            "node": "context_interpreter",
-            "phase": "reason",
-            "step_type": "llm_decision",
-            "round": reason.loop_guard.replan_count,
-            "hypothesis_id": _hyp.hypothesis_id if _hyp else "",
-            "inputs": {
-                "tool_results_summary": (
-                    f"도구 {len([s for s in execution_plan if s.status == StepStatus.DONE])}"
-                    "건 해석"
-                ),
-                "unresolved_knowledge": [
-                    ki.key
-                    for ki in knowledge_items
-                    if ki.status
-                    in (
-                        ConfidenceStatus.UNRESOLVED,
-                        ConfidenceStatus.CONFLICTED,
-                    )
-                ],
-                "original_query": state.preprocessed_input or "",
-                "time_slot": time_slot,
-            },
-            "output": {
-                "table_decisions": {
-                    "SELECTED": _selected,
-                    "REJECTED": _rejected,
-                },
-                "knowledge_updates": _ki_updates,
-                "key_insights": _key_insights,
-            },
-            "routing": {
-                "next_node": "readiness_gate",
-                "reason": (
-                    f"테이블 {len(_selected)}건 선정, " f"KI {len(_ki_updates)}건 갱신"
-                ),
-            },
-        },
+    parsed_summary = {
+        "table_SELECTED": _selected,
+        "table_REJECTED": _rejected,
+        "knowledge_updates": _ki_updates,
+        "key_insights": _key_insights,
+    }
+    routing_reason = (
+        f"테이블 {len(_selected)}건 선정, KI {len(_ki_updates)}건 갱신"
+    )
+    await _emit_context_interpreter_reasoning_steps(
+        interactions=interactions,
+        hypothesis_id=_hyp.hypothesis_id if _hyp else "",
+        round_num=reason.loop_guard.replan_count,
+        parsed_summary=parsed_summary,
+        routing_reason=routing_reason,
     )
 
     return {"reason": reason}
+
+
+async def _emit_context_interpreter_reasoning_steps(
+    *,
+    interactions: list[LLMInteraction],
+    hypothesis_id: str,
+    round_num: int,
+    parsed_summary: dict,
+    routing_reason: str,
+) -> None:
+    """Level 0/1 각 LLM 호출마다 REASONING_STEP 이벤트를 방출한다.
+
+    프롬프트 [INPUT] 치환 변수와 [OUTPUT_CONTRACT] 원본 응답을 손실 없이 보존
+    (20260422 trace-input-output-redesign §2 권고안 B).
+    최종 호출에만 종합 parsed_summary 를 싣는다.
+    """
+    if not interactions:
+        return
+    last_idx = len(interactions) - 1
+    for idx, interaction in enumerate(interactions):
+        is_last = idx == last_idx
+        node_name = (
+            "context_interpreter"
+            if len(interactions) == 1
+            else f"context_interpreter:step{idx + 1}"
+        )
+        summary = parsed_summary if is_last else {"stage": "step_raw"}
+        next_node = "readiness_gate" if is_last else f"context_interpreter:step{idx + 2}"
+        reason = routing_reason if is_last else "Level1 스텝 해석"
+        await dispatch_tracking_event(
+            REASONING_STEP,
+            build_llm_reasoning_payload(
+                node=node_name,
+                phase="reason",
+                round=round_num,
+                hypothesis_id=hypothesis_id,
+                interaction=interaction,
+                routing={
+                    "next_node": next_node,
+                    "reason": reason,
+                },
+                parsed_summary=summary,
+            ),
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -350,19 +377,19 @@ def _serialize_unresolved_items(
 
         if ki.status == ConfidenceStatus.UNRESOLVED:
             lines.append(
-                f"- {ki.key} — {ki.status.value}"
+                f"- ({ki.id}) {ki.key} — {ki.status.value}"
                 f"  역할: {_ROLE_DESC.get(prefix, "기타")}",
             )
         elif ki.status == ConfidenceStatus.CANDIDATE:
             lines.append(
-                f"- {ki.key} — {ki.status.value}"
+                f"- ({ki.id}) {ki.key} — {ki.status.value}"
                 f"  역할: {_ROLE_DESC.get(prefix, "기타")}"
                 f"  {_VALUE_LABEL.get(prefix, "값")} 후보: {ki.value}"
                 f"  후보 판단 사유: {", ".join(ki.evidence) or "미생성"} (출처: {ki.source})",
             )
         elif ki.status == ConfidenceStatus.CONFLICTED:
             lines.append(
-                f"- {ki.key} — {ki.status.value}"
+                f"- ({ki.id}) {ki.key} — {ki.status.value}"
                 f"  역할: {_ROLE_DESC.get(prefix, "기타")}"
                 f"  {_VALUE_LABEL.get(prefix, "값")} : {ki.value or "판단 불가"}"
                 f"  판단 충돌 사유: {", ".join(ki.evidence) or "미생성"} (출처: {ki.source})",
@@ -393,15 +420,27 @@ async def _interpret_batch(
     rewritten_query: str = "",
     session_id: str = "",
     turn_id: str = "",
-) -> BatchInterpretResult:
+    handoff_note: str = "(없음)",
+) -> tuple[BatchInterpretResult, list[LLMInteraction]]:
     """도구 결과를 LLM 해석한다. 토큰 예산에 따라 Level 0/1을 자동 분기한다.
 
     Level 0 (기본): 모든 DONE 스텝을 한 프롬프트에 배치 — 교차 참조 가능.
     Level 1 (토큰 초과): 스텝별 개별 호출 + 종합 판정 — 정보 축소 없이 분할.
+
+    CONTINUE handoff_note 는 Level 0 배치 호출에만 주입한다 (§14.3.2).
+    Level 1 개별 스텝 해석은 단일 tool_result 단위라 힌트가 과도한 일반화를
+    유도할 수 있어 의도적 opt-out.
+
+    Returns:
+        (BatchInterpretResult, interactions):
+            - 해석 결과 (insight/judgments/knowledge_updates).
+            - 각 LLM 호출의 prompt_variables + raw_response 페어.
+              Level 0 은 1개, Level 1 은 스텝 수만큼. REASONING_STEP
+              payload 구성에 사용된다.
     """
     done_steps = [s for s in execution_plan if s.status == StepStatus.DONE]
     if not done_steps:
-        return BatchInterpretResult()
+        return BatchInterpretResult(), []
 
     tool_results_str = serialize_tool_results_by_step(execution_plan)
 
@@ -430,6 +469,7 @@ async def _interpret_batch(
         time_slot,
         knowledge_items,
         rewritten_query=rewritten_query,
+        handoff_note=handoff_note,
     )
 
 
@@ -440,9 +480,18 @@ async def _interpret_level0(
     time_slot: str,
     knowledge_items: list[KnowledgeItem] | None = None,
     rewritten_query: str = "",
-) -> BatchInterpretResult:
-    """Level 0: 전체 배치 1회 호출."""
+    handoff_note: str = "(없음)",
+) -> tuple[BatchInterpretResult, list[LLMInteraction]]:
+    """Level 0: 전체 배치 1회 호출.
+
+    Returns:
+        (BatchInterpretResult, [LLMInteraction]): 해석 결과와 단일 상호작용.
+    """
     unresolved_str = _serialize_unresolved_items(knowledge_items)
+    # INSERT 차단 가드용 — 기존 KI id 집합 (배치 파서에 주입)
+    existing_id_set = {
+        ki.id for ki in (knowledge_items or []) if ki.id
+    }
 
     batch_vars = {
         "original_query": original_query or "",
@@ -450,22 +499,22 @@ async def _interpret_level0(
         "time_slot": time_slot or _TIME_SLOT_UNSPECIFIED,
         "unresolved_items": unresolved_str,
         "tool_results": tool_results_str,
+        "handoff_note": handoff_note,
     }
     render_vars = {f"{{{k}}}": v for k, v in batch_vars.items()}
     prompt, tracked_vars = render_prompt(
         CONTEXT_INTERPRETER_SYSTEM,
         render_vars,
     )
-    await record_prompt_variables(tracked_vars)
 
     def _parse_fn(raw_text: str) -> BatchInterpretResult:
         data = extract_json(raw_text)
         if not data:
             raise ValueError("배치 LLM 응답에서 JSON 추출 실패")
-        return _parse_batch_result(data)
+        return _parse_batch_result(data, existing_id_set)
 
     try:
-        _, result = await llm_call_with_parse_retry(
+        raw_text, result = await llm_call_with_parse_retry(
             system=prompt,
             messages=[
                 {
@@ -480,22 +529,27 @@ async def _interpret_level0(
             parse_fn=_parse_fn,
             max_tokens=2048,
             timeout=settings.llm_long_timeout,
-            node_name="batch_interpret",
+            node_name=LLMNode.CONTEXT_INTERPRETER,
         )
-        await dispatch_tracking_event(
-            LLM_PROMPT_VARIABLES,
-            {
-                "variables": batch_vars,
-            },
+        interaction = LLMInteraction(
+            prompt_variables=tracked_vars,
+            raw_response=raw_text,
         )
-        return result
+        return result, [interaction]
 
     except (ParseError, Exception) as e:
         logger.warning(
             "Level 0 배치 LLM 해석 실패, rule-based fallback",
             error=str(e),
         )
-        return _interpret_batch_fallback(execution_plan)
+        fallback_interaction = LLMInteraction(
+            prompt_variables=tracked_vars,
+            raw_response=llm_failure_sentinel("LLM 실패", e),
+        )
+        return (
+            _interpret_batch_fallback(execution_plan),
+            [fallback_interaction],
+        )
 
 
 async def _interpret_level1(
@@ -506,18 +560,26 @@ async def _interpret_level1(
     rewritten_query: str = "",
     session_id: str = "",
     turn_id: str = "",
-) -> BatchInterpretResult:
+) -> tuple[BatchInterpretResult, list[LLMInteraction]]:
     """Level 1: 스텝별 개별 호출 + 종합 판정.
 
     각 스텝을 개별 LLM 호출로 분석한 뒤,
     모든 스텝의 insight와 판정을 모아 종합 판정 1회를 수행한다.
+
+    Returns:
+        (BatchInterpretResult, interactions): 스텝별 LLM 호출마다 하나씩.
     """
     done_steps = [s for s in execution_plan if s.status == StepStatus.DONE]
     unresolved_str = _serialize_unresolved_items(knowledge_items)
+    # INSERT 차단 가드용 — 기존 KI id 집합
+    existing_id_set = {
+        ki.id for ki in (knowledge_items or []) if ki.id
+    }
 
     all_interpretations: list[dict] = []
     all_knowledge_updates: list[KnowledgeItem] = []
     step_insights: list[str] = []
+    step_interactions: list[LLMInteraction] = []
 
     # ── 스텝별 개별 호출 ──
     for step in done_steps:
@@ -550,7 +612,7 @@ async def _interpret_level1(
             "tool_results": tool_results_for_step,
         }
         render_vars = {f"{{{k}}}": v for k, v in step_vars.items()}
-        step_prompt, _ = render_prompt(
+        step_prompt, tracked_step_vars = render_prompt(
             CONTEXT_INTERPRETER_SYSTEM,
             render_vars,
         )
@@ -562,7 +624,7 @@ async def _interpret_level1(
             return data
 
         try:
-            _, step_result = await llm_call_with_parse_retry(
+            step_raw, step_result = await llm_call_with_parse_retry(
                 system=step_prompt,
                 messages=[
                     {
@@ -577,23 +639,21 @@ async def _interpret_level1(
                 parse_fn=_parse_step,
                 max_tokens=1024,
                 timeout=settings.llm_long_timeout,
-                node_name=f"interpret_step_{step.step}",
+                node_name=LLMNode.CONTEXT_INTERPRETER,
             )
             all_interpretations.append(step_result)
+            step_interactions.append(LLMInteraction(
+                prompt_variables=tracked_step_vars,
+                raw_response=step_raw,
+            ))
 
-            # knowledge_updates 추출
+            # knowledge_updates 추출 — INSERT 차단 가드 통과분만 수용
             for ku in step_result.get("knowledge_updates", []):
-                all_knowledge_updates.append(
-                    KnowledgeItem(
-                        key=ku.get("key", ""),
-                        value=ku.get("value", ""),
-                        confidence=ku.get("confidence", 0.5),
-                        status=ku.get("new_status", ConfidenceStatus.CANDIDATE),
-                        source=ku.get("source", "Level1해석"),
-                        evidence=[ku.get("evidence", "")],
-                        is_critical=ku.get("is_critical", False),
-                    )
+                item = _build_knowledge_update(
+                    ku, existing_id_set, "Level1해석",
                 )
+                if item is not None:
+                    all_knowledge_updates.append(item)
 
             # 다음 스텝용 insight 누적
             insight = step_result.get("insight", "")
@@ -614,6 +674,10 @@ async def _interpret_level1(
                     "insight": f"{step.tool}({step.input}) Level 1 해석 실패",
                 }
             )
+            step_interactions.append(LLMInteraction(
+                prompt_variables=tracked_step_vars,
+                raw_response=llm_failure_sentinel("LLM 실패", e),
+            ))
 
     logger.info(
         "Level 1 스텝별 해석 완료",
@@ -621,33 +685,88 @@ async def _interpret_level1(
         interpretations=len(all_interpretations),
     )
 
-    return BatchInterpretResult(
-        interpretations=all_interpretations,
-        knowledge_updates=all_knowledge_updates,
+    return (
+        BatchInterpretResult(
+            interpretations=all_interpretations,
+            knowledge_updates=all_knowledge_updates,
+        ),
+        step_interactions,
     )
 
 
-def _parse_batch_result(data: dict) -> BatchInterpretResult:
+def _build_knowledge_update(
+    ku: dict,
+    existing_id_set: set[str],
+    default_source: str,
+) -> KnowledgeItem | None:
+    """LLM 응답 dict → KnowledgeItem 변환 + INSERT 차단 가드.
+
+    Returns None 이면 호출부는 해당 update 를 폐기한다.
+    정규화 규칙: 대문자화 + 공백/소괄호 제거.
+
+    Args:
+        ku: LLM 응답 knowledge_updates[*] 항목 dict.
+        existing_id_set: 기존 reason.knowledge_items 의 id 집합.
+        default_source: source 누락 시 사용할 기본 출처명.
+
+    Returns:
+        UPDATE 로 수용할 KnowledgeItem (key="", is_critical=False —
+        병합 단계에서 기존 KI 의 key/is_critical 이 보존됨).
+        폐기 시 None.
+    """
+    raw_id = (ku.get("id") or "").upper().strip().strip("()").strip()
+
+    # Guard 1: id 누락
+    if not raw_id:
+        logger.warning(
+            "knowledge_updates: id missing — dropped. raw=%s",
+            truncate_log(str(ku)),
+        )
+        return None
+
+    # Guard 2: 형식 오류 (K숫자가 아님)
+    if not raw_id.startswith("K") or not raw_id[1:].isdigit():
+        logger.warning(
+            "knowledge_updates: malformed id %r — dropped", ku.get("id"),
+        )
+        return None
+
+    # Guard 3: 존재하지 않는 id (INSERT 시도)
+    if raw_id not in existing_id_set:
+        logger.warning(
+            "knowledge_updates: unknown id %s — dropped (INSERT blocked). raw=%s",
+            raw_id, truncate_log(str(ku)),
+        )
+        return None
+
+    return KnowledgeItem(
+        id=raw_id,
+        key="",
+        value=ku.get("value", ""),
+        confidence=ku.get("confidence", 0.5),
+        status=ku.get("new_status", ConfidenceStatus.CANDIDATE),
+        source=ku.get("source", default_source),
+        evidence=[ku.get("evidence", "")],
+        is_critical=False,
+    )
+
+
+def _parse_batch_result(
+    data: dict, existing_id_set: set[str],
+) -> BatchInterpretResult:
     """배치 LLM 응답 JSON을 BatchInterpretResult로 파싱한다.
 
     각 interpretation에 nested된 explored_tables/use_cases/biz_terms/
     biz_manuals 판정과 knowledge_updates를 추출한다.
+    knowledge_updates는 _build_knowledge_update 가드를 통과한 항목만 포함.
     """
     knowledge_updates: list[KnowledgeItem] = []
 
     for interp in data.get("interpretations", []):
         for ku in interp.get("knowledge_updates", []):
-            knowledge_updates.append(
-                KnowledgeItem(
-                    key=ku.get("key", ""),
-                    value=ku.get("value", ""),
-                    confidence=ku.get("confidence", 0.5),
-                    status=ku.get("new_status", ConfidenceStatus.CANDIDATE),
-                    source=ku.get("source", "배치해석"),
-                    evidence=[ku.get("evidence", "")],
-                    is_critical=ku.get("is_critical", False),
-                )
-            )
+            item = _build_knowledge_update(ku, existing_id_set, "배치해석")
+            if item is not None:
+                knowledge_updates.append(item)
 
     return BatchInterpretResult(
         interpretations=data.get("interpretations", []),
@@ -1386,20 +1505,76 @@ def _parse_selection_status(status_str: str) -> SelectionStatus:
 
 
 def _dedup_knowledge_items(knowledge_items: list) -> None:
-    """같은 key의 KI가 여러 건이면 최고 confidence 항목만 유지한다."""
+    """id 기반 dedup. 동일 id에 대해 최고 confidence 항목만 유지. in-place 변형.
+
+    seed 이후 id 는 고정이므로 key 표기 차이(공백 등)에 영향 받지 않는다.
+    id 미할당 항목(이론상 발생 안 함 — seed에서 반드시 채번)은 건너뜀.
+    """
     best_ki: dict[str, int] = {}
     for i, ki in enumerate(knowledge_items):
-        if ki.key in best_ki:
-            existing_idx = best_ki[ki.key]
+        if not ki.id:
+            continue
+        if ki.id in best_ki:
+            existing_idx = best_ki[ki.id]
             if ki.confidence > knowledge_items[existing_idx].confidence:
-                best_ki[ki.key] = i
+                best_ki[ki.id] = i
         else:
-            best_ki[ki.key] = i
+            best_ki[ki.id] = i
 
     keep_indices = set(best_ki.values())
     knowledge_items[:] = [
         ki for i, ki in enumerate(knowledge_items) if i in keep_indices
     ]
+
+
+def _should_promote(
+    current: ConfidenceStatus, incoming: ConfidenceStatus,
+) -> bool:
+    """상태 승격 허용 여부. 단일 호출에서 UNRESOLVED→CONFIRMED 점프는 허용.
+
+    _merge_updates_into_items 에서 기존 KI 의 status 와 UPDATE 가 제안한
+    new_status 를 비교해 승격 여부를 판정한다. 현재는 단순 서열 비교로
+    충분하며, 단일 근거 CONFIRMED 제약 등 추가 규칙은 confidence_scorer 가
+    담당한다.
+    """
+    order = {
+        ConfidenceStatus.UNRESOLVED: 0,
+        ConfidenceStatus.CONFLICTED: 0,
+        ConfidenceStatus.CANDIDATE: 1,
+        ConfidenceStatus.PROBABLE: 2,
+        ConfidenceStatus.CONFIRMED: 3,
+    }
+    return order.get(incoming, 0) > order.get(current, 0)
+
+
+def _merge_updates_into_items(
+    existing: list[KnowledgeItem],
+    updates: list[KnowledgeItem],
+) -> None:
+    """UPDATE 항목을 기존 KI에 병합. id로 매칭. in-place 변형.
+
+    - 기존 KI 의 key, is_critical 은 보존 (UPDATE 는 절대 건드리지 않음)
+    - value, source 는 UPDATE 가 비어있지 않으면 덮어씀
+    - status 는 _should_promote 에서 허용한 경우에만 승격
+    - confidence 는 max 로 누적
+    - evidence 는 중복 제외 append
+    - updates 중 id 가 existing 에 없으면 폐기 (가드에서 이미 걸러졌으나 방어)
+    """
+    by_id = {ki.id: ki for ki in existing if ki.id}
+    for upd in updates:
+        base = by_id.get(upd.id)
+        if not base:
+            continue
+        if upd.value:
+            base.value = upd.value
+        if _should_promote(base.status, upd.status):
+            base.status = upd.status
+        base.confidence = max(base.confidence, upd.confidence)
+        if upd.source:
+            base.source = upd.source
+        for ev in upd.evidence:
+            if ev and ev not in base.evidence:
+                base.evidence.append(ev)
 
 
 def _promote_sampled_confidence(

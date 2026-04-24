@@ -16,6 +16,7 @@ Prompt Version: 2.0 (2026-03-26)
   v1.9 (2026-03-25): 파일 명명규칙 통일 — 노드명 기반 + _system/_user 접미
   v2.0 (2026-03-26): TABLE_COMPARISON_SYSTEM 추가 (유사 테이블 비교 판정)
   v2.1 (2026-03-29): 변수명을 파일명과 일치시키는 네이밍 통일
+  v2.2 (2026-04-17): CONTINUE_ORCHESTRATOR 추가 (멀티턴 연속 질의 라우팅)
 
 모든 노드가 이 파일에서 프롬프트 변수를 import하여 사용한다.
 프롬프트 본문은 resources/prompts/ 하위 3계층 디렉토리에서 읽어온다.
@@ -35,11 +36,13 @@ Prompt Version: 2.0 (2026-03-26)
 파일 매핑 (interpret/):
   INTENT_CLASSIFIER_SYSTEM         ← intent_classifier_system.txt
   INTENT_CLASSIFIER_USER           ← intent_classifier_user.txt
-  INTENT_CLASSIFIER_QUERY_REWRITER ← intent_classifier_query_rewriter.txt
+  EXTRACTION_QUERY_REWRITER        ← extraction_query_rewriter.txt
   QUERY_NORMALIZER_PHASE1_SYSTEM  ← query_normalizer_phase1_system.txt
   QUERY_NORMALIZER_PHASE1_USER    ← query_normalizer_phase1_user.txt
   QUERY_NORMALIZER_PHASE2_SYSTEM  ← query_normalizer_phase2_system.txt
   QUERY_NORMALIZER_PHASE2_USER    ← query_normalizer_phase2_user.txt
+  CONTINUE_ORCHESTRATOR_SYSTEM    ← continue_orchestrator_system.txt
+  CONTINUE_ORCHESTRATOR_USER      ← continue_orchestrator_user.txt
 
 파일 매핑 (reason/):
   CONTEXT_INTERPRETER_SYSTEM        ← context_interpreter_system.txt
@@ -55,11 +58,11 @@ Prompt Version: 2.0 (2026-03-26)
 파일 매핑 (present/):
   ANALYZER_SYSTEM                 ← analyzer_system.txt
   ANALYZER_USER                   ← analyzer_user.txt
-  ANALYZER_VIZ_JUDGMENT_SYSTEM    ← analyzer_viz_judgment_system.txt
-  ANALYZER_VIZ_JUDGMENT_USER      ← analyzer_viz_judgment_user.txt
-  ANALYZER_VIZ_SVG_SYSTEM_BASE    ← analyzer_viz_svg_system_base.txt
-  ANALYZER_VIZ_SVG_EXAMPLES       ← analyzer_viz_svg_example_{chart_type}.txt
-  ANALYZER_VIZ_SVG_USER           ← analyzer_viz_svg_user.txt
+  VISUALIZER_JUDGMENT_SYSTEM      ← visualizer_judgment_system.txt
+  VISUALIZER_JUDGMENT_USER        ← visualizer_judgment_user.txt
+  VISUALIZER_SVG_SYSTEM_BASE      ← visualizer_svg_system_base.txt
+  VISUALIZER_SVG_EXAMPLES         ← visualizer_svg_example_{chart_type}.txt
+  VISUALIZER_SVG_USER             ← visualizer_svg_user.txt
 """
 
 from src.utils.resource_loader import load_text_required
@@ -87,8 +90,11 @@ def _present(filename: str) -> str:
 # 통합 노드 프롬프트 (resolve_history + classify_intent → intent_classifier)
 INTENT_CLASSIFIER_SYSTEM = _interpret("intent_classifier_system.txt")
 INTENT_CLASSIFIER_USER = _interpret("intent_classifier_user.txt")
-INTENT_CLASSIFIER_QUERY_REWRITER = _interpret(
-    "intent_classifier_query_rewriter.txt",
+
+# 추출 질의 재작성 — DATA_ANALYSIS 질의의 시각화/분석 지시어 제거
+# query_normalizer 진입 전 전처리 단계에서 호출 (src/services/query_normalizer.py)
+EXTRACTION_QUERY_REWRITER = _interpret(
+    "extraction_query_rewriter.txt",
 )
 
 QUERY_NORMALIZER_PHASE1_SYSTEM = _interpret(
@@ -103,6 +109,9 @@ QUERY_NORMALIZER_PHASE2_SYSTEM = _interpret(
 QUERY_NORMALIZER_PHASE2_USER = _interpret(
     "query_normalizer_phase2_user.txt",
 )
+
+CONTINUE_ORCHESTRATOR_SYSTEM = _interpret("continue_orchestrator_system.txt")
+CONTINUE_ORCHESTRATOR_USER = _interpret("continue_orchestrator_user.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -148,27 +157,59 @@ RECOVERY_AGENT_SYSTEM = _reason("recovery_agent_system.txt")
 
 ANALYZER_SYSTEM = _present("analyzer_system.txt")
 ANALYZER_USER = _present("analyzer_user.txt")
-ANALYZER_VIZ_JUDGMENT_SYSTEM = _present("analyzer_viz_judgment_system.txt")
-ANALYZER_VIZ_JUDGMENT_USER = _present("analyzer_viz_judgment_user.txt")
-ANALYZER_VIZ_SVG_SYSTEM_BASE = _present(
-    "analyzer_viz_svg_system_base.txt",
+VISUALIZER_JUDGMENT_SYSTEM = _present("visualizer_judgment_system.txt")
+VISUALIZER_JUDGMENT_USER = _present("visualizer_judgment_user.txt")
+VISUALIZER_SVG_SYSTEM_BASE = _present(
+    "visualizer_svg_system_base.txt",
 )
 # 차트 타입별 예제. 키는 VisualizationType.value와 동일해야 한다.
-ANALYZER_VIZ_SVG_EXAMPLES: dict[str, str] = {
-    "bar_chart": _present("analyzer_viz_svg_example_bar_chart.txt"),
-    "line_chart": _present("analyzer_viz_svg_example_line_chart.txt"),
-    "pie_chart": _present("analyzer_viz_svg_example_pie_chart.txt"),
+VISUALIZER_SVG_EXAMPLES: dict[str, str] = {
+    # 정량 차트 (10종)
+    "bar_chart": _present("visualizer_svg_example_bar_chart.txt"),
     "horizontal_bar": _present(
-        "analyzer_viz_svg_example_horizontal_bar.txt",
+        "visualizer_svg_example_horizontal_bar.txt",
     ),
-    "flowchart": _present("analyzer_viz_svg_example_flowchart.txt"),
-    "timeline": _present("analyzer_viz_svg_example_timeline.txt"),
+    "grouped_bar": _present(
+        "visualizer_svg_example_grouped_bar.txt",
+    ),
+    "stacked_bar": _present(
+        "visualizer_svg_example_stacked_bar.txt",
+    ),
+    "line_chart": _present("visualizer_svg_example_line_chart.txt"),
+    "pie_chart": _present("visualizer_svg_example_pie_chart.txt"),
     "donut_chart": _present(
-        "analyzer_viz_svg_example_donut_chart.txt",
+        "visualizer_svg_example_donut_chart.txt",
     ),
-    "mind_map": _present("analyzer_viz_svg_example_mind_map.txt"),
+    "scatter_plot": _present(
+        "visualizer_svg_example_scatter_plot.txt",
+    ),
+    "waterfall_chart": _present(
+        "visualizer_svg_example_waterfall_chart.txt",
+    ),
+    "heatmap": _present("visualizer_svg_example_heatmap.txt"),
+    # 정보 카드
+    "info_card": _present(
+        "visualizer_svg_example_info_card.txt",
+    ),
+    # 다이어그램 (8종)
+    "flowchart": _present("visualizer_svg_example_flowchart.txt"),
+    "timeline": _present("visualizer_svg_example_timeline.txt"),
+    "mind_map": _present("visualizer_svg_example_mind_map.txt"),
+    "org_chart": _present("visualizer_svg_example_org_chart.txt"),
+    "process_diagram": _present(
+        "visualizer_svg_example_process_diagram.txt",
+    ),
+    "venn_diagram": _present(
+        "visualizer_svg_example_venn_diagram.txt",
+    ),
+    "matrix_chart": _present(
+        "visualizer_svg_example_matrix_chart.txt",
+    ),
+    "value_chain": _present(
+        "visualizer_svg_example_value_chain.txt",
+    ),
 }
-ANALYZER_VIZ_SVG_USER = _present("analyzer_viz_svg_user.txt")
+VISUALIZER_SVG_USER = _present("visualizer_svg_user.txt")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

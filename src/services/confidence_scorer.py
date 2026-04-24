@@ -1,6 +1,6 @@
 """확신도(Confidence Score) 계산 및 행동 판정 모듈.
 
-작성자: 한철희 / 최종수정: 2026-04-07 12:56:37
+작성자: 한철희 / 최종수정: 2026-04-16
 
 에이전트가 "SQL을 생성할 준비가 됐는가"를 판단하는 수치를 계산하고,
 다음 행동을 결정하는 단일 판정 함수(evaluate_readiness)를 제공한다.
@@ -21,7 +21,6 @@ explore의 조기 탈출과 assess의 라우팅이 모두 evaluate_readiness()�
     - evaluate_readiness: 다음 행동 판정 (SSOT)
     - calculate_readiness: 0.0~1.0 준비도 점수 계산
     - all_critical_confirmed: critical 항목 전체 해소 여부 확인
-    - should_ask_user: 추론 불가 충돌 감지 (ASK_USER 발동 조건)
 """
 
 from __future__ import annotations
@@ -55,7 +54,6 @@ class ReadinessVerdict(str, Enum):
     EXPLORE = "explore"
     GENERATE = "generate_sql"
     REPLAN = "replan"
-    ASK_USER = "ask_user"
     TERMINATE = "conclude_failure"
 
 
@@ -64,7 +62,6 @@ VERDICT_TO_PHASE: dict[ReadinessVerdict, Phase] = {
     ReadinessVerdict.GENERATE: Phase.GENERATING,
     ReadinessVerdict.REPLAN: Phase.REPLANNING,
     ReadinessVerdict.EXPLORE: Phase.EXPLORING,
-    ReadinessVerdict.ASK_USER: Phase.VERIFYING,
     ReadinessVerdict.TERMINATE: Phase.DONE,
 }
 
@@ -79,8 +76,7 @@ def evaluate_readiness(
       1. 루프 가드 초과 → TERMINATE
       2. 충분한 확신 → GENERATE
       3. 탐색 스텝 남음 → EXPLORE
-      4. CONFLICTED 항목 → ASK_USER (탐색 완료 후 판단)
-      5. 확신 부족 또는 가설 실패 → REPLAN
+      4. 확신 부족 또는 가설 실패 → REPLAN
     """
     from src.agents.state.state import should_terminate
 
@@ -104,12 +100,8 @@ def evaluate_readiness(
     if remaining:
         return ReadinessVerdict.EXPLORE
 
-    # 4. CONFLICTED → 서로 다른 테이블이 관련된 추론 불가 충돌만 사용자 확인
-    # 단순 용어 모호성(동일 테이블 내)은 관행적 추론으로 진행 (§9.1 "선 추론 후 표시" 정책)
-    if should_ask_user(reason):
-        return ReadinessVerdict.ASK_USER
-
-    # 5. 가설 실패 또는 확신 부족 → 재계획
+    # 4. 확신 부족 또는 가설 실패 → 재계획
+    # CONFLICTED 항목도 여기로 흘러서 recovery_agent가 탐색/명확화로 해소한다.
     return ReadinessVerdict.REPLAN
 
 
@@ -191,44 +183,3 @@ def has_conflicted_items(
     )
 
 
-def _is_unresolvable_conflict(
-    ki: "KnowledgeItem",
-) -> bool:
-    """추론으로 해결 불가능한 충돌인지 판별.
-
-    True (ASK_USER 필요):
-    - 서로 다른 테이블을 사용해야 하는 의미가 2개 이상 존재
-    - 금융 지표 산출식이 충돌 (연체율 계산 방식 등)
-
-    False (추론으로 진행):
-    - 단순 용어 모호성 (예금신규액 vs 건수) → 관행적 해석
-    - 동일 테이블 내 컬럼 차이 → 관행적 해석
-    """
-    table_refs: set[str] = set()
-    for ev in ki.evidence:
-        table_refs.update(
-            word for word in ev.split()
-            if word.startswith("TB_")
-        )
-    return len(table_refs) >= 2
-
-
-def should_ask_user(
-    reason: ReasoningState,
-) -> bool:
-    """ASK_USER는 '추론으로도 해결 불가능한' 경우에만 발동.
-
-    critical + CONFLICTED 항목 중 서로 다른 테이블이 연관된
-    경우만 사용자 확인이 필요하다. 단순 용어 모호성은
-    관행적 추론으로 진행하고 결과에 추론 근거를 표시한다.
-    """
-    critical_conflicts = [
-        ki for ki in reason.knowledge_items
-        if ki.status == ConfidenceStatus.CONFLICTED
-        and ki.is_critical
-    ]
-    unresolvable = [
-        ki for ki in critical_conflicts
-        if _is_unresolvable_conflict(ki)
-    ]
-    return len(unresolvable) > 0

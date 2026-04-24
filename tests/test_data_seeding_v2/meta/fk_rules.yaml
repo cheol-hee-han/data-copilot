@@ -1,0 +1,303 @@
+# ============================================================
+# FK 추론 규칙표 (catalog_v2.json 생성용)
+# ============================================================
+# 용도: .md에 FK 명시가 누락된 컬럼에 자동으로 FK 관계를 주입
+# 적용 순서: 1) exclusions → 2) tier1 → 3) tier2 → 4) tier3 → 5) special
+#           첫 매칭에서 중단 (Short-circuit)
+# 생성: Phase C Stage 1
+version: 1
+last_updated: 2026-04-22
+
+# ============================================================
+# FK 제외 (우선순위 최고 - 이 컬럼들은 FK 아님)
+# ============================================================
+exclusions:
+  # 타행/외부 계좌 (자행 DPG001M 참조 아님)
+  column_names:
+    - CNTRPT_ACN       # 상대방 계좌 (타행 가능성)
+    - RCV_ACN          # 수취 계좌 (타행 가능성)
+    - FRAUD_ACN        # 사기 이용 계좌 (대부분 타행)
+    - OPP_ACN          # 상대 계좌
+    - NOSTRO_ACN       # 해외 코레스 (NOSTRO)
+    - VOSTRO_ACN       # 해외 코레스 (VOSTRO)
+    - TGT_EXT_ACN      # 외부 대상 계좌
+
+    # 해외/외부 식별자
+    - CNTRPT_BIC       # 해외 은행 BIC
+    - CNTRPT_BANK      # 해외 은행명
+    - BIZ_NO           # 사업자등록번호 (외부 식별자)
+    - MCC              # 가맹점 업종코드 (ISO 표준)
+    - SWIFT_NO         # SWIFT 전문번호 (내부 PK는 별개)
+
+  # CTR_NO 컬럼은 도메인별 의미가 다르므로 domain_specific에서 처리
+  # (DPN/TRS 도메인의 CTR_NO는 "계약번호"로 FK 아님)
+
+# ============================================================
+# Tier 1: 글로벌 공통 키 (컬럼명 기반, 도메인 무관)
+# ============================================================
+tier1_global:
+  # ─── 고객 (CSN 계열) : 모두 CSC001M.CSN 참조 ───
+  - main: CSN
+    references: CSC001M.CSN
+    aliases:
+      - CRP_CSN          # 법인 고객
+      - EMPLOY_CSN       # 사업장 (근로자)
+      - CP_CSN           # 상대방 (자행 고객인 경우)
+      - ISS_CRP_CSN      # 발행 법인
+      - SUPR_CSN         # 상위 기업
+      - GRT_CSN          # 보증인
+      - EMP_CSN          # 직원 고객
+      - RLTD_CSN         # 관련 고객
+      - ISSUER_CSN       # 발행자
+      - EMP_CMP_CSN      # 직원 회사
+      - CMP_CSN          # 회사 고객
+      - BENF_CSN         # 수익자
+      - AFM_OWNR_CSN     # 자금주
+      - VICT_CSN         # 피해자
+      - VENDOR_CSN       # 공급자
+      - UNIF_CSN         # 통합 고객
+      - UBO_CSN          # 실소유자
+      - TRST_CSN         # 신탁 관계자
+      - TRSTR_CSN        # 위탁자
+      - TNT_CSN          # 임차인
+      - TGT_CSN          # 대상 고객
+      - SUCCESSOR_CSN    # 승계자
+      - STDT_CSN         # 학생
+      - SRC_CSN          # 원천 고객
+      - SME_CMP_CSN      # 중소기업
+      - RLTD_PEP_CSN     # PEP 관계자
+      - REQ_CSN          # 요청 고객
+      - REFERRER_CSN     # 추천인
+      - REFERRED_CSN     # 피추천인
+
+  # ─── 부점 (BRCD 계열) : 모두 CMI001M.BRCD 참조 ───
+  - main: BRCD
+    references: CMI001M.BRCD
+    aliases:
+      - MNGM_BRCD        # 관리부점
+      - PRC_BRCD         # 처리부점
+      - BLNG_BRCD        # 소속부점
+      - UPPR_BRCD        # 상위부점
+      - EXEC_BRCD        # 실행부점
+      - TO_BRCD          # 전입부점
+      - FR_BRCD          # 전출부점
+      - OPEN_BRCD        # 개설부점
+      - PRE_BRCD         # 직전부점
+      - POST_BRCD        # 이후부점
+      - BFM_BRCD         # 변경전부점
+      - AFM_BRCD         # 변경후부점
+      - MAIN_BRCD        # 주부점
+      - OVS_BRCD         # 해외부점
+      - PROC_BRCD        # 처리부점 (alt)
+      - MGMT_BRCD        # 관리부점 (alt)
+      - MNGM_RGN_BRCD    # 관리지역부점
+
+  # ─── 직원 (EMN 계열) : 모두 CMI007M.EMN 참조 ───
+  - main: EMN
+    references: CMI007M.EMN
+    aliases:
+      - APPR_EMN         # 승인자
+      - MGR_EMN          # 담당자
+      - MNGM_RM_EMN      # 관리 RM
+      - MDFC_EMN         # 수정자
+      - PRC_EMN          # 처리자
+      - VERI_EMN         # 검증자
+      - GRNT_EMN         # 보증 직원
+      - EXCT_EMN         # 실행자
+      - ACT_EMN          # 활동자
+      - WAIVER_APPR_EMN  # 예외 승인자
+      - VERDICT_EMN      # 판정자
+      - TEAM_LDR_EMN     # 팀장
+      - SURV_EMN         # 조사자
+      - SELLER_EMN       # 판매자
+      - RVW_EMN          # 검토자
+      - RPT_EMN          # 보고자
+      - RM_EMN           # RM
+      - REV_EMN          # 재검토자
+      - REVIEW_EMN       # 검토자 (alt)
+      - REPT_EMN         # 보고자 (alt)
+      - PROC_EMN         # 처리자 (alt)
+      - PB_EMN           # PB
+      - OTSC_EMN         # 외주 (내부 직원 기록)
+      - OPEN_EMN         # 개설자
+
+  # ─── 상품 ───
+  - main: PDN
+    references: PFP001M.PDN
+
+# ============================================================
+# Tier 2: 도메인 마스터 키 (컬럼명만으로 결정 가능)
+# ============================================================
+tier2_master:
+  # ─── 대출 (외화대출 FXR도 LNB 참조) ───
+  - main: LON_NO
+    references: LNB001M.LON_NO
+    self_ref_aliases:
+      - PREV_LON_NO      # 직전 대출
+      - ORIG_LON_NO      # 원 대출
+      - NEW_LON_NO       # 신규 대출
+      - PAR_LON_NO       # 모 대출
+
+  # ─── 계좌 (외화예금 DPY도 DPG 참조) ───
+  - main: ACN
+    references: DPG001M.ACN
+    aliases:
+      - LDR_ACN          # 원장계좌
+      - EMP_ACN          # 직원계좌
+      - VIR_ACN          # 가상계좌
+      - VACN             # 가상계좌 (단축)
+      - LNK_ACN          # 연결계좌
+      - LINK_ACN
+      - DP_ACN           # 예금계좌
+      - SRC_ACN          # 출금계좌
+      - TGT_ACN          # 입금계좌
+      - XFER_ACN         # 이체계좌
+      - WDR_ACN          # 출금계좌 (alt)
+      - PAY_ACN          # 결제계좌
+      - REAL_ACN         # 실계좌
+      - RLTD_ACN         # 관련계좌
+      - FCY_ACN          # 외화계좌
+      - VICT_ACN         # 피해자 계좌
+
+  # ─── IRP 계좌 ───
+  - main: IRP_ACN
+    references: RPD002M.IRP_ACN
+    aliases:
+      - IRP_XFR_ACN      # IRP 이체계좌
+
+  # ─── 퇴직연금 가입자 ───
+  - main: PEN_NO
+    references: RPC001M.PEN_NO
+
+  # ─── 신탁 ───
+  - main: TRST_NO
+    references: TRS001M.TRST_NO
+
+  # ─── 파생 ───
+  - main: DRV_NO
+    references: DRV001M.DRV_NO
+    aliases:
+      - HDG_DEAL_NO      # 헤지 거래 (파생 일종)
+
+  # ─── 담보 ───
+  - main: COLLTR_NO
+    references: LNM001M.COLLTR_NO
+
+  # ─── 보증 ───
+  - main: GUAR_NO
+    references: LNG001M.GUAR_NO
+
+  # ─── 카드 회원 ───
+  - main: MBR_NO
+    references: CLN001M.MBR_NO
+
+  # ─── 카드 ───
+  - main: CARD_NO_ALTR
+    references: CLN002M.CARD_NO_ALTR
+    self_ref_aliases:
+      - NEW_CARD_NO      # 신규 카드 (재발급)
+      - MAIN_CARD_NO     # 주카드 (가족카드 참조)
+
+  # ─── 가맹점 ───
+  - main: MERCH_NO
+    references: SLE021M.MERCH_NO
+
+# ============================================================
+# Tier 3: 도메인별 분기 (컬럼명이 도메인에 따라 다른 테이블 참조)
+# ============================================================
+tier3_domain_specific:
+  # ─── CTR_NO: 3가지 의미 ───
+  - column: CTR_NO
+    rules:
+      - domains: [CSK]          # 고객 KYC
+        references: CSK009L.CTR_NO
+      - domains: [AML]
+        references: AML003L.CTR_NO
+      - domains: [DPN, TRS]     # 신탁 내부 계약번호 (다른 의미)
+        references: null        # FK 아님
+    aliases_tier3:
+      - SRC_CSK_CTR_NO         # AML → CSK 원천 참조
+        references: CSK009L.CTR_NO
+
+  # ─── STR_NO: 2가지 의미 (CSK vs AML) ───
+  - column: STR_NO
+    rules:
+      - domains: [CSK]
+        references: CSK008L.STR_NO
+      - domains: [AML]
+        references: AML002L.STR_NO
+    aliases_tier3:
+      - SRC_CSK_STR_NO         # AML → CSK 원천
+        references: CSK008L.STR_NO
+      - AML_STR_NO             # CSK → AML 이관 후 번호
+        references: AML002L.STR_NO
+
+  # ─── DEAL_NO: FXD vs DRV (쌍둥이) ───
+  - column: DEAL_NO
+    rules:
+      - domains: [FXD]
+        references: FXD001L.DEAL_NO
+      - domains: [DRV]
+        references: DRV001M.DRV_NO    # 같은 거래가 양쪽 기록
+
+  # ─── TRN_NO: 도메인별 L 테이블 ───
+  - column: TRN_NO
+    rules:
+      - domains: [EBS]
+        references: EBS001L.TRN_NO    # 이체거래
+      - domains: [SLE]
+        references: SLE001L.TRN_NO    # 카드매출
+      - domains: [FXC]
+        references: FXC001L.TRN_NO    # 환전거래
+      - domains: [DPG, DPF, DPD, DPB, DPN, DPY]
+        references: null              # 도메인별 L테이블 다수, 자동화 어려움
+    aliases_tier3:
+      - ORIG_TRN_NO       # 원거래 (자기참조)
+      - SRC_TRN_NO        # 원천거래
+      - VIR_TRN_NO        # 가상거래
+
+# ============================================================
+# Special: 쌍둥이 관계 전용 참조 (이전 영역 점검에서 확정)
+# ============================================================
+special_references:
+  # 전자금융 FDS → 사기피해 이관
+  - column: SRC_FDS_NO
+    references: EBS021M.FDS_NO
+    description: "EBS022M 사기피해가 EBS021M 이체FDS 원천 참조"
+
+  # SWIFT 전문 참조 (카드 등)
+  - column: SWIFT_REF
+    references: FXC005L.SWIFT_NO
+    description: "SWIFT 전문 참조"
+
+  # 투자 → 채권 원장
+  - column: ISIN
+    references: null        # ISIN은 국제 식별자, 내부 FK 아님
+
+# ============================================================
+# Meta: 규칙 적용 요약 (예상 처리 건수)
+# ============================================================
+stats_expected:
+  total_columns_scanned: 12331
+  pre_rule_fk_count: 738        # 6.0%
+  post_rule_fk_count: 4500      # 예상 ~36% (추정)
+  tier1_contributions:
+    CSN_family: 156             # 누락 CSN 계열
+    BRCD_family: 141            # 누락 BRCD 계열
+    EMN_family: 60+             # 누락 EMN 계열
+    PDN: 43                     # 누락 PDN
+  tier2_contributions:
+    LON_NO_family: 14
+    ACN_family: 30+
+    PEN_NO: 29
+    TRST_NO: 13
+    DRV_NO: 11
+    MERCH_NO: ~28
+    MBR_NO: ~28
+    CARD_NO_ALTR: ~40
+    COLLTR_NO: ~29
+    GUAR_NO: ~17
+  notes:
+    - "Tier 3 (도메인 분기)는 건수 적으나 중요 쌍둥이 관계 보존"
+    - "exclusions는 FK 오탐 방지 (타행 계좌, 외부 식별자)"
+    - "self_ref_aliases는 순환 FK로 DAG 생성 시 특별 처리 필요"

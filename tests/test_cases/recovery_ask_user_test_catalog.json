@@ -1,0 +1,729 @@
+{
+  "version": "1.0",
+  "created": "2026-04-17",
+  "description": "recovery_agent ask_user 기능 테스트 카탈로그 — 탐색 실패 후 사용자 명확화 질문이 발생하는 시나리오",
+  "target": "Docker 데이터소스(PG/Qdrant/MongoDB) + LLM API",
+  "total_cases": 30,
+  "design_context": {
+    "trigger_condition": "recovery_agent가 동일 항목에 대해 2회+ 탐색 실패 시 ask_user 또는 give_up 판단",
+    "ask_user_vs_give_up": "ask_user=사용자 업무 판단으로 해소 가능, give_up=데이터 부재·SQL 불가",
+    "max_ask_user_rounds": 2,
+    "infrastructure": "AmbiguitySignal → pending_signals → clarification_handler → interrupt → 사용자 응답 → resolved_signals → recovery_agent 재진입"
+  },
+  "categories": [
+    {
+      "id": "REC-ASK-01",
+      "name": "대상 범위 불명 (single_select)",
+      "description": "유효 후보가 복수 발견되었으나 탐색으로 특정 불가. 사용자 선택 필요.",
+      "expected_path": "explore → readiness_gate(REPLAN) → recovery_agent(2회 탐색) → ask_user(single_select) → 사용자 응답 → recovery_agent(replan)",
+      "cases": [
+        {
+          "id": "RA01-001",
+          "query": "고객 수 알려줘",
+          "recovery_context": {
+            "unresolved_item": "scope:고객범위",
+            "explored_tables": ["TB_ADW_CSC101M"],
+            "dead_ends": [
+              {"hypothesis": "CUS_DCD='01' 개인고객 기준", "result": "개인/법인/개인사업자 3종 모두 유효"},
+              {"hypothesis": "유사 SQL에서 기본 고객 범위 확인", "result": "개인 2건, 법인 1건, 전체 1건 — 편중 불가"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "어떤 고객.*대상",
+            "expected_options": ["개인고객", "기업고객(법인)", "전체"],
+            "option_source": "CUS_DCD 코드 메타: 01=개인, 02=법인, 03=개인사업자"
+          },
+          "user_response": "개인고객이요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "CUS_DCD = '01'",
+            "expected_tables": ["TB_ADW_CSC101M"]
+          },
+          "notes": "CAT-06 E06-001과 유사하나, CAT-06은 정규화 단계 명확화. 이 케이스는 recovery 단계에서 탐색 2회 실패 후 발생."
+        },
+        {
+          "id": "RA01-002",
+          "query": "잔액 합계 알려줘",
+          "recovery_context": {
+            "unresolved_item": "scope:잔액범위",
+            "explored_tables": ["TB_ADW_DEP201P", "TB_ADW_LNB301M"],
+            "dead_ends": [
+              {"hypothesis": "수신 잔액(DEP201P.BAL_AMT) 기준", "result": "수신/여신 모두 유효"},
+              {"hypothesis": "유사 SQL에서 '잔액 합계' 기본 대상 확인", "result": "수신 3건, 여신 2건 — 편중 불가"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "잔액.*어떤.*대상|예금.*대출",
+            "expected_options": ["예금(수신) 잔액", "대출(여신) 잔액", "전체 (예금+대출)"]
+          },
+          "user_response": "예금 잔액이요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "DEP201P.BAL_AMT 사용",
+            "expected_tables": ["TB_ADW_DEP201P"]
+          },
+          "notes": "수신(DEP201P) vs 여신(LNB301M) 중 어느 잔액인지 불명."
+        },
+        {
+          "id": "RA01-003",
+          "query": "등급별 현황 뽑아줘",
+          "recovery_context": {
+            "unresolved_item": "scope:등급기준",
+            "explored_tables": ["TB_ADW_CSC101M", "TB_ADW_CSP103M"],
+            "dead_ends": [
+              {"hypothesis": "CUS_GRD_CD(고객등급) 기준", "result": "CUS_GRD_CD, MKT_GRD_CD 모두 등급 컬럼"},
+              {"hypothesis": "유사 SQL에서 '등급별 현황' 패턴 확인", "result": "고객등급 3건, 마케팅등급 1건 — 편중 불충분"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "어떤 등급.*기준",
+            "expected_options": ["고객등급 (VIP/우수/일반/잠재/관리)", "마케팅등급 (최우수/우수/일반/관심/휴면)"],
+            "option_source": "CUS_GRD_CD vs MKT_GRD_CD"
+          },
+          "user_response": "고객등급 기준이요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "CUS_GRD_CD 기준 GROUP BY"
+          },
+          "notes": "고객등급(CSC101M.CUS_GRD_CD) vs 마케팅등급(CSP103M.MKT_GRD_CD) 선택 불가."
+        },
+        {
+          "id": "RA01-004",
+          "query": "연체 건수 알려줘",
+          "recovery_context": {
+            "unresolved_item": "filter:연체판정기준",
+            "explored_tables": ["TB_ADW_LNB301M"],
+            "dead_ends": [
+              {"hypothesis": "OVDU_GRD_CD IS NOT NULL 기준", "result": "OVDU_GRD_CD='A'가 정상. B~E가 연체"},
+              {"hypothesis": "LN_STCD='03' 연체 상태 기준", "result": "LN_STCD 03=연체도 유효한 기준"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "연체.*기준|어떤.*연체",
+            "expected_options": ["연체등급 기준 (요주의 이상)", "대출상태 기준 (연체 상태)", "연체일수 기준 (1일 이상)"],
+            "option_source": "OVDU_GRD_CD B~E vs LN_STCD='03' vs OVDU_DY_CN>0"
+          },
+          "user_response": "연체등급 기준으로요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "OVDU_GRD_CD IN ('B','C','D','E')"
+          },
+          "notes": "연체 판정 기준이 3가지(등급/상태/일수) 있어 특정 불가."
+        },
+        {
+          "id": "RA01-005",
+          "query": "지역별 대출 현황",
+          "recovery_context": {
+            "unresolved_item": "filter:지역필터방식",
+            "explored_tables": ["TB_ADW_LNB301M", "TB_ADW_COM001M"],
+            "dead_ends": [
+              {"hypothesis": "COM001M.RGN_CD(지역코드) 기준 JOIN", "result": "RGN_CD와 BR_NM 양쪽 경로 가능"},
+              {"hypothesis": "BR_NM LIKE '%서울%' 텍스트 기준", "result": "광역시/도 단위인지 시군구 단위인지 불명"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "지역.*단위|어떤.*지역",
+            "expected_options": ["광역시/도 단위 (서울, 경기, 부산 등)", "개별 지점 단위"]
+          },
+          "user_response": "광역시/도 단위요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "RGN_CD 기준 GROUP BY"
+          },
+          "notes": "RGN_CD 12개 코드(서울~경남) 기반 vs BR_NM 텍스트 기반 집계 범위 불명."
+        }
+      ]
+    },
+    {
+      "id": "REC-ASK-02",
+      "name": "산출식/계산 기준 불명 (free_text)",
+      "description": "금융 지표 산출식이 매뉴얼·유사SQL에서 확인 불가. 사용자에게 직접 질문.",
+      "expected_path": "explore → readiness_gate(REPLAN) → recovery_agent(2회 탐색 실패) → ask_user(free_text) → 사용자 응답 → recovery_agent(replan)",
+      "cases": [
+        {
+          "id": "RA02-001",
+          "query": "BIS 비율 산출해줘",
+          "recovery_context": {
+            "unresolved_item": "measure:BIS비율산출식",
+            "explored_tables": ["TB_ADW_RSK1101M"],
+            "dead_ends": [
+              {"hypothesis": "매뉴얼에서 BIS 비율 산출식 확인", "result": "search_manual('BIS 비율 산출식') → 0건"},
+              {"hypothesis": "유사 SQL에서 BIS 비율 계산 패턴 확인", "result": "search_use_cases('BIS 비율을 자기자본과 위험가중자산으로 산출') → 0건"}
+            ],
+            "failure_type": "산출식 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "free_text",
+            "question_pattern": "BIS.*어떤.*방식|산출.*기준|계산",
+            "expected_options": null
+          },
+          "user_response": "자기자본을 위험가중자산으로 나누면 됩니다",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_formula": "자기자본/위험가중자산*100"
+          },
+          "notes": "RSK1101M에 IND_CD='BIS_RATIO' 지표값이 있지만, 직접 산출이 필요한 경우 산출식 불명."
+        },
+        {
+          "id": "RA02-002",
+          "query": "고객별 DSR 계산해줘",
+          "recovery_context": {
+            "unresolved_item": "measure:DSR산출식",
+            "explored_tables": ["TB_ADW_LNB301M", "TB_ADW_CSC101M"],
+            "dead_ends": [
+              {"hypothesis": "매뉴얼에서 DSR 산출식 확인", "result": "search_manual('DSR 총부채원리금상환비율') → 0건"},
+              {"hypothesis": "유사 SQL에서 DSR 계산 패턴 확인", "result": "search_use_cases('연간 원리금 상환액을 연소득으로 나누어 DSR을 산출') → 0건"}
+            ],
+            "failure_type": "산출식 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "free_text",
+            "question_pattern": "DSR.*계산.*방식|원리금.*소득",
+            "expected_options": null
+          },
+          "user_response": "연간 원리금 상환액 나누기 연소득이요. 원리금은 월상환액 곱하기 12로 해주세요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_formula": "(MON_RPAY_AMT * 12) / ANN_INCM * 100"
+          },
+          "notes": "DSR은 금융 규제 지표로 산출식이 정확해야 하지만, 매뉴얼에 미등록."
+        },
+        {
+          "id": "RA02-003",
+          "query": "지점별 수익성 분석해줘",
+          "recovery_context": {
+            "unresolved_item": "measure:수익성지표정의",
+            "explored_tables": ["TB_ADW_FIN1306S", "TB_ADW_COM001M"],
+            "dead_ends": [
+              {"hypothesis": "PL_ITEM_CD='NET' 당기순이익 기준", "result": "수익성 지표가 다수: NII, NFI, PRETAX, NET"},
+              {"hypothesis": "유사 SQL에서 지점별 수익성 패턴 확인", "result": "search_use_cases('지점별 수익성 지표를 손익항목별로 조회') → 0건"}
+            ],
+            "failure_type": "산출식 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "free_text",
+            "question_pattern": "수익성.*어떤.*지표|어떤.*항목.*기준",
+            "expected_options": null
+          },
+          "user_response": "당기순이익 기준이요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "PL_ITEM_CD = 'NET'"
+          },
+          "notes": "FIN1306S에 PL_ITEM_CD 10종(NII/NFI/OPEX/PROV/PRETAX/NET 등) 중 어느 것이 '수익성'인지 불명."
+        },
+        {
+          "id": "RA02-004",
+          "query": "고객등급별 가중평균금리 알려줘",
+          "recovery_context": {
+            "unresolved_item": "measure:가중평균금리산출식",
+            "explored_tables": ["TB_ADW_DEP201P", "TB_ADW_CSC101M"],
+            "dead_ends": [
+              {"hypothesis": "SUM(BAL_AMT*INT_RT)/SUM(BAL_AMT) 가중평균 공식", "result": "INT_RT 컬럼 확인 필요, 어떤 금리인지 불명"},
+              {"hypothesis": "유사 SQL에서 가중평균 금리 계산 확인", "result": "search_use_cases('예금 잔액 기준 가중평균 금리를 산출') → 1건, 관련성 낮음"}
+            ],
+            "failure_type": "산출식 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "free_text",
+            "question_pattern": "가중평균.*어떤.*금리|금리.*기준",
+            "expected_options": null
+          },
+          "user_response": "예금 잔액 기준으로 적용금리의 가중평균을 구해주세요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_formula": "SUM(BAL_AMT * APL_INT_RT) / NULLIF(SUM(BAL_AMT), 0)"
+          },
+          "notes": "가중평균 공식은 알지만, 어떤 금리(기본금리/적용금리/우대금리)를 대상으로 하는지 불명."
+        },
+        {
+          "id": "RA02-005",
+          "query": "NPL 비율 뽑아줘",
+          "recovery_context": {
+            "unresolved_item": "measure:NPL산출식",
+            "explored_tables": ["TB_ADW_LNB301M"],
+            "dead_ends": [
+              {"hypothesis": "매뉴얼에서 NPL(부실채권) 정의 확인", "result": "search_manual('NPL 부실채권비율') → 0건"},
+              {"hypothesis": "OVDU_GRD_CD C~E가 부실채권인지 확인", "result": "고정(C)/회수의문(D)/추정손실(E)이 NPL 범위인지 명확하지 않음"}
+            ],
+            "failure_type": "산출식 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "free_text",
+            "question_pattern": "NPL.*어떤.*기준|부실채권.*정의|연체등급.*범위",
+            "expected_options": null
+          },
+          "user_response": "연체등급 C 이하(고정, 회수의문, 추정손실)를 부실채권으로 봅니다. 부실채권금액 나누기 총대출잔액이요.",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "OVDU_GRD_CD IN ('C','D','E')",
+            "clarified_formula": "SUM(CASE WHEN OVDU_GRD_CD IN ('C','D','E') THEN LN_BAL_AMT END) / NULLIF(SUM(LN_BAL_AMT), 0) * 100"
+          },
+          "notes": "NPL 범위(어느 등급부터 부실인지)는 업무 관행이며 매뉴얼에 없음."
+        }
+      ]
+    },
+    {
+      "id": "REC-ASK-03",
+      "name": "ask_user 후 사용자 응답별 분기",
+      "description": "사용자 응답이 유효/불명확/모르겠다일 때 recovery_agent 재진입 후 행동 검증.",
+      "expected_path": "recovery_agent → ask_user → 사용자 응답 → recovery_agent 재진입 → replan/give_up",
+      "cases": [
+        {
+          "id": "RA03-001",
+          "query": "고객 수 알려줘",
+          "scenario": "사용자가 명확한 선택지 응답",
+          "ask_user_question": "어떤 고객을 대상으로 하시나요?",
+          "ask_user_options": ["개인고객", "기업고객", "전체"],
+          "user_response": "기업고객",
+          "expected_after_response": {
+            "action": "replan",
+            "hypothesis_contains": "기업고객|법인|CUS_DCD",
+            "replan_count_change": 0
+          },
+          "verify": {
+            "is_clarification_reentry": true,
+            "increment_replan_skipped": true,
+            "hypothesis_transition_skipped": true,
+            "clarification_history_injected": true
+          },
+          "notes": "재진입 시 replan_count 미증가, 가설 전이 스킵, clarification_history 포함 확인."
+        },
+        {
+          "id": "RA03-002",
+          "query": "잔액 합계 알려줘",
+          "scenario": "사용자가 '모르겠다'고 응답",
+          "ask_user_question": "예금 잔액과 대출 잔액 중 어떤 잔액을 원하시나요?",
+          "ask_user_options": ["예금 잔액", "대출 잔액", "전체"],
+          "user_response": "잘 모르겠어요",
+          "expected_after_response": {
+            "action": "replan_or_give_up",
+            "reasoning": "LLM이 '모르겠다' 응답을 해소 불가로 간주, 남은 탐색 여지에 따라 판단"
+          },
+          "verify": {
+            "is_clarification_reentry": true,
+            "clarification_history_contains": "모르겠"
+          },
+          "notes": "프롬프트 지시에 따라 LLM이 자유 판단. '모르겠다'=해소 불가, 남은 탐색 여지에 따라 replan/give_up."
+        },
+        {
+          "id": "RA03-003",
+          "query": "등급별 현황",
+          "scenario": "사용자가 선택지에 없는 답변 (자유 입력)",
+          "ask_user_question": "어떤 등급 기준으로 보시겠어요?",
+          "ask_user_options": ["고객등급", "마케팅등급"],
+          "user_response": "연체등급이요",
+          "expected_after_response": {
+            "action": "replan",
+            "hypothesis_contains": "연체등급|OVDU_GRD_CD",
+            "reasoning": "선택지에 없더라도 유효한 답변이므로 LLM이 새 가설 수립"
+          },
+          "verify": {
+            "clarification_history_contains": "연체등급"
+          },
+          "notes": "single_select지만 사용자가 선택지 밖 답변. LLM은 업무 맥락에서 유효한 답변으로 처리."
+        },
+        {
+          "id": "RA03-004",
+          "query": "BIS 비율 산출해줘",
+          "scenario": "free_text에서 충분히 상세한 응답",
+          "ask_user_question": "BIS 비율을 어떤 방식으로 계산하시나요?",
+          "user_response": "자기자본을 위험가중자산으로 나누고 100을 곱하면 됩니다. 자기자본은 RSK1101M의 IND_CD='BIS_RATIO' 값을 쓰세요.",
+          "expected_after_response": {
+            "action": "replan",
+            "hypothesis_contains": "BIS|자기자본|위험가중자산"
+          },
+          "notes": "사용자가 구체적 컬럼까지 언급한 경우. LLM이 이를 활용해 정확한 가설 수립."
+        },
+        {
+          "id": "RA03-005",
+          "query": "대출 실적 뽑아줘",
+          "scenario": "free_text에서 불충분한 응답",
+          "ask_user_question": "'실적'이란 어떤 항목을 의미하시나요? 예를 들어 대출 건수, 대출 금액, 대출 잔액 등.",
+          "user_response": "음.. 그냥 전반적인 것",
+          "expected_after_response": {
+            "action": "replan",
+            "reasoning": "불충분하지만 '전반적' → LLM이 건수+금액+잔액 종합 리포트로 해석 시도"
+          },
+          "notes": "LLM이 모호한 답변을 최선으로 해석하여 replan. 2차 ask_user도 가능."
+        }
+      ]
+    },
+    {
+      "id": "REC-ASK-04",
+      "name": "ask_user 횟수 제한 (루프 가드)",
+      "description": "MAX_ASK_USER_ROUNDS(2)에 도달하면 ask_user 대신 give_up으로 전환.",
+      "expected_path": "recovery_agent → ask_user(1차) → 응답 → recovery_agent → ask_user(2차) → 응답 → recovery_agent → ask_user 시도 → give_up 전환",
+      "cases": [
+        {
+          "id": "RA04-001",
+          "query": "실적 좀 알려줘",
+          "scenario": "ask_user 2회 후 3번째 시도 시 give_up 전환",
+          "rounds": [
+            {
+              "round": 1,
+              "ask_user_question": "'실적'이 무엇을 의미하시나요?",
+              "user_response": "대출 실적이요",
+              "result": "replan — 대출 실적으로 범위 좁힘, 추가 탐색"
+            },
+            {
+              "round": 2,
+              "ask_user_question": "대출 실적의 기준은 건수인가요, 금액인가요?",
+              "user_response": "잘 모르겠어요",
+              "result": "replan — '모르겠다'이나 남은 탐색 여지로 replan"
+            },
+            {
+              "round": 3,
+              "recovery_agent_action": "ask_user 시도",
+              "expected_result": "ask_user_count(2) >= MAX_ASK_USER_ROUNDS(2) → give_up 전환",
+              "verify": {
+                "ask_user_count_at_check": 2,
+                "forced_give_up": true,
+                "lessons_learned_preserved": true
+              }
+            }
+          ],
+          "notes": "ask_user 무한 루프 방지. 3번째 ask_user 시도 시 Python이 강제로 give_up 전환."
+        },
+        {
+          "id": "RA04-002",
+          "query": "리스크 지표 현황",
+          "scenario": "ask_user 1회 후 유효한 응답 → replan 성공 (횟수 제한에 걸리지 않음)",
+          "rounds": [
+            {
+              "round": 1,
+              "ask_user_question": "어떤 리스크 지표를 보시겠어요?",
+              "ask_user_options": ["BIS자기자본비율", "유동성커버리지비율(LCR)", "순이자마진(NIM)", "부실채권비율(NPL)"],
+              "user_response": "NIM이요",
+              "result": "replan — IND_CD='NIM' 기준 탐색"
+            }
+          ],
+          "expected_final": {
+            "ask_user_count": 1,
+            "action": "replan 후 정상 진행",
+            "no_forced_give_up": true
+          },
+          "notes": "1회 ask_user 후 해소 → 정상 replan. 횟수 제한에 여유 있음."
+        }
+      ]
+    },
+    {
+      "id": "REC-ASK-05",
+      "name": "give_up 경로 (ask_user가 아닌 경우)",
+      "description": "사용자에게 물어봐도 답이 나올 수 없는 문제 → give_up 직행.",
+      "expected_path": "explore → readiness_gate(REPLAN) → recovery_agent(3회 탐색 실패) → give_up",
+      "cases": [
+        {
+          "id": "RA05-001",
+          "query": "특수금융상품 수익률 추이",
+          "recovery_context": {
+            "unresolved_item": "table:수익률테이블",
+            "explored_tables": [],
+            "dead_ends": [
+              {"hypothesis": "search_table_meta('특수금융상품 수익률')", "result": "관련 테이블 0건"},
+              {"hypothesis": "search_use_cases('특수금융상품 수익률 추이를 조회')", "result": "유사 SQL 0건"},
+              {"hypothesis": "search_table_meta('투자상품 성과 지표')", "result": "FND601P, FND602P 발견되었으나 '특수금융상품' 관련 컬럼 없음"}
+            ],
+            "failure_type": "데이터 부재",
+            "all_methods_exhausted": true
+          },
+          "expected_action": "give_up",
+          "expected_reasoning": "정보계 DB에 '특수금융상품 수익률' 데이터가 적재되지 않았을 가능성 강함",
+          "verify": {
+            "no_ask_user": true,
+            "clarification_null": true,
+            "execution_plan_empty": true
+          },
+          "notes": "테이블 자체가 존재하지 않으므로 사용자에게 물어봐도 답이 나올 수 없음."
+        },
+        {
+          "id": "RA05-002",
+          "query": "AML 의심거래 건수",
+          "recovery_context": {
+            "unresolved_item": "table:AML거래테이블",
+            "explored_tables": ["TB_ADW_AML1121M"],
+            "dead_ends": [
+              {"hypothesis": "AML1121M에서 의심거래 필터", "result": "AML1121M은 경보 테이블이지 거래 테이블이 아님"},
+              {"hypothesis": "TRX701L에서 AML 플래그 확인", "result": "AML 관련 컬럼 없음"},
+              {"hypothesis": "search_table_meta('AML 의심거래 보고')", "result": "0건"}
+            ],
+            "failure_type": "테이블 부재"
+          },
+          "expected_action": "give_up",
+          "expected_reasoning": "AML 의심거래 상세 데이터는 정보계가 아닌 별도 FDS 시스템에 존재할 가능성",
+          "notes": "AML1121M은 경보 수준만 있고, 실제 의심거래 데이터는 정보계 범위 밖."
+        },
+        {
+          "id": "RA05-003",
+          "query": "실시간 환율 조회해줘",
+          "recovery_context": {
+            "unresolved_item": "table:실시간환율",
+            "explored_tables": ["TB_ADW_FXB502M"],
+            "dead_ends": [
+              {"hypothesis": "FXB502M이 실시간 환율 테이블인지 확인", "result": "BASE_DT 기준 일별 고시환율, 실시간 아님"},
+              {"hypothesis": "search_table_meta('실시간 환율 시세')", "result": "0건"}
+            ],
+            "failure_type": "데이터 부재"
+          },
+          "expected_action": "give_up",
+          "expected_reasoning": "정보계에는 일별 고시환율만 존재. 실시간 환율은 원천 시스템(딜링룸)에서만 제공.",
+          "notes": "SQL로 표현 가능하지만 데이터가 정보계에 없는 케이스."
+        }
+      ]
+    },
+    {
+      "id": "REC-ASK-06",
+      "name": "유사 테이블 선택 불명 (single_select)",
+      "description": "같은 도메인의 유사 테이블이 다수 발견되었으나 탐색으로 구분 불가.",
+      "expected_path": "explore → readiness_gate(REPLAN) → recovery_agent(2회 탐색) → ask_user(single_select)",
+      "cases": [
+        {
+          "id": "RA06-001",
+          "query": "예금 잔액 현황 뽑아줘",
+          "recovery_context": {
+            "unresolved_item": "table:예금잔액테이블",
+            "explored_tables": ["TB_ADW_DEP201P", "TB_ADW_DEP202S"],
+            "dead_ends": [
+              {"hypothesis": "DEP201P(스냅샷) 사용", "result": "DEP201P는 T+0 당일 기준, DEP202S는 T+1 전일 기준 — 양쪽 모두 유효"},
+              {"hypothesis": "유사 SQL에서 예금 잔액 패턴 확인", "result": "DEP201P 3건, DEP202S 2건 — 명확한 편중 없음"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "데이터.*시점|기준.*시점",
+            "expected_options": ["당일(T+0) 기준 실시간 잔액", "전일(T+1) 기준 확정 잔액"]
+          },
+          "user_response": "전일 기준이요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_table": "TB_ADW_DEP202S"
+          },
+          "notes": "DEP201P(T+0) vs DEP202S(T+1) 시점 차이로 인한 테이블 선택 불명."
+        },
+        {
+          "id": "RA06-002",
+          "query": "펀드 현황 보여줘",
+          "recovery_context": {
+            "unresolved_item": "table:펀드테이블",
+            "explored_tables": ["TB_ADW_FND601P", "TB_ADW_FND602P"],
+            "dead_ends": [
+              {"hypothesis": "FND601P(잔고) 사용", "result": "잔고 정보 vs 평가 정보 중 어떤 관점의 '현황'인지 불명"},
+              {"hypothesis": "유사 SQL에서 펀드 현황 패턴 확인", "result": "잔고 2건, 평가 2건 — 구분 불가"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "펀드.*어떤.*정보|잔고.*평가",
+            "expected_options": ["펀드 계좌 잔고 현황", "펀드 수익률/평가액 현황"]
+          },
+          "user_response": "수익률 현황이요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_table": "TB_ADW_FND602P"
+          },
+          "notes": "FND601P(잔고) vs FND602P(평가) — 같은 '펀드 현황'이지만 관점이 다름."
+        },
+        {
+          "id": "RA06-003",
+          "query": "고객 이력 조회해줘",
+          "recovery_context": {
+            "unresolved_item": "scope:고객이력범위",
+            "explored_tables": ["TB_ADW_CSC101M", "TB_ADW_CSC102H"],
+            "dead_ends": [
+              {"hypothesis": "CSC101M(현재 스냅샷) 사용", "result": "CSC101M은 현재 상태만, CSC102H는 변동 이력"},
+              {"hypothesis": "'이력'의 의미 — 현재 정보인지 변동 추이인지", "result": "탐색으로 구분 불가"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "고객.*현재.*변동|어떤.*이력",
+            "expected_options": ["현재 고객 기본 정보", "고객 등급/상태 변동 이력"]
+          },
+          "user_response": "등급 변동 이력이요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_table": "TB_ADW_CSC102H"
+          },
+          "notes": "CSC101M(현재 상태) vs CSC102H(변동 이력) — '이력'의 의미가 모호."
+        }
+      ]
+    },
+    {
+      "id": "REC-ASK-07",
+      "name": "엣지 케이스",
+      "description": "경계 조건, 비정상 입력, 인프라 동작 검증.",
+      "cases": [
+        {
+          "id": "RA07-001",
+          "query": "대출 현황 알려줘",
+          "scenario": "recovery_agent가 replan을 반복하다가 should_terminate에 걸림 (ask_user 아님)",
+          "recovery_context": {
+            "loop_guard": {"replan_count": 3, "ask_user_count": 0},
+            "max_replans": 3
+          },
+          "expected_action": "give_up (should_terminate 강제 종료)",
+          "verify": {
+            "no_ask_user": true,
+            "termination_by_loop_guard": true
+          },
+          "notes": "ask_user 없이 replan만 반복하다 한도 도달 → 기존 종료 경로."
+        },
+        {
+          "id": "RA07-002",
+          "query": "캠페인 효과 분석",
+          "scenario": "ask_user 1회 후 replan으로 해소 → 정상 SQL 생성",
+          "recovery_context": {
+            "unresolved_item": "filter:캠페인상태",
+            "explored_tables": ["TB_ADW_MKT1201M", "TB_ADW_MKT1202M"]
+          },
+          "ask_user": {
+            "question": "어떤 상태의 캠페인을 분석하시겠어요?",
+            "options": ["실행 중인 캠페인", "종료된 캠페인", "전체"]
+          },
+          "user_response": "종료된 캠페인",
+          "expected_flow": "ask_user → replan(CAMP_STCD='03') → explore → readiness_gate(GENERATE) → sql_generator → success",
+          "verify": {
+            "ask_user_count_final": 1,
+            "sql_generated": true
+          },
+          "notes": "ask_user가 정상적으로 replan을 이끌어내고 최종 SQL 생성까지 연결되는 해피패스."
+        },
+        {
+          "id": "RA07-003",
+          "query": "WM 고객 자산 현황",
+          "scenario": "ask_user 후 사용자 응답이 기존 unresolved_item을 해소하지 못함 → 2차 ask_user",
+          "recovery_context": {
+            "unresolved_item": "measure:자산기준",
+            "explored_tables": ["TB_ADW_WMB1401M", "TB_ADW_DEP201P", "TB_ADW_LNB301M"]
+          },
+          "rounds": [
+            {
+              "round": 1,
+              "ask_user_question": "자산 현황의 범위를 알려주세요. 어떤 자산을 포함하시겠어요?",
+              "user_response": "예금이랑 대출 다요",
+              "result": "replan — 수신+여신 포함. 그러나 추가 탐색에서 펀드(FND601P)도 발견"
+            },
+            {
+              "round": 2,
+              "ask_user_question": "펀드 자산도 포함하시겠어요?",
+              "user_response": "네, 펀드도 포함해주세요",
+              "result": "replan — 수신+여신+펀드 포함"
+            }
+          ],
+          "expected_final": {
+            "ask_user_count": 2,
+            "action": "replan",
+            "expected_tables": ["TB_ADW_WMB1401M", "TB_ADW_DEP201P", "TB_ADW_LNB301M", "TB_ADW_FND601P"]
+          },
+          "notes": "1차 응답이 부분 해소 → 추가 탐색 → 새 후보 발견 → 2차 ask_user. 횟수 제한(2) 내."
+        },
+        {
+          "id": "RA07-004",
+          "query": "보험 현황 분석해줘",
+          "scenario": "recovery_agent가 ask_user 판정하지만 replan으로도 해소 가능한 경계 케이스",
+          "recovery_context": {
+            "unresolved_item": "scope:보험유형",
+            "explored_tables": ["TB_ADW_INS803M"],
+            "dead_ends": [
+              {"hypothesis": "INS_DCD 코드 메타 확인", "result": "L=생명보험, N=손해보험, H=건강보험 3종"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_action": "ask_user 또는 replan (LLM 판단)",
+          "expected_ask_user_if_triggered": {
+            "question_type": "single_select",
+            "expected_options": ["생명보험", "손해보험", "건강보험", "전체"]
+          },
+          "notes": "dead_end 1건만 있어 '탐색 한계' 판정이 경계. LLM이 추가 탐색 여지를 보고 replan할 수도 있음."
+        },
+        {
+          "id": "RA07-005",
+          "query": "연금 유형별 고객 수",
+          "scenario": "정규화 단계에서 명확화되지 않고 recovery까지 도달한 경우",
+          "recovery_context": {
+            "unresolved_item": "scope:연금유형범위",
+            "explored_tables": ["TB_ADW_PNB904P"],
+            "dead_ends": [
+              {"hypothesis": "PN_DCD 코드로 DB/DC/IRP 구분", "result": "3종 모두 유효, 전체인지 특정 유형인지 불명"},
+              {"hypothesis": "유사 SQL에서 연금 유형 패턴 확인", "result": "DB형 1건 — 편중으로 보기 어려움"}
+            ],
+            "failure_type": "필터값 불명"
+          },
+          "expected_ask_user": {
+            "question_type": "single_select",
+            "question_pattern": "연금.*유형|어떤.*연금",
+            "expected_options": ["확정급여형(DB)", "확정기여형(DC)", "개인형퇴직연금(IRP)", "전체"]
+          },
+          "user_response": "전체 다요",
+          "expected_after_response": {
+            "action": "replan",
+            "clarified_filter": "PN_DCD IN ('DB','DC','IRP') (전체)"
+          },
+          "notes": "'전체' 선택 시 필터 조건 없이 GROUP BY PN_DCD로 처리."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_cases": 30,
+    "by_category": {
+      "대상 범위 불명 (single_select)": 5,
+      "산출식/계산 기준 불명 (free_text)": 5,
+      "사용자 응답별 분기": 5,
+      "ask_user 횟수 제한": 2,
+      "give_up 경로": 3,
+      "유사 테이블 선택 불명": 3,
+      "엣지 케이스": 5
+    },
+    "by_question_type": {
+      "single_select": 13,
+      "free_text": 7,
+      "give_up (no ask_user)": 5,
+      "mixed/conditional": 5
+    },
+    "seeded_tables_referenced": [
+      "TB_ADW_CSC101M", "TB_ADW_CSC102H", "TB_ADW_CSP103M",
+      "TB_ADW_DEP201P", "TB_ADW_DEP202S",
+      "TB_ADW_LNB301M", "TB_ADW_LNB302M",
+      "TB_ADW_CRD401M",
+      "TB_ADW_FND601P", "TB_ADW_FND602P",
+      "TB_ADW_FXB502M",
+      "TB_ADW_INS803M",
+      "TB_ADW_PNB904P",
+      "TB_ADW_RSK1101M",
+      "TB_ADW_FIN1306S",
+      "TB_ADW_MKT1201M", "TB_ADW_MKT1202M",
+      "TB_ADW_WMB1401M",
+      "TB_ADW_COM001M",
+      "TB_ADW_AML1121M",
+      "TB_ADW_TRX701L"
+    ],
+    "code_meta_referenced": [
+      "CUS_DCD (개인/법인/개인사업자)",
+      "CUS_GRD_CD (VIP/우수/일반/잠재/관리)",
+      "MKT_GRD_CD (최우수/우수/일반/관심/휴면)",
+      "OVDU_GRD_CD (정상/요주의/고정/회수의문/추정손실)",
+      "LN_STCD (정상/기한이익상실/연체/대위변제/상각)",
+      "ACT_DCD (보통예금/정기예금/적금/MMF)",
+      "INS_DCD (생명보험/손해보험/건강보험)",
+      "PN_DCD (DB/DC/IRP)",
+      "RGN_CD (서울~경남 12개)",
+      "CAMP_STCD (계획/실행/종료)",
+      "PL_ITEM_CD (NII/NFI/OPEX/PROV/PRETAX/NET 등)",
+      "IND_CD (BIS_RATIO/LCR/NIM/NPL_RATIO 등)"
+    ]
+  }
+}

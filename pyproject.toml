@@ -64,12 +64,13 @@ dependencies = [
     "sqlanydb>=1.0.13",            # 네이티브 방식 (libdbcapi_r.so만 필요, ODBC 불필요)
     # Oracle 19c/21c — python-oracledb (cx_Oracle의 공식 후속 드라이버)
     "oracledb>=2.2.0",             # thin 모드 기본, thick 모드는 Instant Client 필요
+    # ── 운영 서버 (폐쇄망 systemd 기동 필수) ──
+    # Windows 개발 환경에서는 설치되지 않지만 uvicorn 단독 실행은 동작한다.
+    # 폐쇄망(Linux) 반입 시 gunicorn + UvicornWorker 로 운영하므로 main deps 에 둔다.
+    'gunicorn>=23.0.0 ; sys_platform != "win32"',
 ]
 
 [project.optional-dependencies]
-prod = [
-    "gunicorn>=23.0.0",           # WSGI/ASGI 운영 서버 (Linux 전용, uvicorn worker)
-]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

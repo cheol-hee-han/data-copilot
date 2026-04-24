@@ -70,7 +70,7 @@ async def reasoning_preparer_node(state: PipelineState) -> dict:
         decomposition, query,
     )
     for i, ki in enumerate(knowledge_items):
-        ki.knowledge_id = f"K{i + 1}"
+        ki.id = f"K{i + 1}"
     reason.knowledge_items = knowledge_items
 
     # 2. rule-based 초기 가설 생성
@@ -129,7 +129,7 @@ async def reasoning_preparer_node(state: PipelineState) -> dict:
                 "order_limit": decomposition.get("order_limit", []),
             },
             "knowledge_items": [
-                f"{ki.knowledge_id}: {ki.key} ({ki.status.value})"
+                f"{ki.id}: {ki.key} ({ki.status.value})"
                 for ki in knowledge_items
             ],
             "hypothesis": f"{hypothesis.hypothesis_id}: {hypothesis.description}",

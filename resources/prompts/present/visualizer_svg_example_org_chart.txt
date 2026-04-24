@@ -1,0 +1,126 @@
+────────────────────────────────
+## 예제 9: org_chart (조직도)
+────────────────────────────────
+
+데이터:
+유형: 조직도 (3계층 트리)
+최상위: "행장"
+2계층 (부행장 3명):
+  - "영업총괄 부행장"
+  - "리스크총괄 부행장"
+  - "디지털총괄 부행장"
+3계층 (본부 6개):
+  - 영업총괄 → ["개인영업본부", "기업영업본부"]
+  - 리스크총괄 → ["신용리스크본부", "시장리스크본부"]
+  - 디지털총괄 → ["디지털전략본부", "IT개발본부"]
+
+계산 과정 (모델 내부 참조):
+  레벨별 Y 좌표:
+    L1 (행장): y=60~110 (높이 50)
+    L2 (부행장): y=180~230 (높이 50)
+    L3 (본부): y=340~390 (높이 50)
+  X 좌표:
+    L1 행장: cx=400 (x=340, w=120)
+    L2 부행장 3개 균등 분할:
+      좌(영업): cx=150 (x=80, w=140)
+      중(리스크): cx=400 (x=330, w=140)
+      우(디지털): cx=650 (x=580, w=140)
+    L3 본부 (각 부행장 아래 2개씩, w=130):
+      영업: 개인영업 cx=80 (x=15), 기업영업 cx=220 (x=155)
+      리스크: 신용리스크 cx=330 (x=265), 시장리스크 cx=470 (x=405)
+      디지털: 디지털전략 cx=580 (x=515), IT개발 cx=720 (x=655)
+  연결선: 부모 노드 하단 중앙 → 자식 노드 상단 중앙 (수직 + 수평 결합)
+  부모 하단 y=110 또는 230, 자식 상단 y=180 또는 340
+  L1→L2 분기: 행장 (400,110) → 중간선 (400,150) → 좌우 분기 (150,150),(400,150),(650,150) → 부행장 상단
+  L2→L3 분기: 부행장 (cx,230) → 중간선 (cx,290) → 자식 (cx_child,290) → 자식 상단 (cx_child,340)
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">은행 본부 조직도</text>
+
+  <!-- ===== L1: 행장 ===== -->
+  <rect x="340" y="60" width="120" height="50" rx="8" fill="#1a56db" stroke="#1a56db" stroke-width="1.5"/>
+  <text x="400" y="91" text-anchor="middle" font-size="17" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">행장</text>
+
+  <!-- L1 → L2 연결선 -->
+  <line x1="400" y1="110" x2="400" y2="150" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="150" y1="150" x2="650" y2="150" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="150" y1="150" x2="150" y2="180" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="400" y1="150" x2="400" y2="180" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="650" y1="150" x2="650" y2="180" stroke="#6b7280" stroke-width="1.5"/>
+
+  <!-- ===== L2: 부행장 3명 ===== -->
+  <!-- 영업총괄 -->
+  <rect x="80" y="180" width="140" height="50" rx="8" fill="#dbeafe" stroke="#1a56db" stroke-width="1.5"/>
+  <text x="150" y="203" text-anchor="middle" font-size="14" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">영업총괄</text>
+  <text x="150" y="220" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">부행장</text>
+
+  <!-- 리스크총괄 -->
+  <rect x="330" y="180" width="140" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="400" y="203" text-anchor="middle" font-size="14" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">리스크총괄</text>
+  <text x="400" y="220" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">부행장</text>
+
+  <!-- 디지털총괄 -->
+  <rect x="580" y="180" width="140" height="50" rx="8" fill="#d1fae5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="650" y="203" text-anchor="middle" font-size="14" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">디지털총괄</text>
+  <text x="650" y="220" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">부행장</text>
+
+  <!-- ===== L2 → L3 연결선 ===== -->
+  <!-- 영업 분기 -->
+  <line x1="150" y1="230" x2="150" y2="290" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="80" y1="290" x2="220" y2="290" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="80" y1="290" x2="80" y2="340" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="220" y1="290" x2="220" y2="340" stroke="#6b7280" stroke-width="1.5"/>
+
+  <!-- 리스크 분기 -->
+  <line x1="400" y1="230" x2="400" y2="290" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="330" y1="290" x2="470" y2="290" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="330" y1="290" x2="330" y2="340" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="470" y1="290" x2="470" y2="340" stroke="#6b7280" stroke-width="1.5"/>
+
+  <!-- 디지털 분기 -->
+  <line x1="650" y1="230" x2="650" y2="290" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="580" y1="290" x2="720" y2="290" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="580" y1="290" x2="580" y2="340" stroke="#6b7280" stroke-width="1.5"/>
+  <line x1="720" y1="290" x2="720" y2="340" stroke="#6b7280" stroke-width="1.5"/>
+
+  <!-- ===== L3: 본부 6개 ===== -->
+  <!-- 개인영업본부 -->
+  <rect x="15" y="340" width="130" height="50" rx="8" fill="#f0f5ff" stroke="#1a56db" stroke-width="1.5"/>
+  <text x="80" y="370" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">개인영업본부</text>
+
+  <!-- 기업영업본부 -->
+  <rect x="155" y="340" width="130" height="50" rx="8" fill="#f0f5ff" stroke="#1a56db" stroke-width="1.5"/>
+  <text x="220" y="370" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">기업영업본부</text>
+
+  <!-- 신용리스크본부 -->
+  <rect x="265" y="340" width="130" height="50" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="330" y="370" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">신용리스크본부</text>
+
+  <!-- 시장리스크본부 -->
+  <rect x="405" y="340" width="130" height="50" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="470" y="370" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">시장리스크본부</text>
+
+  <!-- 디지털전략본부 -->
+  <rect x="515" y="340" width="130" height="50" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="580" y="370" text-anchor="middle" font-size="14"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">디지털전략본부</text>
+
+  <!-- IT개발본부 -->
+  <rect x="655" y="340" width="130" height="50" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+  <text x="720" y="370" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">IT개발본부</text>
+</svg>

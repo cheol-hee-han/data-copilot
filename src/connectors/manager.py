@@ -117,23 +117,65 @@ class ConnectorManager:
         """
         return self._checkpointer_pool
 
+    # 인프라 커넥터: (속성명, health_check 키)
+    # 속성명은 getattr(self, attr)에, 키는 health_check_all/readiness에 사용.
+    _REQUIRED_INFRA: tuple[tuple[str, str], ...] = (
+        ("mongo", "mongodb"),
+        ("qdrant", "qdrant"),
+        ("postgres", "postgres"),
+    )
+    # 선택 인프라 — connect 실패 시 degraded 모드로 계속
+    _OPTIONAL_INFRA: tuple[tuple[str, str], ...] = (
+        # ("neo4j", "neo4j"),  # 향후 활성화 시 주석 해제
+    )
+
     async def connect_all(self) -> None:
         """모든 커넥터를 초기화한다 (멱등).
 
-        인프라 커넥터(mongo, qdrant, postgres)와 업무 DB 커넥터를
-        순서대로 connect 한다. Qdrant 실접속 모드에서는 Reranker도 워밍업한다.
+        각 커넥터의 connect()가 실접속 검증을 수행한다.
+        필수 인프라 커넥터 실패 → 기동 중단 (RuntimeError).
+        선택 인프라·업무 DB 커넥터 실패 → 해당 커넥터 제외 후 계속.
         """
         if self._connected:
             return
 
-        # 인프라
-        for attr in ("mongo", "qdrant", "postgres"):
-            await getattr(self, attr).connect()
-        # await self.neo4j.connect()  # 향후 활성화 시 주석 해제
+        # ── 1단계: 필수 인프라 ──
+        for attr, _ in self._REQUIRED_INFRA:
+            try:
+                await getattr(self, attr).connect()
+            except Exception as e:
+                logger.error(
+                    f"[기동 중단] 필수 인프라 연결 실패 — {attr.upper()}",
+                    step="1_required_infra",
+                    error=str(e),
+                )
+                raise
 
-        # 업무 DB (생성된 것만)
-        for conn in self._db_connectors.values():
-            await conn.connect()
+        # ── 2단계: 선택 인프라 ──
+        for attr, _ in self._OPTIONAL_INFRA:
+            try:
+                await getattr(self, attr).connect()
+            except Exception as e:
+                logger.warning(
+                    f"[degraded] 선택 인프라 연결 실패 — {attr.upper()}",
+                    step="2_optional_infra",
+                    error=str(e),
+                )
+
+        # ── 3단계: 업무 DB (실패 시 해당 커넥터 제외) ──
+        failed_db: list[str] = []
+        for name, conn in self._db_connectors.items():
+            try:
+                await conn.connect()
+            except Exception as e:
+                logger.warning(
+                    f"[degraded] 업무 DB 연결 실패 — {name}",
+                    step="3_business_db",
+                    error=str(e),
+                )
+                failed_db.append(name)
+        for name in failed_db:
+            del self._db_connectors[name]
 
         if not self._use_dummy:
             await self._warmup_reranker()
@@ -142,6 +184,7 @@ class ConnectorManager:
         logger.info(
             "커넥터 초기화 완료",
             db_connectors=sorted(self._db_connectors.keys()),
+            excluded_db=failed_db or None,
         )
 
     async def _warmup_reranker(self) -> None:
@@ -178,9 +221,8 @@ class ConnectorManager:
 
     async def disconnect_all(self) -> None:
         """모든 커넥터 연결을 종료한다."""
-        for attr in ("mongo", "qdrant", "postgres"):
+        for attr, _ in (*self._REQUIRED_INFRA, *self._OPTIONAL_INFRA):
             await getattr(self, attr).disconnect()
-        # await self.neo4j.disconnect()  # 향후 활성화 시 주석 해제
 
         for conn in self._db_connectors.values():
             await conn.disconnect()
@@ -221,10 +263,10 @@ class ConnectorManager:
                 return name, False
 
         targets: list[tuple[str, BaseConnector]] = [
-            ("mongodb", self.mongo),
-            ("qdrant", self.qdrant),
-            ("postgres", self.postgres),
-            # ("neo4j", self.neo4j),  # 향후 활성화 시 주석 해제
+            (key, getattr(self, attr))
+            for attr, key in (
+                *self._REQUIRED_INFRA, *self._OPTIONAL_INFRA,
+            )
         ]
         for name, conn in self._db_connectors.items():
             targets.append((name, conn))

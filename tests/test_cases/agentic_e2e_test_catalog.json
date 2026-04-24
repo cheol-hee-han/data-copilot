@@ -219,7 +219,7 @@
         {"id": "E12-001", "scenario": "EXPLORE — 탐색 스텝 남음", "state": "execution_plan에 PENDING 스텝 존재", "expected_verdict": "EXPLORE", "expected_next": "context_explorer"},
         {"id": "E12-002", "scenario": "GENERATE — 고확신도", "state": "score >= 0.75, all critical CONFIRMED", "expected_verdict": "GENERATE", "expected_next": "sql_generator"},
         {"id": "E12-003", "scenario": "REPLAN — 저확신도", "state": "score < 0.30, 스텝 소진", "expected_verdict": "REPLAN", "expected_next": "recovery_planner"},
-        {"id": "E12-004", "scenario": "ASK_USER — CONFLICTED", "state": "knowledge_items에 CONFLICTED 존재", "expected_verdict": "ASK_USER", "expected_next": "result_finalizer"},
+        {"id": "E12-004", "scenario": "REPLAN — CONFLICTED", "state": "knowledge_items에 CONFLICTED 존재", "expected_verdict": "REPLAN", "expected_next": "recovery_agent"},
         {"id": "E12-005", "scenario": "TERMINATE — 루프 가드 초과", "state": "total_tool_calls >= 20", "expected_verdict": "TERMINATE", "expected_next": "result_finalizer"},
         {"id": "E12-006", "scenario": "TERMINATE — replan 초과", "state": "replan_count >= 3", "expected_verdict": "TERMINATE", "expected_next": "result_finalizer"},
         {"id": "E12-007", "scenario": "Fast-Path 성공", "state": "fast_path_triggered=True, validator SUCCESS", "expected_next": "result_finalizer(success)"},
@@ -272,8 +272,8 @@
     {
       "id": "CAT-15",
       "name": "분석 및 시각화 의도",
-      "description": "데이터 분석 요청 → analyze_data 노드 경유",
-      "expected_path": "agentic_core → execute_sql → analyze_data → format_response",
+      "description": "데이터 분석 요청 → analyzer → visualizer 노드 경유",
+      "expected_path": "agentic_core → execute_sql → analyzer → visualizer → format_response",
       "cases": [
         {"id": "E15-001", "query": "고객등급별 분포를 분석해줘", "expected_intent": "data_analysis", "expected_chart": "pie/donut"},
         {"id": "E15-002", "query": "연체율 추이를 분석해줘", "expected_intent": "data_analysis", "expected_chart": "line"},
@@ -286,11 +286,78 @@
         {"id": "E15-009", "query": "카드유형별 이용금액 구성비", "expected_intent": "data_analysis", "expected_chart": "donut"},
         {"id": "E15-010", "query": "월별 신규 고객 수 트렌드 분석해줘", "expected_intent": "data_analysis", "expected_chart": "line"}
       ]
+    },
+    {
+      "id": "CAT-17",
+      "name": "CONTINUE 오케스트레이터 4-way 라우팅 (Path F')",
+      "description": "이전 턴 스냅샷을 가진 CONTINUE 발화를 REDISPLAY / ANALYZE / REGENERATE / REFINE 로 분기시키는 오케스트레이터 골든셋",
+      "expected_path": "continue_orchestrator → (redisplay → visualizer / analyze → analyzer / regenerate → sql_generator / refine → normalizer)",
+      "cases": [
+        {
+          "id": "E17-001",
+          "route": "regenerate",
+          "setup": "이전 턴: 지점별 여신 잔액 합계 (원 단위, 10건 결과)",
+          "new_query": "이거 억원 단위로 다시 뽑아줘",
+          "expected_route": "regenerate",
+          "expected_handoff_headers": ["### SQL 생성 지시"],
+          "expected_sql_change": "SUM(LN_BAL_AMT)/100000000",
+          "expected": "SELECT expression 단위 환산. 정규화 슬롯 무변경 → NormalizedQuery 를 스냅샷에서 그대로 hydrate 후 sql_generator 직행",
+          "notes": "§5 예시 3 대응 (SQL 문자열 차원 단위 변환)"
+        },
+        {
+          "id": "E17-002",
+          "route": "refine",
+          "setup": "이전 턴: 지점별 여신 잔액 합계 (GROUP BY BRCD, 48건)",
+          "new_query": "상위 10개만 보여줘",
+          "expected_route": "refine",
+          "expected_handoff_headers": ["### 연속 처리 의도"],
+          "expected_sql_change": "ORDER BY SUM(LN_BAL_AMT) DESC LIMIT 10",
+          "expected_nq_change": "intent AGGREGATE → RANK, modifiers [SORT DESC, LIMIT 10] 신규 추가",
+          "expected": "LIMIT·ORDER BY 신규 추가로 결과 row 집합이 48→10 으로 달라짐. intent 전이까지 발생 → query_normalizer 부터 재수행",
+          "notes": "§5 TOP-N 경계 — 슬롯 변경은 refine (정규화 변경 결정은 query_normalizer 가 담당)"
+        },
+        {
+          "id": "E17-003",
+          "route": "refine",
+          "setup": "이전 턴: 2024년 월별 수신 잔액 (GROUP BY ACCT_YM, 12건)",
+          "new_query": "분기별로 다시 뽑아줘",
+          "expected_route": "refine",
+          "expected_handoff_headers": ["### 연속 처리 의도"],
+          "expected_sql_change": "GROUP BY SUBSTR(ACCT_YM,1,4)||'Q'||CAST(CEIL(CAST(SUBSTR(ACCT_YM,5,2) AS INT)/3.0) AS INT)",
+          "expected_nq_change": "dimensions.기준년월 granularity MONTH → QUARTER",
+          "expected": "GROUP BY 축 전환으로 결과 row 수가 12→4 로 달라지고 dimensions 슬롯이 바뀜 → query_normalizer 부터 재수행",
+          "notes": "§5 분기 축 전환 — 슬롯 변경은 refine"
+        },
+        {
+          "id": "E17-004",
+          "route": "redisplay",
+          "setup": "이전 턴: 대출유형별 건수 (파이 차트로 렌더링된 4행 결과)",
+          "new_query": "이거 막대 차트로 바꿔줘",
+          "expected_route": "redisplay",
+          "expected_handoff_headers": ["### 시각화/포맷 지시"],
+          "expected_sql_change": "없음 (재생성 금지)",
+          "expected_chart": "bar",
+          "expected": "기존 SQLResult 재사용. visualizer 가 handoff_note 의 막대 차트 지시를 반영하여 VisualizationData 재생성. formatter 까지 재실행",
+          "notes": "§7.1 redisplay 경로 대응"
+        },
+        {
+          "id": "E17-005",
+          "route": "analyze",
+          "setup": "이전 턴: 지점별 대출 연체율 상위 10개 (대전지점 1위, 비정상적으로 높음)",
+          "new_query": "대전지점이 왜 이렇게 높아?",
+          "expected_route": "analyze",
+          "expected_handoff_headers": ["### 분석 초점"],
+          "expected_sql_change": "없음",
+          "expected_analysis_focus": "대전지점 1위 원인 해석, 이상치 여부 검토, 2~3문장 요약 + 시사점",
+          "expected": "analyzer 노드가 기존 rows 를 재분석. handoff_note 의 분석 초점이 analyzer_user 에 주입되어 reasoning_summary 에 반영",
+          "notes": "§5 예시 1 + §7.2 analyze 경로 대응"
+        }
+      ]
     }
   ],
   "summary": {
-    "total_cases": 165,
-    "by_difficulty": {"easy": 35, "medium": 65, "hard": 40, "mixed": 25},
+    "total_cases": 170,
+    "by_difficulty": {"easy": 35, "medium": 65, "hard": 40, "mixed": 30},
     "by_category": {
       "단순 추출": 10,
       "그룹별 집계": 10,
@@ -306,11 +373,12 @@
       "에이전틱 분기": 15,
       "메타 불완전성": 10,
       "유사 테이블 구분": 10,
-      "분석/시각화": 10
+      "분석/시각화": 10,
+      "CONTINUE 4-way 라우팅": 5
     },
     "coverage": {
-      "agent_states": ["PLANNING", "EXPLORING", "VERIFYING", "GENERATING", "VALIDATING", "REPLANNING", "DONE"],
-      "verdicts": ["EXPLORE", "GENERATE", "REPLAN", "ASK_USER", "TERMINATE"],
+      "agent_states": ["PLANNING", "EXPLORING", "GENERATING", "VALIDATING", "REPLANNING", "DONE"],
+      "verdicts": ["EXPLORE", "GENERATE", "REPLAN", "TERMINATE"],
       "validation_outcomes": ["SUCCESS", "FAIL_SYNTAX", "FAIL_SEMANTIC_LOCAL", "FAIL_STRUCTURAL", "FAIL_EMPTY", "FAIL_DB_ERROR"],
       "imperfection_types": ["TYPE-2 (코드값 미정의)", "TYPE-3 (메타 품질)", "TYPE-4 (스키마 모호성)"],
       "intents": ["data_extraction", "data_analysis", "clarification_needed", "casual_talk", "meta_question"],

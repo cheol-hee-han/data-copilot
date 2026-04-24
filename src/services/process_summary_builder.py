@@ -26,7 +26,11 @@ if TYPE_CHECKING:
 
 
 def build_process_summary(state: PipelineState) -> dict[str, Any] | None:
-    """5단계 조회 과정 요약을 구조화 dict로 반환한다."""
+    """5단계 조회 과정 요약을 구조화 dict로 반환한다.
+
+    Path F' §3.5: 최상위에 `_query_decomposition` 언더스코어 필드를 추가하여
+    REGENERATE hydration 전용으로 보존한다 (UI 렌더 게이트에서 무시됨).
+    """
     intent = _build_intent_dict(state)
     interpretation = _build_interpretation_dict(state)
     context = _build_context_dict(state)
@@ -44,6 +48,11 @@ def build_process_summary(state: PipelineState) -> dict[str, Any] | None:
     }
     if ai_decisions:
         result["ai_decisions"] = ai_decisions
+
+    # Path F' REGENERATE hydration 전용 query_decomposition (언더스코어 접두사).
+    if state.reason.query_decomposition:
+        result["_query_decomposition"] = dict(state.reason.query_decomposition)
+
     return result
 
 
@@ -62,7 +71,11 @@ def _build_intent_dict(state: PipelineState) -> dict[str, Any]:
 
 
 def _build_interpretation_dict(state: PipelineState) -> dict[str, Any]:
-    """2단계: 질의 해석 — normalized_query 슬롯 요약."""
+    """2단계: 질의 해석 — normalized_query 슬롯 요약.
+
+    Path F' §3.5: `_raw` 언더스코어 접두사로 원본 NormalizedQuery dict 를
+    함께 저장한다 (hydration 전용, UI 렌더 게이트에서 무시됨).
+    """
     nq = state.normalized_query
     if not nq:
         return {}
@@ -88,6 +101,10 @@ def _build_interpretation_dict(state: PipelineState) -> dict[str, Any]:
         result["entities"] = [e.term for e in nq.entities]
     if nq.dimensions:
         result["dimensions"] = [d.term for d in nq.dimensions]
+
+    # Path F' REGENERATE hydration 전용 원본 보존.
+    result["_raw"] = nq.model_dump(mode="json")
+
     return result
 
 
@@ -155,6 +172,12 @@ def _build_context_dict(state: PipelineState) -> dict[str, Any]:
     if selected_terms:
         result["biz_terms"] = [bt.term for bt in selected_terms]
 
+    # Path F' REGENERATE hydration 전용 지식 항목 전량 보존 (언더스코어 접두사).
+    if reason.knowledge_items:
+        result["_knowledge_items"] = [
+            k.model_dump(mode="json") for k in reason.knowledge_items
+        ]
+
     return result
 
 
@@ -198,6 +221,7 @@ def _build_ai_decision_dict(state: PipelineState) -> dict[str, Any] | None:
                     "question": s.question,
                     "value": s.inferred_value or "",
                     "source_node": s.source_node,
+                    "reason": s.reasoning or "",
                 })
 
     # pending_assumptions 중 inferences와 겹치는 항목 제거
@@ -239,7 +263,8 @@ def _build_validation_dict(state: PipelineState) -> dict[str, Any]:
         if checks:
             passed = sum(
                 1 for v in checks.values()
-                if isinstance(v, dict) and v.get("pass")
+                if isinstance(v, dict)
+                and v.get("verdict") == "PASS"
             )
             total = sum(
                 1 for v in checks.values()
@@ -253,5 +278,10 @@ def _build_validation_dict(state: PipelineState) -> dict[str, Any]:
     elif state.sql_result:
         result["row_count"] = 0
         result["row_label"] = "조회 결과 0건."
+
+    if state.visualization and state.visualization.judgment_reason:
+        result["viz_judgment"] = (
+            state.visualization.judgment_reason
+        )
 
     return result

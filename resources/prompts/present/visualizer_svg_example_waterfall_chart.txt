@@ -1,0 +1,144 @@
+────────────────────────────────
+## 예제 8: waterfall_chart (폭포 차트 — 손익 분해)
+────────────────────────────────
+
+데이터:
+컬럼: [항목, 금액(억원), 유형]
+행: [
+  ("매출액", +5000, "수입"),
+  ("매출원가", -3200, "비용"),
+  ("판관비", -900, "비용"),
+  ("영업이익", 900, "소계"),
+  ("영업외손익", -200, "비용"),
+  ("당기순이익", 700, "최종")
+]
+
+계산 과정 (모델 내부 참조):
+  누적 추적: 0 → 5000 → 1800 → 900 → 900(소계) → 700 → 700(최종)
+  y_max = 5000 × 1.15 ≈ 5750 → 올림 → 6000
+  plot: x=[90,760], y=[60,420], width=670, height=360
+  scale = 360/6000 = 0.06
+
+  막대 6개: bar_width=80, gap=33, total=6×80+5×33=645
+  중앙 정렬: start_x = 90 + (670-645)/2 = 102.5
+  x좌표: x1=102.5, x2=215.5, x3=328.5, x4=441.5, x5=554.5, x6=667.5
+  cx (라벨 중심): 142.5, 255.5, 368.5, 481.5, 594.5, 707.5
+
+  Y그리드 7개: 0→y=420, 1000→y=360, 2000→y=300, 3000→y=240, 4000→y=180, 5000→y=120, 6000→y=60
+
+  막대별 위치/높이 (scale=0.06, 누적 위에서 +는 위로 쌓고, -는 아래로 깎음):
+    1) 매출액 +5000  : 누적 0→5000, top=120, bottom=420, h=300, color=#1a56db (수입)
+    2) 매출원가 -3200: 누적 5000→1800, top=120, bottom=312, h=192, color=#ef4444 (비용)
+    3) 판관비 -900   : 누적 1800→900, top=312, bottom=366, h=54, color=#ef4444 (비용)
+    4) 영업이익 =900 (소계): 0→900, top=366, bottom=420, h=54, color=#10b981 (소계)
+    5) 영업외손익 -200: 누적 900→700, top=366, bottom=378, h=12, color=#ef4444 (비용)
+    6) 당기순이익 =700 (최종): 0→700, top=378, bottom=420, h=42, color=#1a56db (최종)
+
+  연결선 (점선, 막대 우측 끝 → 다음 막대 좌측 끝, 누적값 라인):
+    1→2: (182.5, 120) → (215.5, 120)
+    2→3: (295.5, 312) → (328.5, 312)
+    3→4: (408.5, 366) → (441.5, 366)
+    4→5: (521.5, 366) → (554.5, 366)
+    5→6: (634.5, 378) → (667.5, 378)
+
+  값 라벨: 양수는 막대 상단(top - 8), 음수는 부호 포함 (-3,200)
+  X축 레이블: cx 위치, y=448, 4글자(매출원가) 5글자 미만이므로 회전 불필요
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">손익 분해 (억원)</text>
+
+  <!-- Y축 그리드 + 레이블 -->
+  <line x1="90" y1="420" x2="760" y2="420" stroke="#d1d5db" stroke-width="1"/>
+  <text x="80" y="424" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">0</text>
+
+  <line x1="90" y1="360" x2="760" y2="360" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="364" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">1,000</text>
+
+  <line x1="90" y1="300" x2="760" y2="300" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="304" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">2,000</text>
+
+  <line x1="90" y1="240" x2="760" y2="240" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="244" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">3,000</text>
+
+  <line x1="90" y1="180" x2="760" y2="180" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="184" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">4,000</text>
+
+  <line x1="90" y1="120" x2="760" y2="120" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="124" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">5,000</text>
+
+  <line x1="90" y1="60" x2="760" y2="60" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="80" y="64" text-anchor="end" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">6,000</text>
+
+  <!-- 축선 -->
+  <line x1="90" y1="60" x2="90" y2="420" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- 1) 매출액 +5000 (수입) -->
+  <rect x="102.5" y="120" width="80" height="300" fill="#1a56db" rx="4"/>
+  <text x="142.5" y="108" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">+5,000</text>
+  <text x="142.5" y="448" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">매출액</text>
+
+  <!-- 연결선 1→2 -->
+  <line x1="182.5" y1="120" x2="215.5" y2="120" stroke="#6b7280" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- 2) 매출원가 -3200 (비용) -->
+  <rect x="215.5" y="120" width="80" height="192" fill="#ef4444" rx="4"/>
+  <text x="255.5" y="108" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">-3,200</text>
+  <text x="255.5" y="448" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">매출원가</text>
+
+  <!-- 연결선 2→3 -->
+  <line x1="295.5" y1="312" x2="328.5" y2="312" stroke="#6b7280" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- 3) 판관비 -900 (비용) -->
+  <rect x="328.5" y="312" width="80" height="54" fill="#ef4444" rx="4"/>
+  <text x="368.5" y="300" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">-900</text>
+  <text x="368.5" y="448" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">판관비</text>
+
+  <!-- 연결선 3→4 -->
+  <line x1="408.5" y1="366" x2="441.5" y2="366" stroke="#6b7280" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- 4) 영업이익 =900 (소계) -->
+  <rect x="441.5" y="366" width="80" height="54" fill="#10b981" rx="4"/>
+  <text x="481.5" y="354" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">900</text>
+  <text x="481.5" y="448" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">영업이익</text>
+
+  <!-- 연결선 4→5 -->
+  <line x1="521.5" y1="366" x2="554.5" y2="366" stroke="#6b7280" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- 5) 영업외손익 -200 (비용) -->
+  <rect x="554.5" y="366" width="80" height="12" fill="#ef4444" rx="4"/>
+  <text x="594.5" y="354" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">-200</text>
+  <text x="594.5" y="448" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">영업외손익</text>
+
+  <!-- 연결선 5→6 -->
+  <line x1="634.5" y1="378" x2="667.5" y2="378" stroke="#6b7280" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- 6) 당기순이익 =700 (최종) -->
+  <rect x="667.5" y="378" width="80" height="42" fill="#1a56db" rx="4"/>
+  <text x="707.5" y="366" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">700</text>
+  <text x="707.5" y="448" text-anchor="middle" font-size="15"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">당기순이익</text>
+
+  <!-- 범례 (하단) -->
+  <rect x="220" y="475" width="14" height="14" fill="#1a56db" rx="2"/>
+  <text x="240" y="487" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">수입/최종</text>
+
+  <rect x="350" y="475" width="14" height="14" fill="#ef4444" rx="2"/>
+  <text x="370" y="487" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">비용</text>
+
+  <rect x="450" y="475" width="14" height="14" fill="#10b981" rx="2"/>
+  <text x="470" y="487" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">소계</text>
+</svg>

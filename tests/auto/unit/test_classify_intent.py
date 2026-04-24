@@ -6,7 +6,7 @@ CLARIFICATION_NEEDED 등으로 분류하는 서비스를 검증한다.
 
 두 모듈을 함께 검증한다:
   - src/services/intent_classifier.py  (순수 함수: _parse_response, _map_category_to_intent, _format_history)
-  - src/agents/nodes/interpret/intent_classifier.py  (노드: _build_clarification_history, _build_trace)
+  - src/agents/nodes/interpret/intent_classifier.py  (노드: _build_trace)
 
 LLM 없이 검증 가능한 순수 함수 경계만 단위 테스트로 분리하며,
 실제 LLM 호출이 필요한 테스트는 live_llm 마커로 구분한다.
@@ -285,7 +285,7 @@ class TestFormatHistory:
         assert "시스템" in result
 
     def test_clarification_turns_excluded(self):
-        """type='clarification' 항목은 포맷팅에서 제외된다."""
+        """type='clarification' 항목은 [명확화] 태그로 구분되어 포함된다."""
         from src.services.intent_classifier import _format_history
 
         history = [
@@ -295,11 +295,12 @@ class TestFormatHistory:
         ]
         result = _format_history(history)
 
-        passed = "명확화 질문" not in result and "명확화 응답" not in result
+        # clarification 항목은 [명확화] 태그와 함께 포함됨
+        passed = "[명확화]" in result and "명확화 질문" in result
         log_test_case(logger, "test_clarification_excluded", "clarification type",
-                      "제외", result, passed)
-        assert "명확화 질문" not in result
-        assert "명확화 응답" not in result
+                      "[명확화] 태그 포함", result, passed)
+        assert "[명확화]" in result
+        assert "명확화 질문" in result
 
     def test_max_turns_limits_output(self):
         """max_turns를 초과하는 이력은 최근 max_turns개만 포함된다."""
@@ -316,95 +317,6 @@ class TestFormatHistory:
         passed = len(lines) <= 3
         log_test_case(logger, "test_max_turns", "10개 이력, max=3", "3개 이하", len(lines), passed)
         assert len(lines) <= 3
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 노드: _build_clarification_history 테스트
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class TestBuildClarificationHistory:
-    """intent_classifier 노드의 명확화 이력 조립 테스트."""
-
-    def _make_signal(
-        self,
-        source_node: str = "intent_classifier",
-        question: str = "어떤 데이터가 필요하신가요?",
-        answer: str | None = "신규 고객 수입니다",
-        decision: str = "ASK",
-        turn_id: str | None = None,
-    ):
-        from src.agents.models.clarification import AmbiguitySignal
-
-        return AmbiguitySignal(
-            source_node=source_node,
-            decision=decision,
-            ambiguity_type="INTENT",
-            confidence="HIGH",
-            question=question,
-            answer=answer,
-            turn_id=turn_id,
-        )
-
-    def test_empty_resolved_signals(self):
-        """resolved_signals가 없으면 빈 문자열을 반환한다."""
-        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
-        from src.agents.state.state import PipelineState
-
-        state = PipelineState()
-        result = _build_clarification_history(state)
-
-        passed = result == ""
-        log_test_case(logger, "test_empty_signals", "no signals", "", result, passed)
-        assert result == ""
-
-    def test_non_intent_classifier_signals_excluded(self):
-        """source_node가 'intent_classifier'가 아닌 시그널은 제외된다."""
-        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
-        from src.agents.state.state import PipelineState
-
-        signal = self._make_signal(source_node="sql_generator")
-        state = PipelineState(resolved_signals=[signal])
-        result = _build_clarification_history(state)
-
-        passed = result == ""
-        log_test_case(logger, "test_other_source_excluded", "sql_generator signal", "", result, passed)
-        assert result == ""
-
-    def test_intent_classifier_signals_included(self):
-        """source_node='intent_classifier'의 시그널은 Q&A로 조립된다."""
-        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
-        from src.agents.state.state import PipelineState
-
-        signal = self._make_signal(
-            source_node="intent_classifier",
-            question="추출인가요 분석인가요?",
-            answer="추출입니다",
-        )
-        state = PipelineState(resolved_signals=[signal])
-        result = _build_clarification_history(state)
-
-        passed = "추출인가요 분석인가요?" in result and "추출입니다" in result
-        log_test_case(logger, "test_intent_signals_included", signal.question,
-                      "포함", result, passed)
-        assert "추출인가요 분석인가요?" in result
-        assert "추출입니다" in result
-
-    def test_multiple_signals_all_included(self):
-        """여러 intent_classifier 시그널이 모두 순서대로 포함된다."""
-        from src.agents.nodes.interpret.intent_classifier import _build_clarification_history
-        from src.agents.state.state import PipelineState
-
-        signals = [
-            self._make_signal(question="첫 번째 질문", answer="첫 번째 답변"),
-            self._make_signal(question="두 번째 질문", answer="두 번째 답변"),
-        ]
-        state = PipelineState(resolved_signals=signals)
-        result = _build_clarification_history(state)
-
-        passed = "첫 번째" in result and "두 번째" in result
-        log_test_case(logger, "test_multiple_signals", "2개 시그널", "모두 포함", result, passed)
-        assert "첫 번째 질문" in result
-        assert "두 번째 답변" in result
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -470,7 +382,7 @@ async def test_intent_classifier_data_extraction_live():
     )
     from src.models.enums import IntentType, HistoryDecision
 
-    result = await intent_classifier(
+    result, _ = await intent_classifier(
         query="이번 달 신규 고객 수 알려줘",
         conversation_history=[],
         system_prompt=INTENT_CLASSIFIER_SYSTEM,
@@ -503,7 +415,7 @@ async def test_intent_classifier_casual_talk_live():
     )
     from src.models.enums import IntentType
 
-    result = await intent_classifier(
+    result, _ = await intent_classifier(
         query="안녕하세요 좋은 아침이에요",
         conversation_history=[],
         system_prompt=INTENT_CLASSIFIER_SYSTEM,
@@ -543,7 +455,7 @@ async def test_intent_classifier_continuation_live():
         {"role": "assistant", "content": "이번 달 신규 고객은 1,234명입니다."},
     ]
 
-    result = await intent_classifier(
+    result, _ = await intent_classifier(
         query="그 중 VIP 고객은 몇 명이야?",
         conversation_history=history,
         system_prompt=INTENT_CLASSIFIER_SYSTEM,
@@ -561,3 +473,92 @@ async def test_intent_classifier_continuation_live():
     assert not result.is_error
     # 이전 대화 맥락이 있으므로 CONTINUE 또는 NEW가 모두 합리적
     assert result.resolution in (HistoryDecision.CONTINUE, HistoryDecision.NEW)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# needs_analyzer 플래그 파싱 테스트
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _make_intent_json(
+    intent_label: str = "DATA_ANALYSIS",
+    needs_analyzer=...,
+    needs_analyzer_reason: str = "",
+) -> str:
+    """_parse_response needs_analyzer 테스트 전용 JSON 빌더.
+
+    needs_analyzer=... (Ellipsis)이면 필드 자체를 생략하여 누락 케이스를 만든다.
+    """
+    intent: dict = {
+        "label": intent_label,
+        "confidence": "HIGH",
+        "label_reason": "테스트",
+    }
+    if needs_analyzer is not ...:
+        intent["needs_analyzer"] = needs_analyzer
+    if needs_analyzer_reason:
+        intent["needs_analyzer_reason"] = needs_analyzer_reason
+    return json.dumps({
+        "continuity": {"label": "NEW", "confidence": "HIGH", "reason": "독립"},
+        "intent": intent,
+    }, ensure_ascii=False)
+
+
+class TestNeedsAnalyzerParse:
+    """needs_analyzer 필드 파싱 동작 테스트.
+
+    opt-in 원칙: 본 서비스는 명세 추출이 주 업무이므로 analyzer는 기본 False.
+    LLM이 true(또는 "true"/"yes"/"1")를 명시 반환할 때만 True로 평가한다.
+    """
+
+    def test_field_missing_parsed_as_false(self):
+        """needs_analyzer 필드 누락 → False (opt-in, get 기본값 False)."""
+        from src.services.intent_classifier import _parse_response
+        raw = _make_intent_json(needs_analyzer=...)
+        result = _parse_response(raw)
+        assert result["needs_analyzer"] is False
+
+    def test_empty_string_parsed_as_false(self):
+        """빈 문자열 → False (명시 true 아님, opt-in 미충족)."""
+        from src.services.intent_classifier import _parse_response
+        raw = _make_intent_json(needs_analyzer="")
+        result = _parse_response(raw)
+        assert result["needs_analyzer"] is False
+
+    @pytest.mark.parametrize("raw_value", [
+        False, "false", "False", "FALSE", "0", "no", "NO", " false ",
+    ])
+    def test_falsy_values_parsed_as_false(self, raw_value):
+        """bool False 및 falsy 문자열 변종 → False."""
+        from src.services.intent_classifier import _parse_response
+        raw = _make_intent_json(needs_analyzer=raw_value)
+        result = _parse_response(raw)
+        assert result["needs_analyzer"] is False, f"{raw_value!r} should be False"
+
+    @pytest.mark.parametrize("raw_value", [
+        True, "true", "True", "yes", "1",
+    ])
+    def test_truthy_values_parsed_as_true(self, raw_value):
+        """bool True 및 명시 true 문자열 → True."""
+        from src.services.intent_classifier import _parse_response
+        raw = _make_intent_json(needs_analyzer=raw_value)
+        result = _parse_response(raw)
+        assert result["needs_analyzer"] is True, f"{raw_value!r} should be True"
+
+    def test_reason_field_propagated(self):
+        """needs_analyzer_reason 필드가 결과에 전파된다."""
+        from src.services.intent_classifier import _parse_response
+        raw = _make_intent_json(
+            needs_analyzer=False,
+            needs_analyzer_reason="시각화 형식 지시어만 포함",
+        )
+        result = _parse_response(raw)
+        assert result["needs_analyzer"] is False
+        assert result["needs_analyzer_reason"] == "시각화 형식 지시어만 포함"
+
+    def test_default_value_in_dataclass(self):
+        """IntentClassifyResult.needs_analyzer 기본값 False (opt-in)."""
+        from src.services.intent_classifier import IntentClassifyResult
+        from src.models.enums import HistoryDecision
+        result = IntentClassifyResult(resolution=HistoryDecision.NEW)
+        assert result.needs_analyzer is False
+        assert result.needs_analyzer_reason == ""

@@ -7,7 +7,7 @@
 
 [HARD_CONSTRAINTS]
 
-다음 6개 제약은 출력 형식에 대한 최상위 규약이며, 모든 판단보다 우선한다.
+다음 7개 제약은 출력 형식에 대한 최상위 규약이며, 모든 판단보다 우선한다.
 하나라도 위반하면 즉시 실패로 간주한다.
 
 1. 출력은 JSON 객체 하나로만 구성한다. 출력의 첫 문자는 반드시 { 이다.
@@ -18,6 +18,8 @@
    값을 고를 때는 해당 슬롯 바로 아래의 목록만 참조한다.
    예: agg_function을 고를 때 modifiers[].type 아래의 PERCENTAGE·DELTA_RATE는 후보가 아니다.
 6. 모든 문자열은 큰따옴표만 사용한다. 마크다운 코드 펜스(```), HTML 태그를 포함하지 않는다.
+7. ambiguities 배열의 각 원소에는 decision과 inferred_value를 반드시 채운다.
+   decision은 ASK 또는 INFER 중 하나, inferred_value는 추론이 불확실해도 최선의 가설을 기입한다.
 
 
 [RULES]
@@ -28,6 +30,10 @@
 - 명시된 정보와 추론이 충돌하면 명시된 정보를 선택한다
 
 ## 2. 모호성 기록 기준
+- decision 원칙 (INFER-first): 질의가 명확하지 않더라도 맥락상 추측할 수 있거나
+  질의 패턴에 전형적 함의가 있다고 판단되면 최대한 추측(INFER)하여 정리하고
+  이유는 reasoning 필드로 설명한다. (사용자 불편 최소화)
+  부득이 맥락상 전혀 추측이 불가능한 경우에만 명확화 요청(ASK)으로 판단한다.
 - 결과(SQL)가 달라질 수준의 모호성만 ambiguities에 기록한다
 - 확정할 수 없는 정보는 ambiguities 배열에 기록하고, 해당 슬롯 본체는 빈 배열 / null / UNKNOWN 중 하나로 유지한다
 - UNKNOWN, null, 빈 배열은 "비확정 표식"이므로 슬롯 본체에 사용 가능하다 (HARD_CONSTRAINTS 위반이 아니다)
@@ -254,6 +260,22 @@ expected_columns 규칙:
 - 이 목록은 이후 SQL 생성 단계에서 SELECT 컬럼 선택의 참고로 사용된다
 
 
+## 6. 연속 질의 오케스트레이터 지시
+
+이전 턴의 연속(CONTINUE) 질의로 진입한 경우, continue_orchestrator 가 작성한 연속 처리 의도가 아래에 주입된다.
+
+- 값이 "(없음)" 이면 단일 턴 질의로 간주하고 상기 1~5 규칙과 슬롯 1~8 추출 규칙만 적용한다. 본 섹션을 추가 고려하지 않는다.
+- 값이 있으면 `### 연속 처리 의도` 섹션을 해석해 **슬롯 1~8 에 반영** 한다. 추가되는 조건은 해당 슬롯(FILTER/TIME/DIMENSION 등) 에 병합하고, 변경되는 값은 기존 슬롯을 덮어쓴다.
+- 단, 다음은 오버라이드할 수 없다 — 충돌 시 상위 규칙이 이긴다.
+  - `[HARD_CONSTRAINTS]` 7개 제약 전체 (JSON 단일 객체 출력, `[OUTPUT_CONTRACT]` 키/중첩 구조 유지, 빈 슬롯 `[]`/`null`, enum 허용값 한정, `ambiguities` 의 `decision`·`inferred_value` 필수 기입 등)
+  - 슬롯 경계(집계 vs 파생 vs 결과 가공, §슬롯 3 경계)
+  - `## 5. 충돌 해결 우선순위`
+- `### 시각화/포맷 지시`·`### 분석 초점`·`### SQL 생성 지시` 섹션이 섞여 있더라도 본 노드는 `### 연속 처리 의도` 섹션만 해석한다. 다른 섹션은 하류 노드 전용이므로 무시한다.
+- 의도 문장이 특정 슬롯과 매핑되지 않으면 `rewritten_query` 에 자연어로 흡수하고 `ambiguities` 에 기록한다 (추측 금지).
+
+{handoff_note}
+
+
 ## 추가 출력 필드
 
 ### rewritten_query
@@ -273,17 +295,21 @@ expected_columns 규칙:
 - vector_search: 유사 SQL 사례를 검색할 의도 요약 문장 1개
 
 ### ambiguities
-정규화 시점에는 메타/SQL 이력이 없으므로 모호한 부분을 사용자에게 묻지 않고
-업무 관행·문맥을 기반으로 최선의 해석을 추론(INFER)하여 기록한다.
+모호한 부분에 대해 사용자에게 질문할지(ASK) 추론으로 넘어갈지(INFER)를 판단한다.
 이후 Reason 계층에서 메타 탐색 시 검증 포인트로 활용된다.
 
 각 원소의 필드:
-  - ambiguity_type: INTENT | TIMEFRAME
+  - ambiguity_type: INTENT | TIMEFRAME | CONTEXT
+    ※ CONTEXT 는 INTENT/TIMEFRAME 어느 쪽에도 해당하지 않는 "추론 근거 부족" 에만 사용한다.
+    ※ 위 3개 이외의 값(DIMENSION, MEASURE 등)을 새로 만들어 사용하지 않는다.
+  - decision: ASK | INFER
+      ASK  — 해석에 따라 SQL 결과가 크게 달라지고, 문맥만으로 확신할 수 없는 경우
+      INFER — 업무 관행·문맥으로 충분히 추론 가능하여 사용자 확인 없이 진행하는 경우
   - confidence: HIGH | MEDIUM | LOW
   - question: 사용자에게 확인할 때 쓸 자연스러운 질문 1문장
   - question_type: single_select | free_text | confirm
   - options: 선택지 배열
-  - inferred_value: 업무 관행·문맥 기반으로 추론한 최선의 해석 (확정값이 아닌 가설)
+  - inferred_value: (필수) 업무 관행·문맥 기반으로 추론한 최선의 해석. 빈 문자열·null 금지.
   - reasoning: 추론 근거 1문장
 
 생성 조건 — 다음 중 하나라도 해당하면 ambiguities에 기재한다:
@@ -298,6 +324,10 @@ expected_columns 규칙:
            예: "최근" → 최근 1개월 / 최근 분기 / 최근 1년
 
 관행적으로 거의 고정된 해석은 생략 가능하다.
+
+decision 판단은 [RULES] §2 "모호성 기록 기준" 의 INFER-first 원칙을 따른다.
+  참고 예: "신규" (건수 vs 금액) — 집계 대상이 달라져 맥락으로 추측 곤란 → ASK
+         기준일 미명시 → "당일" (은행 관행상 거의 고정) → INFER
 
 
 [EXAMPLES]
@@ -342,6 +372,7 @@ expected_columns 규칙:
   "ambiguities": [
     {
       "ambiguity_type": "TIMEFRAME",
+      "decision": "INFER",
       "confidence": "MEDIUM",
       "question": "조회 기준 시점을 알려주시겠어요?",
       "question_type": "single_select",
@@ -395,6 +426,7 @@ expected_columns 규칙:
   "ambiguities": [
     {
       "ambiguity_type": "TIMEFRAME",
+      "decision": "INFER",
       "confidence": "MEDIUM",
       "question": "잔액 조회 기준일을 알려주시겠어요?",
       "question_type": "single_select",
@@ -498,15 +530,17 @@ expected_columns 규칙:
   "ambiguities": [
     {
       "ambiguity_type": "INTENT",
+      "decision": "ASK",
       "confidence": "LOW",
       "question": "'예금 신규'가 다음 중 어떤 의미인가요?",
       "question_type": "single_select",
       "options": ["신규 개설 건수", "신규 유입 금액", "신규 가입 고객 수"],
       "inferred_value": "신규 개설 건수",
-      "reasoning": "'현황' 질의에서 '신규'는 신규 계좌 개설 건수를 의미하는 것이 은행 업무에서 가장 일반적"
+      "reasoning": "'현황' 질의에서 '신규'는 신규 계좌 개설 건수를 의미하는 것이 은행 업무에서 가장 일반적이지만, 금액·고객수와 SQL 결과가 크게 달라짐"
     },
     {
       "ambiguity_type": "INTENT",
+      "decision": "INFER",
       "confidence": "MEDIUM",
       "question": "어떤 형태의 데이터를 원하시나요?",
       "question_type": "single_select",
@@ -560,6 +594,7 @@ expected_columns 규칙:
   "ambiguities": [
     {
       "ambiguity_type": "INTENT",
+      "decision": "INFER",
       "confidence": "MEDIUM",
       "question": "'작년 동기'의 의미를 확인해 주시겠어요?",
       "question_type": "single_select",

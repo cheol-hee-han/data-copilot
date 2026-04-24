@@ -1,6 +1,6 @@
 # State Architecture 비판적 분석 — 데이터 활용 파이프라인 관점
 
-> **Version 2.3** (2026-04-13)
+> **Version 2.4** (2026-04-20)
 > 현재 `PipelineState` + `ReasoningState` 구조가 "데이터 분석가의 사고 흐름"을 적절히 모델링하고 있는지
 > 다각도로 분석한다.
 >
@@ -9,6 +9,20 @@
 > v2.1 (2026-04-01): 노드 리네임 반영 (context_explorer→context_retriever+context_interpreter, confidence_evaluator→readiness_gate, recovery_planner→recovery_agent, clarify→clarification_handler, preprocessor 삭제), 신규 state 필드 기재, W/R 약어 갱신
 > v2.2 (2026-04-02): planner→reasoning_preparer 리네임 반영 (규칙 기반, LLM/프롬프트 미사용), W/R 약어 갱신 (PRP)
 > v2.3 (2026-04-13): state.py W/R 약어 전수 현행화 (EXP→FET/INT, EVL→RDG), explored_biz_manuals/explored_biz_terms W 노드 정정 (RET→INT)
+> v2.4 (2026-04-20): 멀티턴(CONTINUE 4-Way) · 시각화 분리 · target_db 라우팅 · 스트리밍 · 턴 격리 SSoT 반영 (1.5 절 신규)
+
+---
+
+## 목차
+
+1. [분석 프레임워크](#1-분석-프레임워크) — 분석가 사고 흐름과 State 매핑, v2.1~v2.4 신규 필드
+2. [구조적 분석 — 잘 설계된 부분](#2-구조적-분석--잘-설계된-부분)
+3. [구조적 분석 — 문제점](#3-구조적-분석--문제점) — 불변 해석/플랫 지식/Phase 전이 불일치 등 8가지
+4. [종합 평가](#4-종합-평가)
+5. [최종 권고](#5-최종-권고) — 우선순위/실행순서
+6. [부록 — 미커버 분석가 행동](#6-부록-현재-state가-커버하지-못하는-분석가-행동)
+7. [파이프라인 정보 중복 분석](#7-파이프라인-정보-중복-분석)
+8. [통합 설계 권고](#8-통합-설계-권고)
 
 ---
 
@@ -74,6 +88,69 @@
 | `table_verifier` | — | *(삭제)* | — | 기능이 context_interpreter에 흡수 |
 | `clarify` | — | `clarification_handler` | — | Interpret/Reason 명확화 통합 |
 | `planner` | PLN | `reasoning_preparer` | PRP | 규칙 기반, LLM/프롬프트 미사용 |
+| `execute_sql` | EXE | `sql_executor` | EXE | v2.4 노드명 통일 (책임 노출) |
+| `analyze_data` | ANA | `analyzer` | ANA | v2.4 — 시각화 책임 분리 |
+| — | — | `visualizer` | VIZ | v2.4 신규, analyzer에서 시각화 분리 |
+| `format_response` | FMT | `formatter` | FMT | v2.4 노드명 통일 |
+| — | — | `turn_reset` | TRS | v2.3 신규 엔트리포인트 |
+| — | — | `continue_orchestrator` | COR | v2.4 신규 — CONTINUE 4-Way 라우터 |
+| — | — | `save_turn_snapshot` | STS | v2.4 신규 — 종료 훅, 턴 스냅샷 영속화 |
+
+### 1.5 v2.4 신규 필드 — 멀티턴 · 시각화 분리 · target_db · 스트리밍
+
+#### 1.5.1 PipelineState 신규 필드
+
+| 필드 | 타입 | 용도 |
+| --- | --- | --- |
+| `turn_id` | `str` | 턴 단위 식별자 (turn_reset 발급, 트레이싱·로깅 키) |
+| `current_user_message_seq` | `int` | 당 턴 user message 시퀀스 — snapshot 매칭/저장 키 |
+| `turn_snapshots` | `list[TurnSnapshot]` | 세션 영속 — 직전 턴 result_data + visualization + analysis 등 보존 |
+| `reference_turns` | `list[int]` | 당 턴 CONTINUE 라우팅에서 참조한 turn user_message_seq 리스트 |
+| `route` | `ContinueRoute \| None` | REDISPLAY/ANALYZE/REGENERATE/REFINE — continue_orchestrator 산출 |
+| `handoff_note` | `str \| None` | continue_orchestrator → 하류 노드 전달 지시 노트 (consumer opt-in 패턴) |
+| `continue_context` | `ContinueContext \| None` | 직전 턴 핵심 메타 (NormalizedQuery·target_db·explanation 등) |
+| `result_data` | `ResultData \| None` | 가공된 결과 데이터 (snapshot hydrate 대상, raw sql_result 분리) |
+| `analysis_query` | `str \| None` | ANALYZE 라우트의 분석 의도 추출 결과 |
+| `needs_analyzer` | `bool` | sql_executor 후 analyzer 라우팅 결정 키 |
+| `process_summary` | `str` | formatter 산출 추론 추적 요약 |
+| `streaming_enabled` | `bool` | 스트리밍 모드 여부 (런너에서 설정) |
+| `streaming_delivered` | `bool` | WebSocket 실제 전달 여부 (중복 전송 방지) |
+
+> **레거시 제거**: `clarification_question`/`clarification_response`/`awaiting_clarification`/`clarification_turns`/`fast_path_triggered` 모두 v2.4 시점에 삭제됨.
+
+#### 1.5.2 ReasoningState 신규 필드
+
+| 필드 | 타입 | 용도 |
+| --- | --- | --- |
+| `target_db` | `str \| None` | readiness_gate/result_finalizer가 결정한 라우팅 대상 DB |
+| `target_db_decision` | `TargetDbDecision \| None` | SSoT 판정 결과 — FORCED/SINGLE/AMBIGUOUS/NO_SELECTION |
+| `previous_turn_sql` | `str \| None` | CONTINUE-REGENERATE 시 sql_generator/recovery_agent 참고 SQL (Phase 3 §3.6) |
+| `previous_turn_sql_explanation` | `str \| None` | 직전 턴 SQL 설명 (재생성 정당성 판단용) |
+| `pending_assumptions` | `list[str]` | 검증되지 않은 SQL 가정 (T5 트리거 후보) |
+| `validation_summary` | `str` | 검증 통과·실패 요약 (formatter 사용) |
+| `confidence_score` | `float` | readiness 점수 (가시화용) |
+| `sql_explanation` | `str \| None` | SQL 설명 (formatter/스냅샷 사용) |
+| `fix_history` | `list[FixAttempt]` | SQL 수정 시도 누적 (loop guard 보조) |
+| `executed_tool_keys` | `list[str]` | 도구 호출 dedup 키 |
+
+#### 1.5.3 턴 격리 SSoT — `PipelineState.turn_reset_updates(intent_norm)`
+
+`turn_reset` 노드가 호출하는 단일 classmethod. 이전 턴의 산출물·실패 컨텍스트·loop_guard·phase를
+초기화하면서 멀티턴 컨텍스트(`conversation_history`/`turn_snapshots`/`session_id` 등)는 보존한다.
+**이 함수가 턴 경계 초기화의 단일 진실 소스**이며, 어떤 노드도 자체적으로 초기화 로직을 복제하지 않는다.
+
+#### 1.5.4 ContinueRoute 4-Way 의미와 hydration 규칙
+
+| Route | 의미 | hydration 대상 (continue_orchestrator) |
+| --- | --- | --- |
+| `REDISPLAY` | SQL·결과 동일, 시각화/포맷만 변경 | `result_data` + `visualization` |
+| `ANALYZE` | 기존 결과로 분석/인사이트 재생성 (SQL 재실행 스킵) | `result_data` (sql_executor 우회) |
+| `REGENERATE` | SQL 표현만 재작성 (정규화·테이블 동일) | `NormalizedQuery` + `knowledge_items` + `target_db` + `previous_turn_sql` (route-agnostic 전량 복원) |
+| `REFINE` | 질의 자체 수정 (필터/집계/기간 변경) | **hydration 스킵** — 정규화부터 재수행 (스냅샷 오염 방지) |
+
+> **REGENERATE × non-local_fix 가드**: REGENERATE 라우트에서는 sql_validator 실패가 local_fix
+> 범위를 벗어날 경우(STRUCTURAL/NO_TABLE 등) recovery_agent를 우회하고 즉시 conclude_failure로
+> 직행한다 (Phase 3 §14.3.5). 직전 턴의 의미·테이블 선택을 보존하기 위함.
 
 ---
 

@@ -45,7 +45,7 @@ def _make_signal(
     decision: str = "INFER",
     ambiguity_type: str = "TIMEFRAME",
     confidence: str = "HIGH",
-    source_node: str = "normalize_query",
+    source_node: str = "query_normalizer",
     question: str = "기간 기준은?",
     answer: str | None = None,
     inferred_value: str | None = "이번 달",
@@ -220,7 +220,7 @@ class TestRouteAfterClarify:
         from src.agents.graph.pipeline import _route_after_clarify
 
         current_signal = _make_signal(
-            source_node="normalize_query",
+            source_node="query_normalizer",
             decision="ASK",
             answer="답변",
             inferred_value=None,
@@ -233,35 +233,35 @@ class TestRouteAfterClarify:
 
         result = _route_after_clarify(state)
 
-        passed = result == "normalize_query"
+        passed = result == "query_normalizer"
         log_test_case(
             logger,
             "test_routes_to_current_source",
-            f"current turn signal source_node=normalize_query",
-            "normalize_query",
+            "current turn signal source_node=query_normalizer",
+            "query_normalizer",
             result,
             passed,
         )
-        assert passed, f"normalize_query 기대, 실제: {result}"
+        assert passed, f"query_normalizer 기대, 실제: {result}"
 
     def test_ignores_stale_signals_from_previous_turns(self):
         """이전 턴 시그널은 라우팅에 영향을 주지 않는다.
 
-        이전 턴: source_node="sql_generator" (다른 노드)
-        현재 턴: source_node="normalize_query"
-        → normalize_query 로 라우팅되어야 함.
+        이전 턴: source_node="intent_classifier" (다른 노드)
+        현재 턴: source_node="query_normalizer"
+        → query_normalizer 로 라우팅되어야 함.
         """
         from src.agents.graph.pipeline import _route_after_clarify
 
         prev_signal = _make_signal(
-            source_node="sql_generator",
+            source_node="intent_classifier",
             decision="ASK",
             answer="이전 답변",
             inferred_value=None,
             turn_id=TURN_B,
         )
         current_signal = _make_signal(
-            source_node="normalize_query",
+            source_node="query_normalizer",
             decision="ASK",
             answer="현재 답변",
             inferred_value=None,
@@ -274,17 +274,17 @@ class TestRouteAfterClarify:
 
         result = _route_after_clarify(state)
 
-        passed = result == "normalize_query"
+        passed = result == "query_normalizer"
         log_test_case(
             logger,
             "test_ignores_stale_signals",
-            "prev_turn→sql_generator, current_turn→normalize_query",
-            "normalize_query",
+            "prev_turn→intent_classifier, current_turn→query_normalizer",
+            "query_normalizer",
             result,
             passed,
         )
         assert passed, (
-            f"이전 턴 시그널에 의한 오라우팅 발생. 기대=normalize_query, 실제={result}"
+            f"이전 턴 시그널에 의한 오라우팅 발생. 기대=query_normalizer, 실제={result}"
         )
 
     def test_falls_back_to_intent_classifier_when_no_current_signals(self):
@@ -325,7 +325,7 @@ class TestRouteAfterClarify:
             turn_id=TURN_A,
         )
         last_signal = _make_signal(
-            source_node="readiness_gate",
+            source_node="recovery_agent",
             decision="ASK",
             answer="마지막 답변",
             inferred_value=None,
@@ -338,16 +338,16 @@ class TestRouteAfterClarify:
 
         result = _route_after_clarify(state)
 
-        passed = result == "readiness_gate"
+        passed = result == "recovery_agent"
         log_test_case(
             logger,
             "test_last_signal_routing",
             "두 개의 현재 턴 시그널",
-            "readiness_gate (마지막 시그널)",
+            "recovery_agent (마지막 시그널)",
             result,
             passed,
         )
-        assert passed, f"readiness_gate 기대, 실제: {result}"
+        assert passed, f"recovery_agent 기대, 실제: {result}"
 
 
 # ──────────────────────────────────────────────────────────────

@@ -110,7 +110,7 @@ class TestReasoningStateMethods:
     def test_format_confirmed_text_empty(self):
         reason = ReasoningState()
         text = reason.format_confirmed_text()
-        assert "확인된 항목 없음" in text
+        assert "사용 가능한 지식 항목 없음" in text
 
     def test_format_dead_ends_text_with_items(self):
         reason = ReasoningState(
@@ -271,26 +271,33 @@ from src.agents.nodes.reason.tools import _safe_search
 
 
 class TestSafeSearch:
+    """_safe_search 래퍼 동작 검증.
+
+    _safe_search(coro) — 인수 1개 시그니처.
+    예외는 호출자(_run_step)로 전파되어 텔레메트리에 정확히 기록된다.
+    비-list 반환값은 빈 리스트로 정규화된다.
+    """
 
     @pytest.mark.asyncio
     async def test_success(self):
         async def ok():
             return [{"a": 1}]
-        result = await _safe_search("test", ok())
+        result = await _safe_search(ok())
         assert result == [{"a": 1}]
 
     @pytest.mark.asyncio
-    async def test_exception_returns_empty(self):
+    async def test_exception_propagates(self):
+        """예외는 상위로 전파된다 — 구현 설계에 따른 기대값."""
         async def fail():
             raise ConnectionError("boom")
-        result = await _safe_search("test", fail())
-        assert result == []
+        with pytest.raises(ConnectionError, match="boom"):
+            await _safe_search(fail())
 
     @pytest.mark.asyncio
     async def test_non_list_returns_empty(self):
         async def not_list():
             return "string result"
-        result = await _safe_search("test", not_list())
+        result = await _safe_search(not_list())
         assert result == []
 
 

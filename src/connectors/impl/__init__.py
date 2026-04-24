@@ -1,5 +1,7 @@
 """커넥터 구현체 모듈.
 
+작성자: 한철희 / 최종수정: 2026-04-20 16:27:03
+
 interfaces.py에 정의된 SearchConnector / DatabaseConnector를 구현하는
 실제 외부 시스템 커넥터를 포함한다.
 

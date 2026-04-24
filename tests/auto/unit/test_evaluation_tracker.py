@@ -231,9 +231,9 @@ def test_disabled_save_returns_none(
     disabled_handler: DataCopilotCallbackHandler,
     tmp_path: Path,
 ) -> None:
-    """비활성화 시 save()가 None을 반환한다."""
+    """비활성화 시 save()가 빈 리스트를 반환한다."""
     result = disabled_handler.save(output_dir=str(tmp_path))
-    assert result is None
+    assert result == []
 
 
 # ── 저장 ──
@@ -243,13 +243,25 @@ def test_save_creates_json(
     handler: DataCopilotCallbackHandler,
     tmp_path: Path,
 ) -> None:
-    """save()가 JSON 파일을 생성한다."""
+    """save()가 JSON 파일을 생성한다.
+
+    save()는 생성된 파일 목록 list[dict]를 반환한다.
+    eval_trace_json_enabled 설정이 True일 때 JSON 파일이 생성된다.
+    """
     handler.start_run(user_input="테스트 질의")
     handler.end_run(final_status="completed")
 
-    path = handler.save(output_dir=str(tmp_path), with_report=False)
-    assert path is not None
-    assert path.exists()
+    saved = handler.save(output_dir=str(tmp_path), with_report=False)
+    assert isinstance(saved, list)
+
+    # eval_trace_json_enabled=True 환경에서 JSON 파일이 생성된다.
+    json_files = list(tmp_path.glob("trace_telemetry_*.json"))
+    assert len(json_files) >= 1, (
+        "JSON 파일이 생성되지 않았습니다. "
+        "eval_trace_json_enabled 설정을 확인하세요. "
+        f"saved={saved}"
+    )
+    path = json_files[0]
     assert path.suffix == ".json"
 
     data = json.loads(path.read_text(encoding="utf-8"))

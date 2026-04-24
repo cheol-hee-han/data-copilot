@@ -475,12 +475,13 @@ class TestBuildExecutionPlan:
 
 
     def test_filter_ki_generates_lookup_code_meta_step(self):
-        """UNRESOLVED filter KnowledgeItem마다 lookup_code_meta 스텝이 생성된다."""
+        """filter KnowledgeItem에 대한 lookup_code_meta 스텝은
+        현재 context_retriever 내장 후속 수집으로 대체되어 실행계획에 포함되지 않는다."""
         items = [self._filter_ki("지점코드"), self._filter_ki("상품코드")]
         steps = _build_execution_plan(items, set(), None, original_query="")
         code_steps = [s for s in steps if s.tool == "lookup_code_meta"]
-        passed = len(code_steps) == 2
-        log_test_case(logger, "code_meta_steps", items, 2, len(code_steps), passed)
+        passed = len(code_steps) == 0
+        log_test_case(logger, "code_meta_steps", items, 0, len(code_steps), passed)
         assert passed
 
     def test_already_executed_table_meta_not_duplicated(self):

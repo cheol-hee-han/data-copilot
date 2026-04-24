@@ -147,7 +147,12 @@ def format_report_table(
     def _fmt_cell(col: str, value: Any) -> str:
         if value is None:
             return ""
-        return _format_value(value, column_formats.get(col, "text"))
+        text = _format_value(value, column_formats.get(col, "text"))
+        # 프롬프트 인젝션 방어: 셀 값이 '## 핵심 요약' 같은 가짜 섹션 헤딩을
+        # 흉내 내지 못하도록 '##' 앞에 ZWSP(U+200B) 를 삽입한다.
+        if text.startswith("##"):
+            text = "\u200b" + text
+        return text.replace("\n##", "\n\u200b##")
 
     header = "| " + " | ".join(columns) + " |"
     separator = "| " + " | ".join("---" for _ in columns) + " |"

@@ -196,12 +196,12 @@ class TestAnalyzerEdgeCases:
         log_test_case(logger, "test_non_dict_json", "[1, 2, 3]", "ValueError", "ValueError", True)
 
     def test_parse_viz_no_chart_type(self):
-        """CHART_TYPE 이 없는 시각화 판단 응답 → ValueError."""
+        """chart_type 필드가 없는 시각화 판단 응답 → ValueError."""
         from src.services.data_analyzer import parse_viz_judgment
 
         with pytest.raises(ValueError):
-            parse_viz_judgment("CHART_TITLE: 테스트\nSOMETHING_ELSE: bar")
-        log_test_case(logger, "test_no_chart_type", "CHART_TYPE 없음", "ValueError", "ValueError", True)
+            parse_viz_judgment('{"chart_title": "테스트"}')
+        log_test_case(logger, "test_no_chart_type", "chart_type 없음", "ValueError", "ValueError", True)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -211,8 +211,11 @@ class TestAnalyzerEdgeCases:
 class TestSecurityEdgeCases:
     """보안 유틸리티 경계 케이스."""
 
-    def test_mask_pii_overlapping_patterns(self):
+    def test_mask_pii_overlapping_patterns(self, monkeypatch):
         """PII 패턴이 겹치는 경우 (전화번호 내 숫자가 계좌번호 패턴에도 매칭)."""
+        import src.config as _cfg
+        monkeypatch.setattr(_cfg.settings, "pii_masking_enabled", True)
+
         from src.utils.security import mask_pii
 
         text = "연락처 010-1234-5678, 계좌 110-123-456789"

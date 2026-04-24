@@ -101,8 +101,9 @@ class TestApplyForceGenerate:
         return _reason(explored_tables=tables, loop_guard=guard)
 
     def test_replan_2times_sufficient_score_triggers_force_generate(self):
-        """replan 2회 + 점수 ≥ THRESHOLD_FORCE_GENERATE + 탐색 테이블 → GENERATE."""
-        reason = self._base_reason(replan_count=2)
+        """replan force_generate_after_replans회 + 점수 ≥ THRESHOLD_FORCE_GENERATE + 탐색 테이블 → GENERATE."""
+        from src.config import settings
+        reason = self._base_reason(replan_count=settings.force_generate_after_replans)
         score = THRESHOLD_FORCE_GENERATE + 0.01
         result = _apply_force_generate(ReadinessVerdict.REPLAN, reason, score)
         passed = result == ReadinessVerdict.GENERATE
@@ -110,8 +111,9 @@ class TestApplyForceGenerate:
         assert passed
 
     def test_terminate_also_triggers_force_generate(self):
-        """TERMINATE 판정도 replan 2회 + 점수 충족이면 GENERATE로 전환."""
-        reason = self._base_reason(replan_count=2)
+        """TERMINATE 판정도 replan force_generate_after_replans회 + 점수 충족이면 GENERATE로 전환."""
+        from src.config import settings
+        reason = self._base_reason(replan_count=settings.force_generate_after_replans)
         score = THRESHOLD_FORCE_GENERATE + 0.01
         result = _apply_force_generate(ReadinessVerdict.TERMINATE, reason, score)
         passed = result == ReadinessVerdict.GENERATE

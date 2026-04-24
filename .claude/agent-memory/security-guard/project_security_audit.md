@@ -1,51 +1,58 @@
 ---
-name: 2026-03-18 보안 감사 결과
-description: Data Copilot 금융 AI 에이전트 보안 감사 — 발견 취약점 11건 전건 수정 완료
+name: 2026-04-17 보안 감사 결과
+description: Data Copilot 금융 AI 에이전트 보안 감사 — 폐쇄망 배포 전 전수 점검
 type: project
 ---
 
-2026-03-18 보안 감사 수행 및 코드 수정 완료.
+# 2026-04-17 보안 감사
 
-**Why:** 은행 금융 데이터를 다루는 NL-to-SQL 파이프라인 특성상 SQL 인젝션·프롬프트 인젝션·PII 노출이 최우선 위협임.
+2026-03-18 이후 변경분 포함 2026-04-17 재감사 수행.
 
-**How to apply:** 추가 기능 개발 시 아래 완료 항목이 퇴보하지 않도록 확인.
+**Why:** 폐쇄망 배포 전 최종 보안 점검. 이전 감사 수정 완료 항목 퇴보 여부 및 신규 이슈 확인.
 
-## 수정 완료 항목
+**How to apply:** 추가 기능 개발 시 아래 잔존 위험 항목이 퇴보하지 않도록 확인.
 
-### src/utils/security.py
-- 프롬프트 인젝션 패턴 9개 → 34개 (한국어 9개, 간접 인젝션 5개, 영어 확장 11개 추가)
-- `_normalize_unicode()` 함수 추가 — NFKC 정규화로 전각 문자 우회 방어
-- 계좌번호 정규식 정밀화 — 하이픈 포함 형식만 매칭하여 오탐 감소
-- `_make_masked()` 개선 — 구분자(하이픈·공백) 보존, 숫자만 마스킹
-- `validate_sql_safety()` — WITH(CTE) 허용, 시간지연·파일I/O·주석 패턴 추가
+## 이전 감사(2026-03-18) 수정 항목 — 퇴보 없음 확인
 
-### src/agents/nodes/interpret/preprocessor.py
-- SQL 인젝션 패턴 4개 → 13개 (블록주석, 서브쿼리 내 DML, 시간지연, 파일I/O 등)
-- `--` 패턴을 줄끝 한정에서 위치 무관으로 수정
-- `detect_prompt_injection()` 호출 추가 (기존 누락)
-- `_normalize_unicode()` 선처리 추가
-- 로그 기록 시 `mask_pii()` 적용
+- 프롬프트 인젝션 패턴 82개 유지 (한국어·간접·영어 확장)
+- normalize_unicode() 선처리 — 전각 우회 차단 유지
+- FORBIDDEN_SQL_PATTERNS 공유 상수 (security.py ↔ sql_safety_checker.py)
+- session_id 검증 `^[a-zA-Z0-9_\-]{1,128}$` 유지 (WebSocket + REST)
+- PII 컬럼 18개 (sql_safety_checker) + 마스킹 컬럼 15개 유지
+- 글로벌 예외 핸들러 — 내부 정보 미노출 유지
 
-### src/agents/nodes/sql_validator.py
-- FORBIDDEN_PATTERNS 5개 → 21개 (시간지연 4종, 파일I/O 4종, 주석 2종, UNION, xp_, CALL 추가)
-- WITH(CTE) 쿼리 허용 (기존 SELECT만 허용 → SELECT 또는 WITH)
-- PII_COLUMNS 9개 → 18개 (계좌번호 5종, 주민번호 변형, 외국인등록번호 추가)
-- MASKING_COLUMNS 8개 → 15개 (CUST_NM 등 추가)
-- `_normalize_unicode()` 적용 후 검증 실행
-- `_MSG_TIME_DELAY` 상수로 중복 문자열 제거
+## 신규 확인 취약점 (2026-04-17)
 
-### src/main.py
-- `_is_valid_session_id()` 추가 — `^[a-zA-Z0-9_\-]{1,128}$` 패턴 검증
-- WebSocket 연결 시 session_id 검증, 실패 시 code=1008로 즉시 종료
-- REST API session_id도 동일 검증 적용
-- 세션 저장 시 `mask_pii()` 적용 (평문 PII 메모리 보관 방지)
-- 미사용 import 제거 (StaticFiles, field_validator)
+### Critical
 
-## 잔존 위험 (미수정)
-- Rate Limiting 미적용 (DoS 위험)
-- WebSocket이 ws:// — 프로덕션에서 wss:// 필요
-- 사용자 인증 미적용
-- PII_COLUMNS 목록이 sql_validator.py와 security.py에 분산
+(없음)
+
+### High
+
+1. result_data(SQL 결과 행) PII 마스킹 미적용 — formatter.py의 `_build_result_data` → stream.end result_data, /api/download 로 전달. 응답 텍스트(masked_response)만 mask_pii() 적용, rows dict 자체는 미적용. 주민번호 등 PII 컬럼은 sql_safety_checker에서 SQL 생성 시 차단하나 컬럼명 변형·별칭(ALIAS) 우회 가능성 존재
+
+### Medium
+
+2. CORS allow_origins=["*"] — 운영 배포 시 구체 도메인으로 교체 필요 (주석으로 명시되어 있으나 미조치)
+3. Content-Security-Policy(CSP) / Strict-Transport-Security(HSTS) 헤더 미설정 — SecurityHeadersMiddleware에 X-Content-Type-Options·X-Frame-Options·Referrer-Policy만 있음
+4. Rate Limiting 미적용 — WebSocket·REST API 모두 DoS 위험
+5. 사용자 인증(Authentication) 미구현 — 모든 엔드포인트 무인증 접근 가능
+6. /api/sessions·/api/messages 등 세션 라우터에 session_id 형식 검증 일부 미적용 (get_session, delete_session, toggle_like, mark_download 파라미터 미검증)
+7. /api/download — 다운로드 데이터(rows)에 PII 마스킹 미적용
+
+### Low
+
+8. WebSocket ws:// — 폐쇄망 배포 시 wss:// 필수 (nginx TLS 종단 처리 필요)
+9. pii_masking_enabled=False 설정 가능 — 운영 시 False 설정 방지 가이드 필요
+10. eval_trace JSON — SQL 실행 결과 샘플(rows[0]) 포함, PII 포함 가능성
+
+## 잔존 위험 (이전 감사부터 지속)
+
+- Rate Limiting 미적용 (Medium으로 유지)
+- WebSocket wss:// 미설정 (Low)
+- 사용자 인증 미적용 (Medium)
+- PII_COLUMNS 목록 분산 (sql_validator.py vs security.py) — pii_columns.yaml 통합으로 개선
 
 ## 감사 문서 위치
-`docs/reviews/design/20260321-security-audit.md`
+
+에이전트 텍스트 출력으로 전달됨 (docs/security/ 별도 파일 없음)

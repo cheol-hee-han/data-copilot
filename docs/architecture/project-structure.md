@@ -1,6 +1,17 @@
 # Project Structure
 
+> **Updated: 2026-04-20** — v2.4 신규 노드 파일 반영 (interpret/continue_orchestrator.py, present/visualizer.py, present/save_turn_snapshot.py). turn_reset/error_end은 pipeline.py 내부 함수로 정의됨.
 > **Updated: 2026-04-13** — 파일시스템 실사 기반 전면 재작성. 커넥터(adw/bdp/crp/hive/test), 라우터, 서비스, 프롬프트(dialect별 SQL 생성), 테스트 파일 수 정정, 누락 모듈 추가, 비존재 파일 제거
+
+## 목차
+
+- [소스 코드 (`src/`)](#소스-코드-src) — agents/connectors/services/utils 디렉토리 트리 + 파일별 역할 주석
+- [리소스 (`resources/`)](#리소스-resources) — domain/prompts(dialect 분기 포함)/system 설정 파일 트리
+- [테스트 (`tests/`)](#테스트-tests) — 단위/통합/E2E/골든셋 구성
+- [문서 (`docs/`)](#문서-docs) — agent-guides/architecture/design/guides/reviews/strategy-proposals 분류
+- [배포 (`deploy/`)](#배포-deploy) — 폐쇄망 오프라인 번들·systemd·db-init 스캐폴드
+- [개발 도구 (`devtools/`)](#개발-도구-devtools) — 시딩·임포트·평가 스크립트
+- [`.claude/` (에이전트 정의)](#claude-에이전트-정의) — agents/agent-memory/rules/skills
 
 ## 소스 코드 (`src/`)
 
@@ -45,6 +56,7 @@ src/
 │       │   ├── __init__.py
 │       │   ├── intent_classifier.py   # 통합 노드 — 이력 해소 + 의도 분류 (단일 LLM 호출)
 │       │   ├── query_normalizer.py    # 질의 정규화 — 8-Slot 구조화 (2-Phase LLM)
+│       │   ├── continue_orchestrator.py # CONTINUE 4-Way 라우터 — REDISPLAY/ANALYZE/REGENERATE/REFINE 결정 + handoff_note + state hydration (v2.4)
 │       │   └── clarification_handler.py # 통합 명확화 노드 — 5개 트리거 소스, source_node 복귀 (AmbiguitySignal 기반)
 │       │
 │       ├── reason/                    # Reason 계층 — 에이전틱 추론 루프
@@ -60,12 +72,17 @@ src/
 │       │   ├── tools.py               # 도구 정의 — 탐색 도구 인터페이스
 │       │   └── tool_renderers.py      # 도구 결과 렌더러 — 검색 결과 → LLM 프롬프트 텍스트 변환
 │       │
-│       └── present/                   # Present 계층 — 결과 생성 및 표현
+│       └── present/                   # Present 계층 — 결과 생성·표현·종료 훅
 │           ├── __init__.py
-│           ├── sql_executor.py        # SQL 실행 — 정보계 DB 읽기 전용 실행
-│           ├── analyzer.py            # 데이터 분석 — LLM 기반 인사이트·시각화 생성
+│           ├── sql_executor.py        # SQL 실행 — 정보계 DB 읽기 전용 실행 (v2.4: execute_sql 리네임)
+│           ├── analyzer.py            # 데이터 분석 — 통계·인사이트 생성 (시각화는 visualizer로 분리)
+│           ├── visualizer.py          # 시각화 단독 노드 — judgment(LLM)+SVG(LLM) 통합, chart_generator 폴백 (v2.4)
 │           ├── formatter.py           # 결과 포맷팅 — 사용자 친화적 보고서 형태로 변환
-│           └── simple_responder.py    # 경량 응답 — 비데이터 의도 (CASUAL_TALK, META_QUESTION)
+│           ├── simple_responder.py    # 경량 응답 — 비데이터 의도 (CASUAL_TALK, META_QUESTION)
+│           └── save_turn_snapshot.py  # 종료 훅 — turn_id 단위 영속화 (CONTINUE hydration 소스, v2.4)
+│
+│       # turn_reset(_), error_end(_handle_error)는 별도 파일이 아니라
+│       # src/agents/graph/pipeline.py 내부 함수로 정의됨 (state SSoT/단일 실패 종착점 패턴)
 │
 ├── routers/                           # FastAPI 라우터
 │   ├── __init__.py
@@ -172,7 +189,7 @@ resources/
 │   ├── interpret/                     # 질의 해석 계층
 │   │   ├── intent_classifier_system.txt           # 이력 해소 + 의도 분류 통합
 │   │   ├── intent_classifier_user.txt             # 이력/의도 사용자 템플릿
-│   │   ├── intent_classifier_query_rewriter.txt   # 질의 재작성 프롬프트
+│   │   ├── extraction_query_rewriter.txt          # DATA_ANALYSIS 추출 질의 재작성 (query_normalizer 호출)
 │   │   ├── query_normalizer_phase1_system.txt     # 정규화 Phase1
 │   │   ├── query_normalizer_phase1_user.txt       # 정규화 Phase1 사용자 템플릿
 │   │   ├── query_normalizer_phase2_system.txt     # 정규화 Phase2 교차검증

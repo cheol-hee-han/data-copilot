@@ -52,14 +52,19 @@ from src.agents.models.normalization import (
     VALID_TIME_TYPES,
     NormalizedQuery,
 )
-from src.utils.llm import llm_call_with_parse_retry
+from src.agents.nodes.thinking_modes import LLMNode
+from src.utils.llm import get_llm_client, llm_call_with_parse_retry
 from src.utils.llm.prompt import (
     render_prompt,
     serialize_synonym_dict,
 )
 from src.utils.llm.response import extract_json
 from src.utils.logger import get_logger
-from src.utils.tracker import record_prompt_variables
+from src.utils.tracker import (
+    LLMInteraction,
+    get_current_node,
+    set_current_node,
+)
 
 logger = get_logger(__name__)
 
@@ -84,10 +89,63 @@ ABBREVIATION_MAP: dict[str, str] = _synonyms_data.get(
 # 전처리기
 # ──────────────────────────────────────────────────────────────
 
+
+async def extraction_query_rewriter(
+    query: str,
+    *,
+    system_prompt: str,
+) -> str:
+    """DATA_ANALYSIS 질의에서 시각화/분석 지시어를 제거한 추출 질의를 생성한다.
+
+    query_normalizer 진입 전 전처리 단계에서 호출된다 (LLM 1회 호출).
+    plain text 출력이므로 JSON 파싱 재시도가 불필요하여
+    LLM 클라이언트를 직접 호출한다.
+
+    Args:
+        query: 원본 사용자 질의 (시각화/분석 지시어 포함).
+        system_prompt: 재작성 전용 시스템 프롬프트(EXTRACTION_QUERY_REWRITER).
+
+    Returns:
+        데이터 추출 중심으로 재작성된 질의.
+
+    Raises:
+        Exception: LLM 호출 실패 시 (호출자에서 폴백 처리).
+    """
+    prev_node = get_current_node()
+    set_current_node("extraction_query_rewriter")
+
+    try:
+        client = get_llm_client()
+        response = await client.messages.create(
+            model=settings.llm_model,
+            max_tokens=settings.llm_default_max_tokens,
+            timeout=settings.llm_default_timeout,
+            system=system_prompt,
+            messages=[{"role": "user", "content": query}],
+        )
+
+        result = (
+            response.content[0].text.strip()
+            if response.content else ""
+        )
+
+        logger.info(
+            "추출 질의 재작성 완료",
+            original=query,
+            rewritten=result,
+        )
+
+        return result
+    finally:
+        set_current_node(prev_node)
+
+
 def _preprocess_for_normalization(text: str) -> str:
-    """정규화 전 텍스트를 전처리한다.
+    """정규화 전 텍스트를 전처리한다 (비-LLM, 내부 헬퍼).
 
     약어 확장과 구어체 정리만 수행한다.
+    DATA_ANALYSIS 질의의 시각화/분석 지시어 제거는 별도 LLM 호출인
+    `extraction_query_rewriter`가 담당한다 — 역할을 혼동하지 말 것.
     """
     text = re.sub(r"[~～]+", "~", text)
 
@@ -522,9 +580,13 @@ async def _call_llm_and_parse(
     system: str,
     user: str,
     node_name: str,
-) -> dict:
-    """LLM을 호출하고 JSON 파싱까지 수행한다."""
-    _, parsed = await llm_call_with_parse_retry(
+) -> tuple[str, dict]:
+    """LLM을 호출하고 JSON 파싱까지 수행한다.
+
+    Returns:
+        (raw_text, parsed) — raw_text 는 LLM 원본 응답 문자열.
+    """
+    raw_text, parsed = await llm_call_with_parse_retry(
         system=system,
         messages=[{"role": "user", "content": user}],
         parse_fn=_parse_normalization_json,
@@ -532,7 +594,7 @@ async def _call_llm_and_parse(
         timeout=settings.llm_long_timeout,
         node_name=node_name,
     )
-    return parsed
+    return raw_text, parsed
 
 
 # ──────────────────────────────────────────────────────────────
@@ -583,7 +645,8 @@ async def run_normalization(
     phase2_system: str,
     phase1_user_template: str | None = None,
     phase2_user_template: str | None = None,
-) -> NormalizedQuery:
+    handoff_note: str = "(없음)",
+) -> tuple[NormalizedQuery, list[LLMInteraction]]:
     """자연어 질의를 8-Slot NormalizedQuery로 정규화한다.
 
     Args:
@@ -594,14 +657,22 @@ async def run_normalization(
             None이면 기본 템플릿을 사용한다.
         phase2_user_template: Phase 2 사용자 프롬프트 템플릿.
             None이면 기본 템플릿을 사용한다.
+        handoff_note: CONTINUE REFINE 진입 시 continue_orchestrator 가 작성한
+            연속 처리 의도. NEW 턴은 기본값 `"(없음)"` 로 안전. Phase1 system
+            prompt `{handoff_note}` 에 치환된다 (Phase3 §14.3.1).
 
     Returns:
-        NormalizedQuery: 8-Slot 구조화된 정규화 결과.
+        (NormalizedQuery, interactions):
+            - 8-Slot 구조화된 정규화 결과.
+            - Phase1/Phase2 LLM 상호작용 목록 (프롬프트 변수 + 원본 응답).
+              index 0 = Phase1, index 1 = Phase2 (Phase2 비활성화 시 단일 요소).
+              REASONING_STEP 이벤트 payload 구성에 사용된다.
     """
     p1_user_tpl = phase1_user_template or _PHASE1_USER_TEMPLATE
     p2_user_tpl = phase2_user_template or _PHASE2_USER_TEMPLATE
 
     cleaned = _preprocess_for_normalization(raw_query)
+    interactions: list[LLMInteraction] = []
 
     # Phase 1 LLM
     today = today_kst().isoformat()
@@ -610,17 +681,24 @@ async def run_normalization(
     # LLM이 은행 업무 동의어·약어를 자체 추론하여 normalized_term에 기재한다.
     # synonym_text = serialize_synonym_dict(ALL_SYNONYMS)
 
-    p1_system = phase1_system
+    # Phase1 system prompt 에 handoff_note 주입 (directive). Phase2 는 변경 없음
+    # — Phase1 JSON 을 교차검증만 하므로 의도 재주입 시 중복 해석 위험 (§14.3.1).
+    p1_system, _ = render_prompt(phase1_system, {
+        "{handoff_note}": handoff_note,
+    })
     phase1_user, p1_vars = render_prompt(p1_user_tpl, {
         "{query}": cleaned,
         "{today}": today,
     })
 
     logger.info("Phase 1 LLM 호출")
-    phase1_data = await _call_llm_and_parse(
-        p1_system, phase1_user, "normalization_phase1",
+    p1_raw, phase1_data = await _call_llm_and_parse(
+        p1_system, phase1_user, LLMNode.NORMALIZE_QUERY_PHASE1,
     )
-    await record_prompt_variables(p1_vars)
+    interactions.append(LLMInteraction(
+        prompt_variables=p1_vars,
+        raw_response=p1_raw,
+    ))
 
     phase1_data, errors1 = _validate_structure(phase1_data)
     phase1_data["original_query"] = raw_query
@@ -633,17 +711,19 @@ async def run_normalization(
 
     # Phase 2 LLM (설정에 따라 스킵)
     if settings.normalization_phase2_enabled:
-        final_data = await _run_phase2(
+        final_data, phase2_interaction = await _run_phase2(
             cleaned, phase1_data, raw_query,
             phase2_system=phase2_system,
             phase2_user_template=p2_user_tpl,
         )
+        interactions.append(phase2_interaction)
     else:
         logger.info("Phase 2 스킵")
         final_data = phase1_data
 
     final_data = _postprocess(final_data)
-    return NormalizedQuery.model_validate(final_data)
+    normalized = NormalizedQuery.model_validate(final_data)
+    return normalized, interactions
 
 
 async def _run_phase2(
@@ -653,8 +733,12 @@ async def _run_phase2(
     *,
     phase2_system: str,
     phase2_user_template: str,
-) -> dict:
-    """Phase 2 교차 검증 실행."""
+) -> tuple[dict, LLMInteraction]:
+    """Phase 2 교차 검증 실행.
+
+    Returns:
+        (final_data, interaction): 교차검증 후 dict + Phase2 LLM 상호작용.
+    """
     logger.info("Phase 2 LLM 호출 (교차 검증)")
     phase1_json_str = json.dumps(
         phase1_data, ensure_ascii=False, indent=2,
@@ -663,14 +747,16 @@ async def _run_phase2(
         "{query}": cleaned,
         "{phase1_json}": phase1_json_str,
     })
-    final_data = await _call_llm_and_parse(
-        phase2_system, phase2_user, "normalization_phase2",
+    p2_raw, final_data = await _call_llm_and_parse(
+        phase2_system, phase2_user, LLMNode.NORMALIZE_QUERY_PHASE2,
     )
-    await record_prompt_variables(p2_vars)
     final_data, errors2 = _validate_structure(final_data)
     final_data["original_query"] = raw_query
     if errors2:
         logger.warning(
             "Phase 2 검증 오류", count=len(errors2),
         )
-    return final_data
+    return final_data, LLMInteraction(
+        prompt_variables=p2_vars,
+        raw_response=p2_raw,
+    )

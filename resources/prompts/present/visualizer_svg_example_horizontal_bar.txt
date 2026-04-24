@@ -1,0 +1,61 @@
+────────────────────────────────
+## 예제 4: horizontal_bar (가로 막대)
+────────────────────────────────
+
+데이터:
+컬럼: [기술스택, 사용률(%)]
+행: [("Python", 68), ("JavaScript", 62), ("TypeScript", 45), ("Go", 28), ("Rust", 15)]
+
+계산 과정:
+  x_max = 68 × 1.15 ≈ 78 → 올림 → 80
+  plot: x=[130,760], y=[70,420], width=630, height=350
+  막대 5개: 높이=50, 간격=20
+  Python: width = (68/80)×630 = 535.5
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">개발자 기술스택 사용률</text>
+
+  <!-- X축 그리드 -->
+  <line x1="130" y1="420" x2="760" y2="420" stroke="#d1d5db" stroke-width="1"/>
+  <line x1="130" y1="70" x2="130" y2="420" stroke="#d1d5db" stroke-width="1"/>
+
+  <line x1="288" y1="70" x2="288" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="288" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">20%</text>
+
+  <line x1="445" y1="70" x2="445" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="445" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">40%</text>
+
+  <line x1="603" y1="70" x2="603" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="603" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">60%</text>
+
+  <line x1="760" y1="70" x2="760" y2="420" stroke="#f3f4f6" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <text x="760" y="448" text-anchor="middle" font-size="15" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">80%</text>
+
+  <!-- Python -->
+  <text x="125" y="100" text-anchor="end" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">Python</text>
+  <rect x="130" y="80" width="536" height="35" fill="#1a56db" rx="4"/>
+  <text x="674" y="103" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">68%</text>
+
+  <!-- JavaScript -->
+  <text x="125" y="170" text-anchor="end" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">JavaScript</text>
+  <rect x="130" y="150" width="489" height="35" fill="#f59e0b" rx="4"/>
+  <text x="627" y="173" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">62%</text>
+
+  <!-- TypeScript -->
+  <text x="125" y="240" text-anchor="end" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">TypeScript</text>
+  <rect x="130" y="220" width="354" height="35" fill="#10b981" rx="4"/>
+  <text x="492" y="243" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">45%</text>
+
+  <!-- Go -->
+  <text x="125" y="310" text-anchor="end" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">Go</text>
+  <rect x="130" y="290" width="221" height="35" fill="#ef4444" rx="4"/>
+  <text x="359" y="313" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">28%</text>
+
+  <!-- Rust -->
+  <text x="125" y="380" text-anchor="end" font-size="16" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">Rust</text>
+  <rect x="130" y="360" width="118" height="35" fill="#8b5cf6" rx="4"/>
+  <text x="256" y="383" font-size="15" font-weight="600" font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">15%</text>
+</svg>

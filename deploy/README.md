@@ -41,7 +41,7 @@ deploy/
    - tar.gz 1개 파일을 폐쇄망 반입 서버로 이관
 3. **설치** (폐쇄망 타겟 호스트)
    - tar 해제 후 `deploy/offline-bundle/install.sh` 실행
-   - `/opt/data-copilot/` 에 앱 배치, `.venv` 재현, 모델 가중치 복사
+   - `/opt/bdp/data-copilot/` 에 앱 배치, `.venv` 재현, 모델 가중치 복사
 4. **DB 초기화** (기구축 PG/Mongo/Qdrant 에 대해 1회만)
    - `deploy/db-init/postgres/init.sh`
    - `deploy/db-init/mongo/init.sh`

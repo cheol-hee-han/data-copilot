@@ -13,7 +13,7 @@ LLM이 생성한 SQL이 실행되기 전에 5단계 검증 파이프라인을 �
     5단계 - LIMIT 절 존재 여부 확인 (집계 쿼리는 예외 처리)
 
 PII 컬럼 목록은 resources/domain/pii_columns.yaml에서 로드하며,
-YAML 파일이 없으면 내장 기본값(_DEFAULT_PII_COLUMNS, _DEFAULT_MASKING_COLUMNS)을 사용한다.
+YAML 파일이 없으면 내장 기본값(_DEFAULT_PII_COLUMNS)을 사용한다.
 검증 실패 시 SafetyCheckResult에 오류 목록과 LLM 재생성용 피드백 문자열을 담아 반환한다.
 """
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from src.config import settings
 from src.utils.logger import get_logger
 from src.utils.sqlglot_analyzer import parse_sql_safe
 from src.utils.resource_loader import load_yaml
@@ -40,47 +41,22 @@ _DEFAULT_PII_COLUMNS = {
     "FRNO", "FRNR_NO",
 }
 
-_DEFAULT_MASKING_COLUMNS = {
-    "PHONE_NO", "TEL_NO", "HP_NO", "MOBILE_NO",
-    "CUST_TEL_NO", "CUST_HP_NO",
-    "EMAIL", "EMAIL_ADDR", "CUST_EMAIL",
-    "BIRTH_DT", "BIRTHDAY", "BIRTH_YMD",
-    "CUST_BIRTH_DT",
-    "ADDR", "ADDRESS", "HOME_ADDR", "WORK_ADDR",
-    "ADDR_DTL",
-    "CUST_NM", "CUST_NAME",
-}
-
 _AGG_PATTERN = re.compile(
     r"\b(COUNT|SUM|AVG|MIN|MAX)\s*\(", re.IGNORECASE,
 )
 
 
-def _load_pii_columns() -> tuple[set[str], set[str]]:
-    """resources/domain/pii_columns.yaml 에서 PII 정의를 로드한다."""
+def _load_pii_columns() -> set[str]:
+    """resources/domain/pii_columns.yaml 에서 금지 컬럼 목록을 로드한다."""
     data = load_yaml("domain/pii_columns.yaml", None)
     if data is None:
-        return _DEFAULT_PII_COLUMNS, _DEFAULT_MASKING_COLUMNS
+        return _DEFAULT_PII_COLUMNS
 
     forbidden = set(data.get("forbidden", []))
-    masking_entries = data.get("masking", [])
-    masking_cols: set[str] = set()
-    for entry in masking_entries:
-        pattern = entry.get("pattern", "")
-        masking_cols.update(pattern.split("|"))
-
-    conditional = data.get("conditional", [])
-    for entry in conditional:
-        pattern = entry.get("pattern", "")
-        masking_cols.update(pattern.split("|"))
-
-    return (
-        forbidden if forbidden else _DEFAULT_PII_COLUMNS,
-        masking_cols if masking_cols else _DEFAULT_MASKING_COLUMNS,
-    )
+    return forbidden if forbidden else _DEFAULT_PII_COLUMNS
 
 
-PII_COLUMNS, MASKING_COLUMNS = _load_pii_columns()
+PII_COLUMNS = _load_pii_columns()
 
 
 @dataclass
@@ -142,7 +118,12 @@ def check_sql_syntax(
 
 
 def check_pii_columns(sql_upper: str) -> list[str]:
-    """PII 컬럼 직접 노출을 검사한다."""
+    """PII 컬럼 직접 노출을 검사한다.
+
+    settings.pii_masking_enabled가 False이면 검사하지 않고 빈 리스트를 반환한다.
+    """
+    if not settings.pii_masking_enabled:
+        return []
     return [
         f"개인정보 컬럼 '{col}'은 조회할 수 없습니다"
         for col in PII_COLUMNS

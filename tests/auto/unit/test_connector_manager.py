@@ -52,19 +52,27 @@ def test_parse_adw_table():
 
 
 def test_parse_bdp_table():
-    """TB_BDP_LCT001L → 'BDP' 반환."""
-    assert ConnectorManager.parse_db_source("TB_BDP_LCT001L") == "BDP"
+    """TB_BDP_LCT001L — BDP 가 target_db_schema_map 에 없으면 빈 문자열 반환.
+
+    BDP/CRP 는 현재 target_db_schema_map 에서 주석처리(미활성) 상태다.
+    parse_db_source 는 map 에 등록된 코드만 인식하므로 '' 를 반환한다.
+    BDP 가 map 에 추가될 경우 이 테스트를 == "BDP" 로 변경해야 한다.
+    """
+    assert ConnectorManager.parse_db_source("TB_BDP_LCT001L") == ""
 
 
 def test_parse_crp_table():
-    """TB_CRP_XXX → 'CRP' 반환."""
-    assert ConnectorManager.parse_db_source("TB_CRP_ACCT001") == "CRP"
+    """TB_CRP_XXX — CRP 가 target_db_schema_map 에 없으면 빈 문자열 반환.
+
+    BDP/CRP 는 현재 target_db_schema_map 에서 주석처리(미활성) 상태다.
+    CRP 가 map 에 추가될 경우 이 테스트를 == "CRP" 로 변경해야 한다.
+    """
+    assert ConnectorManager.parse_db_source("TB_CRP_ACCT001") == ""
 
 
 def test_parse_lowercase_normalized():
     """소문자 테이블명도 대문자로 변환 후 파싱."""
     assert ConnectorManager.parse_db_source("tb_adw_dep201p") == "ADW"
-    assert ConnectorManager.parse_db_source("tb_bdp_log001l") == "BDP"
 
 
 def test_parse_mixed_case():
@@ -104,10 +112,14 @@ def test_parse_schema_prefixed_adw():
 
 
 def test_parse_schema_prefixed_bdp():
-    """BDPOWN.TB_BDP_XXX001L → 'BDP' (스키마 접두사 제거)."""
+    """BDPOWN.TB_BDP_XXX001L — BDP 가 target_db_schema_map 에 없으면 빈 문자열.
+
+    스키마 접두사 제거 후 TB_BDP_XXX001L 을 파싱하지만, BDP 가 map 에 없으므로
+    '' 를 반환한다. BDP 가 map 에 추가될 경우 == "BDP" 로 변경해야 한다.
+    """
     assert ConnectorManager.parse_db_source(
         "BDPOWN.TB_BDP_XXX001L",
-    ) == "BDP"
+    ) == ""
 
 
 def test_parse_schema_prefixed_lowercase():
@@ -184,11 +196,18 @@ def test_get_query_db_with_adw_source_resolves_override():
     assert db is expected
 
 
-def test_get_query_db_with_bdp_source_identity():
-    """override 가 없는 BDP 는 identity 로 BDP 커넥터 반환."""
+def test_get_query_db_with_adw_source_resolves_to_registered_connector():
+    """db_source='ADW' 요청 시 resolve_system_connector 결과의 커넥터를 반환한다.
+
+    실제 settings.system_db_overrides 가 {"ADW":"TEST"} 이면 TEST 커넥터를,
+    {} 이면 ADW 커넥터를 반환한다. 어느 경우든 get_query_db 가 _db_connectors
+    에서 올바른 인스턴스를 꺼내오는지만 검증한다.
+    """
+    from src.config import settings
     manager = ConnectorManager(use_dummy=True)
-    db = manager.get_query_db(db_source="BDP")
-    assert db is manager._db_connectors["BDP"]
+    db = manager.get_query_db(db_source="ADW")
+    expected_key = settings.resolve_system_connector("ADW")
+    assert db is manager._db_connectors[expected_key]
 
 
 def test_get_query_db_unknown_source_falls_back_or_raises():
@@ -232,9 +251,13 @@ def test_target_db_code_accepts_valid_system_code():
 
 
 def test_target_db_code_normalizes_lowercase():
-    """소문자 입력도 허용하고 대문자로 정규화한다."""
-    s = Settings(target_db_code="bdp")
-    assert s.target_db_code == "BDP"
+    """소문자 입력도 허용하고 대문자로 정규화한다.
+
+    target_db_schema_map 에 등록된 코드("adw")만 유효하다.
+    BDP/CRP 는 현재 map 에 미활성이므로 ADW 로 검증한다.
+    """
+    s = Settings(target_db_code="adw")
+    assert s.target_db_code == "ADW"
 
 
 def test_target_db_code_rejects_unknown_code():

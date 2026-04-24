@@ -1,0 +1,128 @@
+────────────────────────────────
+## 예제 13: value_chain (가치사슬, Porter 스타일)
+────────────────────────────────
+
+데이터:
+유형: Porter 가치사슬 (상단 지원활동 + 하단 주활동)
+주제: 은행 가치사슬
+지원활동 (3개, 가로 전체 바):
+  1. "인적자원 관리" — 채용, 교육, 성과관리
+  2. "IT 인프라" — 전산시스템, 정보보안
+  3. "리스크 관리" — 신용/시장/운영 리스크 통제
+주활동 (5단계 화살표 연속):
+  1. "상품개발" — 여신/수신/투자 상품 기획
+  2. "마케팅" — 타겟 고객 발굴, 채널 전략
+  3. "판매" — 영업점/디지털 채널 판매
+  4. "운영" — 계정관리, 거래 처리
+  5. "사후관리" — CS, 만기 관리, 재계약
+
+계산 과정 (모델 내부 참조):
+  캔버스 800×500
+  지원활동 영역:
+    좌측 라벨: x=35, y=150 (회전 "지원활동")
+    박스 영역: x=70~740, w=670
+    3행 × (h=40, gap=5): y=80, 125, 170 → 하단 205
+  주활동 영역 (화살표 모양):
+    좌측 라벨: x=35, y=320 (회전 "주활동")
+    화살표 5개: 폭 136, 겹침(앞꺾임) 20, 간격 x=116
+    x0 시작: 70, 186, 302, 418, 534
+    y 범위: 260~370 (h=110, 중앙 cy=315)
+    path (평행사변형 화살표, 첫 번째만 좌측 평평):
+      첫: M 70,260 L 186,260 L 206,315 L 186,370 L 70,370 Z
+      중간: M x0,260 L x0+136,260 L x0+156,315 L x0+136,370 L x0,370 L x0+20,315 Z
+      마지막: M 534,260 L 670,260 L 690,315 L 670,370 L 534,370 L 554,315 Z
+  마진(margin) 박스 (우측 끝):
+    x=710, y=260~370 → "마진(Margin)" 라벨
+  색상: 주활동 5단계 팔레트 순환, 지원활동은 회색톤으로 차별화
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">은행 가치사슬 (Value Chain)</text>
+
+  <!-- ===== 좌측 카테고리 라벨 (회전) ===== -->
+  <text x="35" y="145" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280"
+        transform="rotate(-90,35,145)">지원활동</text>
+  <text x="35" y="315" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937"
+        transform="rotate(-90,35,315)">주활동</text>
+
+  <!-- ===== 지원활동 (상단 3개 행) ===== -->
+  <!-- 인적자원 관리 -->
+  <rect x="70" y="80" width="670" height="40" rx="6" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="90" y="105" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">인적자원 관리</text>
+  <text x="400" y="105" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">채용 · 교육 · 성과관리</text>
+
+  <!-- IT 인프라 -->
+  <rect x="70" y="125" width="670" height="40" rx="6" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="90" y="150" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">IT 인프라</text>
+  <text x="400" y="150" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">전산시스템 · 정보보안 · 데이터</text>
+
+  <!-- 리스크 관리 -->
+  <rect x="70" y="170" width="670" height="40" rx="6" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="90" y="195" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">리스크 관리</text>
+  <text x="400" y="195" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">신용 · 시장 · 운영 리스크 통제</text>
+
+  <!-- 구분선 -->
+  <line x1="60" y1="230" x2="740" y2="230" stroke="#d1d5db" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- ===== 주활동 5단계 (화살표 모양) ===== -->
+  <!-- 1. 상품개발 (좌측 평평, 우측 화살촉) -->
+  <path d="M 70,260 L 186,260 L 206,315 L 186,370 L 70,370 Z"
+        fill="#dbeafe" stroke="#1a56db" stroke-width="2"/>
+  <text x="125" y="310" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">상품개발</text>
+  <text x="125" y="335" text-anchor="middle" font-size="12"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">여신/수신/투자</text>
+
+  <!-- 2. 마케팅 -->
+  <path d="M 186,260 L 322,260 L 342,315 L 322,370 L 186,370 L 206,315 Z"
+        fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <text x="264" y="310" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">마케팅</text>
+  <text x="264" y="335" text-anchor="middle" font-size="12"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">타겟/채널</text>
+
+  <!-- 3. 판매 -->
+  <path d="M 322,260 L 458,260 L 478,315 L 458,370 L 322,370 L 342,315 Z"
+        fill="#d1fae5" stroke="#10b981" stroke-width="2"/>
+  <text x="400" y="310" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">판매</text>
+  <text x="400" y="335" text-anchor="middle" font-size="12"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">영업점/디지털</text>
+
+  <!-- 4. 운영 -->
+  <path d="M 458,260 L 594,260 L 614,315 L 594,370 L 458,370 L 478,315 Z"
+        fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+  <text x="536" y="310" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#991b1b">운영</text>
+  <text x="536" y="335" text-anchor="middle" font-size="12"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">계정/거래처리</text>
+
+  <!-- 5. 사후관리 -->
+  <path d="M 594,260 L 730,260 L 750,315 L 730,370 L 594,370 L 614,315 Z"
+        fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+  <text x="672" y="310" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#5b21b6">사후관리</text>
+  <text x="672" y="335" text-anchor="middle" font-size="12"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">CS/만기관리</text>
+
+  <!-- ===== 하단 설명 ===== -->
+  <text x="400" y="420" text-anchor="middle" font-size="14" font-style="italic"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">지원활동이 주활동 5단계를 뒷받침하여 고객 가치와 마진을 창출</text>
+
+  <!-- 화살표 방향 강조 (하단) -->
+  <text x="125" y="450" text-anchor="middle" font-size="13" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1a56db">① 기획</text>
+  <text x="672" y="450" text-anchor="middle" font-size="13" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#8b5cf6">⑤ 관리</text>
+  <line x1="180" y1="446" x2="620" y2="446" stroke="#d1d5db" stroke-width="1" stroke-dasharray="4,3"/>
+</svg>

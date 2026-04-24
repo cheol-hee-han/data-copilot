@@ -42,6 +42,7 @@ from src.agents.models.normalization import (
     ModifierType,
 )
 from src.connectors.manager import get_connector_manager
+from src.agents.utils.handoff import normalize_handoff_note
 from src.agents.nodes.system_prompts import (
     SQL_VALIDATOR_SYSTEM,
 )
@@ -57,7 +58,12 @@ from src.utils.sqlglot_analyzer import (
 )
 from src.config import settings
 from src.utils.logger import get_logger
-from src.utils.tracker import record_prompt_variables
+from src.utils.tracker import (
+    LLMInteraction,
+    build_llm_reasoning_payload,
+    llm_failure_sentinel,
+    llm_skip_sentinel,
+)
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
     REASONING_STEP,
@@ -242,10 +248,25 @@ async def sql_validator_node(state: PipelineState) -> dict:
     reason.validated_sql = sql
     reason.failure_type = None
     reason.failure_reason = None
-    logger.info(
-        "SQL 검증 통과",
-        row_count=layer3_result.get("row_count", 0),
-    )
+
+    # 검증 결과 상세 로깅
+    pass_log: dict[str, Any] = {
+        "row_count": layer3_result.get("row_count", 0),
+    }
+    if settings.validate_layer2b_enabled and layer2b_result:
+        checks = layer2b_result.get("checks", {})
+        pass_log["confidence_score"] = reason.confidence_score
+        pass_log["checks"] = {
+            k: {
+                "verdict": v.get("verdict"),
+                "reason": v.get("detail", ""),
+            }
+            for k, v in checks.items()
+        }
+        pass_log["validation_summary"] = layer2b_result.get(
+            "validation_summary", "",
+        )
+    logger.info("SQL 검증 통과", **pass_log)
 
     next_node, routing_reason = _infer_trace_routing(reason)
     await _dispatch_validator_step(
@@ -304,25 +325,30 @@ async def _dispatch_validator_step(
     next_node: str,
     routing_reason: str,
 ) -> None:
-    """sql_validator의 reasoning step을 디스패치한다."""
-    output: dict[str, Any] = {"final_verdict": verdict}
+    """sql_validator의 reasoning step을 디스패치한다.
+
+    Layer2b (LLM) 가 실행된 경우 Option B 표준 payload 를 사용하여
+    프롬프트 변수와 원본 응답을 보존한다. 선행 Layer 실패로 Layer2b
+    가 실행되지 않은 경우 빈 LLMInteraction 으로 일관된 스키마를 유지한다.
+    """
+    parsed_summary: dict[str, Any] = {"final_verdict": verdict}
     if layer1:
-        output["layer1_rule"] = {
+        parsed_summary["layer1_rule"] = {
             "status": layer1.get("status", ""),
             "detail": layer1.get("feedback", "")[:200],
         }
     if layer2a:
-        output["layer2a_structural"] = {
+        parsed_summary["layer2a_structural"] = {
             "status": layer2a.get("status", ""),
             "detail": layer2a.get("feedback", "")[:200],
         }
     if layer3:
-        output["layer3_execution"] = {
+        parsed_summary["layer3_execution"] = {
             "status": layer3.get("status", ""),
             "rows": layer3.get("row_count", 0),
         }
     if layer2b:
-        output["layer2b_semantic"] = {
+        parsed_summary["layer2b_semantic"] = {
             "status": layer2b.get("status", ""),
             "checks": layer2b.get("checks", {}),
             "validation_summary": layer2b.get(
@@ -330,27 +356,43 @@ async def _dispatch_validator_step(
             ),
         }
 
-    await dispatch_tracking_event(REASONING_STEP, {
-        "node": "sql_validator",
-        "phase": "reason",
-        "step_type": "validation",
-        "round": reason.loop_guard.replan_count,
-        "hypothesis_id": (
-            reason.current_hypothesis.hypothesis_id
-            if reason.current_hypothesis else ""
-        ),
-        "inputs": {
-            "sql": format_sql_tabular(sql),
-            "query_decomposition": (
-                f"measures={len(reason.knowledge_items)}건"
+    raw_interaction = layer2b.get("interaction") if layer2b else None
+    interaction: LLMInteraction = (
+        raw_interaction
+        if isinstance(raw_interaction, LLMInteraction)
+        else LLMInteraction(
+            prompt_variables={},
+            raw_response=llm_skip_sentinel(
+                "Layer2b 미실행 — 선행 Layer 실패",
             ),
-        },
-        "output": output,
-        "routing": {
-            "next_node": next_node,
-            "reason": routing_reason,
-        },
-    })
+        )
+    )
+
+    await dispatch_tracking_event(
+        REASONING_STEP,
+        build_llm_reasoning_payload(
+            node="sql_validator",
+            phase="reason",
+            round=reason.loop_guard.replan_count,
+            hypothesis_id=(
+                reason.current_hypothesis.hypothesis_id
+                if reason.current_hypothesis else ""
+            ),
+            interaction=interaction,
+            routing={
+                "next_node": next_node,
+                "reason": routing_reason,
+            },
+            parsed_summary=parsed_summary,
+            extra_inputs={
+                "sql": format_sql_tabular(sql),
+                "query_decomposition": (
+                    f"measures={len(reason.knowledge_items)}건"
+                ),
+            },
+            step_type="validation",
+        ),
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -754,6 +796,7 @@ async def _validate_layer2b(
     retry 후에도 실패하면 FAIL + structural로 처리하여
     검증되지 않은 SQL이 실행되지 않도록 한다.
     """
+    from src.agents.nodes.thinking_modes import LLMNode
     from src.utils.llm import llm_call_with_parse_retry, ParseError
     from src.utils.llm.response import extract_json
     from src.utils.llm.prompt import render_prompt
@@ -785,6 +828,11 @@ async def _validate_layer2b(
     else:
         reasoning_decisions_text = "(없음)"
 
+    # CONTINUE 오케스트레이터 handoff_note (opt-in 단일 패턴, §설계 §4·§7)
+    handoff_note_text = normalize_handoff_note(
+        state.handoff_note if state is not None else None,
+    )
+
     template = SQL_VALIDATOR_SYSTEM
     replacements = {
         "{original_query}": original_query or "",
@@ -796,6 +844,7 @@ async def _validate_layer2b(
         "{reasoning_decisions}": reasoning_decisions_text,
         "{dead_ends}": dead_text,
         "{db_execution_result}": db_result_text,
+        "{handoff_note}": handoff_note_text,
     }
     prompt, prompt_vars = render_prompt(template, replacements)
 
@@ -806,7 +855,7 @@ async def _validate_layer2b(
         return data
 
     try:
-        _, data = await llm_call_with_parse_retry(
+        raw_text, data = await llm_call_with_parse_retry(
             system=prompt,
             messages=[
                 {
@@ -817,18 +866,24 @@ async def _validate_layer2b(
             parse_fn=_parse_fn,
             max_tokens=1024,
             timeout=settings.llm_default_timeout,
-            node_name="sql_validator_layer2b",
+            node_name=LLMNode.SQL_VALIDATOR,
         )
 
-        await record_prompt_variables(prompt_vars)
-        verdict = data.get("verdict", "PASS")
+        interaction = LLMInteraction(
+            prompt_variables=prompt_vars,
+            raw_response=raw_text,
+        )
+        verdict = data.get("final_verdict", "PASS")
         checks = data.get("checks", {})
 
-        passed = [k for k, v in checks.items() if v.get("pass")]
+        passed = [
+            k for k, v in checks.items()
+            if v.get("verdict") == "PASS"
+        ]
         failed = [
             f"{k}: {v.get('detail', '')}"
             for k, v in checks.items()
-            if not v.get("pass")
+            if v.get("verdict") != "PASS"
         ]
         fix = data.get("fix_instruction", "")
         classification = data.get(
@@ -848,6 +903,7 @@ async def _validate_layer2b(
                     "validation_summary", "",
                 ),
                 "confidence_score": score,
+                "interaction": interaction,
             }
 
         return {
@@ -859,6 +915,7 @@ async def _validate_layer2b(
                 "validation_summary", "",
             ),
             "confidence_score": score,
+            "interaction": interaction,
         }
 
     except (ParseError, Exception) as e:
@@ -873,6 +930,12 @@ async def _validate_layer2b(
             "feedback": "LLM 의미 검증에 실패하여 SQL을 확정할 수 없습니다",
             "failure_classification": "structural",
             "confidence_score": 0.0,
+            "interaction": LLMInteraction(
+                prompt_variables=prompt_vars,
+                raw_response=llm_failure_sentinel(
+                    "Layer2b LLM 실패", e,
+                ),
+            ),
         }
 
 

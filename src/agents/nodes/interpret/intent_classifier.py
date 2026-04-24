@@ -14,22 +14,28 @@
       clarification_handler로 라우팅한다.
     - 무한루프 방어: 명확화 횟수가 settings.clarification_max_turns를
       초과하면 DATA_EXTRACTION으로 강제 진행한다.
-    - DATA_ANALYSIS 의도일 경우 시각화/분석 지시어를 제거한
-      추출 전용 질의를 별도로 생성한다.
+
+DATA_ANALYSIS 시각화/분석 지시어 제거(`extraction_query_rewriter`)는
+본 노드가 아닌 `query_normalizer` 에서 수행한다. 이유: CONTINUE 턴에서는
+본 노드가 `CONTINUE_ORCHESTRATION_PENDING` 을 설정하여 continue_orchestrator 로
+라우팅하며, 그 시점에서 재작성 전 원본 질의가 오케스트레이터 입력이어야
+맥락 해석이 정확하기 때문.
 
 핵심 함수:
     - intent_classifier_node: 파이프라인 노드 진입점
-    - _build_clarification_history: 이전 명확화 Q&A를 프롬프트용 텍스트로 조립
-    - _rewrite_for_analysis: DATA_ANALYSIS 질의에서 시각화 지시어 제거
+
+명확화 Q&A 조립은 공용 유틸 `build_clarification_context` 사용.
 """
 
 from __future__ import annotations
 
 from src.agents.models.clarification import AmbiguitySignal
 from src.agents.nodes.system_prompts import (
-    INTENT_CLASSIFIER_QUERY_REWRITER,
     INTENT_CLASSIFIER_SYSTEM,
     INTENT_CLASSIFIER_USER,
+)
+from src.agents.utils.clarification_context import (
+    build_clarification_context,
 )
 from src.agents.state.state import (
     PipelineState,
@@ -41,9 +47,12 @@ from src.models.enums import IntentType
 from src.services.intent_classifier import (
     IntentClassifyResult,
     intent_classifier,
-    rewrite_analysis_query,
 )
 from src.utils.logger import get_logger
+from src.utils.tracker import (
+    LLMInteraction,
+    build_llm_reasoning_payload,
+)
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
     REASONING_STEP,
@@ -53,25 +62,201 @@ from src.utils.truncate import truncate_log
 logger = get_logger(__name__)
 
 
-def _build_clarification_history(state: PipelineState) -> str:
-    """명확화 이력을 프롬프트용 텍스트로 조립한다.
+async def _emit_intent_classifier_reasoning_step(
+    *,
+    interaction: LLMInteraction,
+    result: IntentClassifyResult,
+    next_node: str,
+    routing_reason: str,
+) -> None:
+    """intent_classifier 의 REASONING_STEP 이벤트를 표준 payload 로 방출한다.
 
-    clarification_handler의 interrupt/resume 사이클 후
-    resolved_signals에 저장된 질문-응답을 추출한다.
+    Option B (§trace-input-output-redesign) 권고에 따라 프롬프트 변수와
+    원본 응답을 손실 없이 전달한다.
     """
-    # resolved_signals에서 intent_classifier가 발생시킨 명확화 이력 추출
-    parts: list[str] = []
-    for signal in state.resolved_signals:
-        if signal.source_node != "intent_classifier":
-            continue
-        if signal.question:
-            parts.append(f"시스템: {signal.question}")
-        if signal.answer:
-            parts.append(f"사용자: {signal.answer}")
+    if result.is_error:
+        parsed_summary: dict = {"error": True}
+    else:
+        parsed_summary = {
+            "resolution": result.resolution.value,
+            "intent": result.intent.value,
+            "confidence": result.confidence,
+            "category": result.category,
+            "reason": result.reason or result.continue_reason or "",
+            "needs_analyzer": result.needs_analyzer,
+            "ambiguity_count": len(result.ambiguities or []),
+        }
+    await dispatch_tracking_event(
+        REASONING_STEP,
+        build_llm_reasoning_payload(
+            node="intent_classifier",
+            phase="interpret",
+            round=0,
+            hypothesis_id="",
+            interaction=interaction,
+            routing={
+                "next_node": next_node,
+                "reason": routing_reason,
+            },
+            parsed_summary=parsed_summary,
+        ),
+    )
 
-    if not parts:
-        return ""
-    return "\n".join(parts)
+
+async def _handle_forced_progression(
+    state: PipelineState,
+    result: IntentClassifyResult,
+    interaction: LLMInteraction,
+    ask_count: int,
+) -> dict:
+    """명확화 상한 초과 시 DATA_EXTRACTION 으로 강제 진행한다."""
+    logger.warning(
+        "명확화 상한 초과, 강제 진행",
+        ask_count=ask_count,
+    )
+    forced_signal = AmbiguitySignal(
+        source_node="intent_classifier",
+        decision="INFER",
+        ambiguity_type="INTENT",
+        confidence="LOW",
+        question=(
+            "명확화 횟수 상한에 도달하여 "
+            "데이터 추출로 자동 진행합니다"
+        ),
+        question_type="confirm",
+        inferred_value="데이터 추출",
+        reasoning=f"명확화 {ask_count}회 초과",
+        turn_id=state.turn_id,
+    )
+    await _emit_intent_classifier_reasoning_step(
+        interaction=interaction,
+        result=result,
+        next_node="query_normalizer",
+        routing_reason=(
+            f"명확화 {ask_count}회 초과 → DATA_EXTRACTION 강제 진행"
+        ),
+    )
+    return {
+        "intent": IntentType.DATA_EXTRACTION,
+        "intent_confidence": 0.4,
+        "query_category": "DATA_EXTRACTION",
+        "is_continuation": False,
+        "resolved_signals": [*state.resolved_signals, forced_signal],
+        "status": QueryStatus.INTENT_CLASSIFIED,
+        "trace_log": add_trace(
+            state, "맥락분류",
+            "명확화 상한 초과, 강제 진행",
+            f"횟수={ask_count}",
+        ),
+    }
+
+
+def _build_ambiguity_signal(
+    result: IntentClassifyResult,
+) -> tuple[AmbiguitySignal, str]:
+    """LLM ambiguities (폴백 포함) 에서 ASK 시그널을 구성한다.
+
+    Returns:
+        (signal, label): label 은 "UNSURE" 또는 "AMBIGUOUS".
+    """
+    amb = result.ambiguities[0] if result.ambiguities else {}
+    is_unsure = result.resolution == HistoryDecision.UNSURE
+    fallback_question = (
+        "이전 대화에 이어서 질문하신 건지, "
+        "새로운 데이터를 찾으시는 건지 알려주시겠어요?"
+        if is_unsure
+        else f"요청하신 내용을 좀 더 구체적으로 "
+             f"알려주시겠어요?\n{result.reason or ''}"
+    )
+    signal = AmbiguitySignal(
+        source_node="intent_classifier",
+        decision="ASK",
+        ambiguity_type=amb.get(
+            "ambiguity_type",
+            "CONTEXT" if is_unsure else "INTENT",
+        ),
+        confidence=amb.get("confidence", "LOW"),
+        question=amb.get("question", fallback_question),
+        question_type=amb.get(
+            "question_type",
+            "confirm" if is_unsure else "single_select",
+        ),
+        options=amb.get("options") or [],
+        inferred_value=amb.get("inferred_value"),
+        reasoning=amb.get("reasoning", result.reason or ""),
+    )
+    label = "UNSURE" if is_unsure else "AMBIGUOUS"
+    return signal, label
+
+
+async def _handle_ambiguous_or_unsure(
+    state: PipelineState,
+    result: IntentClassifyResult,
+    interaction: LLMInteraction,
+) -> dict:
+    """UNSURE/AMBIGUOUS 판정 시 명확화 신호를 생성하거나 강제 진행한다."""
+    from src.config import settings
+    ask_count = sum(
+        1 for s in state.resolved_signals
+        if s.decision == "ASK"
+    )
+    if ask_count >= settings.clarification_max_turns:
+        return await _handle_forced_progression(
+            state, result, interaction, ask_count,
+        )
+
+    signal, label = _build_ambiguity_signal(result)
+    await _emit_intent_classifier_reasoning_step(
+        interaction=interaction,
+        result=result,
+        next_node="clarification_handler",
+        routing_reason=f"{label} → 명확화 질문",
+    )
+    return {
+        "pending_signals": [signal],
+        "intent": result.intent,
+        "intent_confidence": result.confidence,
+        "query_category": result.category,
+        "status": QueryStatus.INTENT_CLASSIFIED,
+        "trace_log": add_trace(
+            state, "맥락분류",
+            f"{label} — 명확화 신호 생성",
+            f"질문: {signal.question}",
+        ),
+    }
+
+
+def _apply_continue_updates(
+    state: PipelineState,
+    result: IntentClassifyResult,
+    updates: dict,
+) -> None:
+    """CONTINUE 판정 시 updates 에 맥락 반영·시그널·라우팅 전환을 적용한다."""
+    updates["continue_context"] = result.continue_context
+    # 하류 노드가 continue_context를 직접 참조하도록 전환 전까지
+    # preprocessed_input에 맥락 반영 질의를 설정하여 맥락 손실 방지
+    if result.continue_context:
+        updates["preprocessed_input"] = result.continue_context
+    # 사용자에게 이전 대화 연속 해석 사실을 안내
+    updates["resolved_signals"] = [
+        *state.resolved_signals,
+        AmbiguitySignal(
+            source_node="intent_classifier",
+            decision="INFER",
+            ambiguity_type="CONTEXT",
+            confidence="MEDIUM",
+            question="이전 대화의 연속으로 해석하였습니다",
+            question_type="confirm",
+            inferred_value="기존 맥락 기반 재질의",
+            reasoning=result.continue_reason or "",
+            turn_id=state.turn_id,
+        ),
+    ]
+    # Multi-Turn CONTINUE 오케스트레이터 라우팅 — 참조할 이전 턴 스냅샷이 있는 경우에만.
+    # turn_snapshots가 비어있으면(첫 CONTINUE 턴) 스냅샷이 없으므로 일반 흐름 유지.
+    # save_turn_snapshot의 I4 필터가 위 INFER 시그널을 걸러내므로 충돌 없음.
+    if state.turn_snapshots:
+        updates["status"] = QueryStatus.CONTINUE_ORCHESTRATION_PENDING
 
 
 def _build_trace(
@@ -101,28 +286,6 @@ def _build_trace(
     )
 
 
-async def _rewrite_for_analysis(original_input: str) -> dict:
-    """DATA_ANALYSIS 질의에서 시각화/분석 지시어를 제거한다.
-
-    원본을 analysis_query에 보관하고, 추출 중심 질의로
-    preprocessed_input을 교체한다. 실패 시 원본을 그대로 유지한다.
-    """
-    updates: dict = {"analysis_query": original_input}
-    try:
-        extraction = await rewrite_analysis_query(
-            original_input,
-            system_prompt=INTENT_CLASSIFIER_QUERY_REWRITER,
-        )
-        if extraction:
-            updates["preprocessed_input"] = extraction
-    except Exception as e:
-        logger.warning(
-            "분석 질의 재작성 실패, 원본 유지",
-            error=str(e),
-        )
-    return updates
-
-
 async def intent_classifier_node(
     state: PipelineState,
 ) -> dict:
@@ -130,16 +293,22 @@ async def intent_classifier_node(
     query = state.preprocessed_input
     history = state.conversation_history
 
-    result = await intent_classifier(
+    result, interaction = await intent_classifier(
         query,
         history,
         system_prompt=INTENT_CLASSIFIER_SYSTEM,
         user_template=INTENT_CLASSIFIER_USER,
-        clarification_history=_build_clarification_history(state),
+        clarification_history=build_clarification_context(state),
     )
 
     # ── 에러 ──
     if result.is_error:
+        await _emit_intent_classifier_reasoning_step(
+            interaction=interaction,
+            result=result,
+            next_node="(end)",
+            routing_reason="LLM 호출 실패 → 에러 반환",
+        )
         return {
             "intent": result.intent,
             "intent_confidence": result.confidence,
@@ -152,98 +321,9 @@ async def intent_classifier_node(
         result.resolution == HistoryDecision.UNSURE
         or result.category == "AMBIGUOUS"
     ):
-        from src.config import settings
-        ask_count = sum(
-            1 for s in state.resolved_signals
-            if s.decision == "ASK"
+        return await _handle_ambiguous_or_unsure(
+            state, result, interaction,
         )
-        if ask_count >= settings.clarification_max_turns:
-            logger.warning(
-                "명확화 상한 초과, 강제 진행",
-                ask_count=ask_count,
-            )
-            # 사용자에게 자동 진행 사실을 안내하기 위해 INFER 시그널 생성
-            forced_signal = AmbiguitySignal(
-                source_node="intent_classifier",
-                decision="INFER",
-                ambiguity_type="INTENT",
-                confidence="LOW",
-                question=(
-                    "명확화 횟수 상한에 도달하여 "
-                    "데이터 추출로 자동 진행합니다"
-                ),
-                question_type="confirm",
-                inferred_value="데이터 추출",
-                reasoning=f"명확화 {ask_count}회 초과",
-                turn_id=state.turn_id,
-            )
-            return {
-                "intent": IntentType.DATA_EXTRACTION,
-                "intent_confidence": 0.4,
-                "query_category": "DATA_EXTRACTION",
-                "is_continuation": False,
-                "resolved_signals": [*state.resolved_signals, forced_signal],
-                "status": QueryStatus.INTENT_CLASSIFIED,
-                "trace_log": add_trace(
-                    state, "맥락분류",
-                    "명확화 상한 초과, 강제 진행",
-                    f"횟수={ask_count}",
-                ),
-            }
-
-        # LLM ambiguities에서 AmbiguitySignal 생성
-        amb = (
-            result.ambiguities[0]
-            if result.ambiguities
-            else {}
-        )
-        is_unsure = (
-            result.resolution == HistoryDecision.UNSURE
-        )
-
-        # 폴백: LLM이 ambiguities를 안 생성한 경우
-        fallback_question = (
-            "이전 대화에 이어서 질문하신 건지, "
-            "새로운 데이터를 찾으시는 건지 알려주시겠어요?"
-            if is_unsure
-            else f"요청하신 내용을 좀 더 구체적으로 "
-                 f"알려주시겠어요?\n{result.reason or ''}"
-        )
-
-        signal = AmbiguitySignal(
-            source_node="intent_classifier",
-            decision="ASK",
-            ambiguity_type=amb.get(
-                "ambiguity_type",
-                "CONTEXT" if is_unsure else "INTENT",
-            ),
-            confidence=amb.get("confidence", "LOW"),
-            question=amb.get("question", fallback_question),
-            question_type=amb.get(
-                "question_type",
-                "confirm" if is_unsure else "single_select",
-            ),
-            options=amb.get("options") or [],
-            inferred_value=amb.get("inferred_value"),
-            reasoning=amb.get(
-                "reasoning",
-                result.reason or "",
-            ),
-        )
-
-        label = "UNSURE" if is_unsure else "AMBIGUOUS"
-        return {
-            "pending_signals": [signal],
-            "intent": result.intent,
-            "intent_confidence": result.confidence,
-            "query_category": result.category,
-            "status": QueryStatus.INTENT_CLASSIFIED,
-            "trace_log": add_trace(
-                state, "맥락분류",
-                f"{label} — 명확화 신호 생성",
-                f"질문: {signal.question}",
-            ),
-        }
 
     # ── 정상 경로: SKIP / NEW / CONTINUE ──
     updates: dict = {
@@ -251,40 +331,13 @@ async def intent_classifier_node(
         "intent_confidence": result.confidence,
         "query_category": result.category,
         "is_continuation": result.resolution == HistoryDecision.CONTINUE,
+        "needs_analyzer": result.needs_analyzer,
         "status": QueryStatus.INTENT_CLASSIFIED,
         "trace_log": _build_trace(state, result),
     }
 
     if result.resolution == HistoryDecision.CONTINUE:
-        updates["continue_context"] = result.continue_context
-        # 하류 노드가 continue_context를 직접 참조하도록 전환 전까지
-        # preprocessed_input에 맥락 반영 질의를 설정하여 맥락 손실 방지
-        if result.continue_context:
-            updates["preprocessed_input"] = result.continue_context
-        # 사용자에게 이전 대화 연속 해석 사실을 안내
-        updates["resolved_signals"] = [
-            *state.resolved_signals,
-            AmbiguitySignal(
-                source_node="intent_classifier",
-                decision="INFER",
-                ambiguity_type="CONTEXT",
-                confidence="MEDIUM",
-                question="이전 대화의 연속으로 해석하였습니다",
-                question_type="confirm",
-                inferred_value="기존 맥락 기반 재질의",
-                reasoning=result.continue_reason or "",
-                turn_id=state.turn_id,
-            ),
-        ]
-
-    # ── DATA_ANALYSIS: 시각화/분석 지시어 제거 ──
-    if result.intent == IntentType.DATA_ANALYSIS:
-        current_input = updates.get(
-            "preprocessed_input", query,
-        )
-        updates.update(
-            await _rewrite_for_analysis(current_input),
-        )
+        _apply_continue_updates(state, result, updates)
 
     # ── 추적 이벤트 ──
     from src.utils.tracker.dispatch import (
@@ -301,52 +354,26 @@ async def intent_classifier_node(
             if result.resolution == HistoryDecision.CONTINUE
             else result.reason
         ),
+        "needs_analyzer": result.needs_analyzer,
+        "needs_analyzer_reason": result.needs_analyzer_reason,
     })
 
     # ── Reasoning Flow 트레이스 ──
-    # 라우팅 결정: 정상 경로에서는 데이터 의도 → normalize_query, 비데이터 → simple_responder
+    # 라우팅 결정: 정상 경로에서는 데이터 의도 → query_normalizer, 비데이터 → simple_responder
     if result.intent in (IntentType.CASUAL_TALK, IntentType.META_QUESTION):
         _next_node = "simple_responder"
+    elif updates.get("status") == QueryStatus.CONTINUE_ORCHESTRATION_PENDING:
+        _next_node = "continue_orchestrator"
     else:
-        _next_node = "normalize_query"
-    _routing_reason = (
-        f"{result.resolution.value} + {result.intent.value}"
-    )
+        _next_node = "query_normalizer"
 
-    clarification_hist = _build_clarification_history(state)
-    await dispatch_tracking_event(REASONING_STEP, {
-        "node": "intent_classifier",
-        "phase": "interpret",
-        "step_type": "llm_decision",
-        "round": 0,
-        "hypothesis_id": "",
-        "inputs": {
-            "query": query,
-            "history": (
-                f"최근 {len(history)}턴"
-                if history else "(없음)"
-            ),
-            "clarification_history": (
-                f"{len(state.resolved_signals)}건"
-                if clarification_hist else "(없음)"
-            ),
-        },
-        "output": {
-            "resolution": (
-                f"{result.resolution.value}"
-                f" ({result.confidence:.0%})"
-            ),
-            "resolution_reason": result.reason or result.continue_reason or "",
-            "intent": result.intent.value,
-            "confidence": result.confidence,
-            "ambiguities": [
-                a.get("question", "") for a in (result.ambiguities or [])
-            ],
-        },
-        "routing": {
-            "next_node": _next_node,
-            "reason": _routing_reason,
-        },
-    })
+    await _emit_intent_classifier_reasoning_step(
+        interaction=interaction,
+        result=result,
+        next_node=_next_node,
+        routing_reason=(
+            f"{result.resolution.value} + {result.intent.value}"
+        ),
+    )
 
     return updates

@@ -1,5 +1,7 @@
 """CRP 커넥터 — Oracle 19c/21c 기반 CRP 업무 시스템 읽기 전용 쿼리 실행.
 
+작성자: 한철희 / 최종수정: 2026-04-20 16:27:03
+
 python-oracledb(구 cx_Oracle의 공식 후속 드라이버)를 사용한다.
 thin mode 기본, thick mode는 Instant Client 설치 시 settings.oracle_thick_mode=True로 전환.
 
@@ -69,7 +71,7 @@ class CRPConnector(DatabaseConnector):
             settings.oracle_port,
             service_name=settings.oracle_service_name,
         )
-        self._pool = oracledb.create_pool_async(
+        pool = oracledb.create_pool_async(
             user=settings.oracle_user,
             password=settings.oracle_password,
             dsn=dsn,
@@ -77,6 +79,18 @@ class CRPConnector(DatabaseConnector):
             max=settings.db_pool_size,
             increment=1,
         )
+
+        # 실접속 검증 — 풀에서 커넥션을 꺼내 TCP 핸드셰이크를 수행
+        try:
+            async with pool.acquire() as conn:
+                with conn.cursor() as cursor:
+                    await cursor.execute("SELECT 1 FROM DUAL")
+                    await cursor.fetchall()
+        except Exception:
+            await pool.close()
+            raise
+
+        self._pool = pool
         logger.info(
             "CRP(Oracle) 연결 완료",
             host=settings.oracle_host,

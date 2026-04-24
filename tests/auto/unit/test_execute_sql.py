@@ -1,4 +1,4 @@
-"""SQL 실행 노드(execute_sql_node) 테스트.
+"""SQL 실행 노드(sql_executor_node) 테스트.
 
 테스트 대상:
     검증 완료된 SQL을 DB에 실행하고 SQLResult를 반환하는 노드를 검증한다.
@@ -83,11 +83,11 @@ def _make_state(validated_sql: str):
 @pytest.mark.asyncio
 async def test_unsafe_sql_blocked_insert():
     """INSERT 문은 이중 보안 검증에서 차단된다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     state = _make_state("INSERT INTO TB_CUST_INFO VALUES (1, 'test')")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     passed = result.get("status") == QueryStatus.ERROR
     log_test_case(
@@ -104,11 +104,11 @@ async def test_unsafe_sql_blocked_insert():
 @pytest.mark.asyncio
 async def test_unsafe_sql_blocked_drop():
     """DROP 문은 이중 보안 검증에서 차단된다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     state = _make_state("DROP TABLE TB_CUST_INFO")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     passed = result.get("status") == QueryStatus.ERROR
     log_test_case(
@@ -125,11 +125,11 @@ async def test_unsafe_sql_blocked_drop():
 @pytest.mark.asyncio
 async def test_unsafe_sql_blocked_delete():
     """DELETE 문은 이중 보안 검증에서 차단된다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     state = _make_state("DELETE FROM TB_CUST_INFO WHERE 1=1")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     passed = result.get("status") == QueryStatus.ERROR
     log_test_case(
@@ -146,11 +146,11 @@ async def test_unsafe_sql_blocked_delete():
 @pytest.mark.asyncio
 async def test_unsafe_sql_blocked_update():
     """UPDATE 문은 이중 보안 검증에서 차단된다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     state = _make_state("UPDATE TB_CUST_INFO SET NAME='test' WHERE CUST_NO='001'")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     passed = result.get("status") == QueryStatus.ERROR
     log_test_case(
@@ -171,12 +171,12 @@ async def test_unsafe_sql_blocked_update():
 @pytest.mark.asyncio
 async def test_execute_valid_sql_dummy():
     """Dummy 모드에서 유효한 SELECT 실행이 SQLResult 를 반환한다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus, SQLResult
 
     # Dummy 커넥터가 처리할 수 있는 범용 SELECT
     state = _make_state("SELECT LOAN_NO, LOAN_AMT FROM TB_LOAN_INFO LIMIT 5")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     sql_result = result.get("sql_result")
     status = result.get("status")
@@ -198,11 +198,11 @@ async def test_execute_valid_sql_dummy():
 @pytest.mark.asyncio
 async def test_result_has_columns_and_rows_on_success():
     """성공적으로 실행된 결과는 columns 와 rows 필드를 가진다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus, SQLResult
 
     state = _make_state("SELECT LOAN_NO FROM TB_LOAN_INFO LIMIT 1")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     sql_result: SQLResult = result.get("sql_result")
     status = result.get("status")
@@ -229,11 +229,11 @@ async def test_result_has_columns_and_rows_on_success():
 @pytest.mark.asyncio
 async def test_execution_time_recorded():
     """실행 성공 시 execution_time_ms 가 0 보다 크다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     state = _make_state("SELECT DEPOSIT_NO FROM TB_DEPOSIT_INFO LIMIT 1")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     if result.get("status") == QueryStatus.EXECUTED:
         sql_result = result["sql_result"]
@@ -254,12 +254,12 @@ async def test_execution_time_recorded():
 @pytest.mark.asyncio
 async def test_invalid_sql_returns_error():
     """구문 오류 SQL 은 ERROR 상태를 반환한다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     # 보안 검증은 통과하지만 DB 에서 구문 오류가 발생할 SQL
     state = _make_state("SELECT FROM WHERE INVALID SYNTAX !!!!")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     status = result.get("status")
     # 보안 오류 또는 실행 오류 모두 ERROR
@@ -283,11 +283,11 @@ async def test_invalid_sql_returns_error():
 @pytest.mark.asyncio
 async def test_execute_select_1_live():
     """라이브: 'SELECT 1 AS val' 이 1행을 반환한다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     state = _make_state("SELECT 1 AS val")
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     sql_result = result.get("sql_result")
     status = result.get("status")
@@ -312,13 +312,13 @@ async def test_execute_select_1_live():
 @pytest.mark.asyncio
 async def test_empty_result_live():
     """라이브: 결과가 없는 쿼리는 row_count=0 인 SQLResult 를 반환한다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
 
     state = _make_state(
         "SELECT 1 AS val WHERE 1=0"
     )
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     sql_result = result.get("sql_result")
     status = result.get("status")
@@ -342,7 +342,7 @@ async def test_empty_result_live():
 @pytest.mark.asyncio
 async def test_row_count_limit_live():
     """라이브: 결과가 max_query_rows 를 초과하면 잘린다."""
-    from src.agents.nodes.present.sql_executor import execute_sql_node
+    from src.agents.nodes.present.sql_executor import sql_executor_node
     from src.agents.state.state import QueryStatus
     from src.config import settings
 
@@ -351,7 +351,7 @@ async def test_row_count_limit_live():
     state = _make_state(
         f"SELECT generate_series(1, {limit + 10}) AS n"
     )
-    result = await execute_sql_node(state)
+    result = await sql_executor_node(state)
 
     sql_result = result.get("sql_result")
     status = result.get("status")

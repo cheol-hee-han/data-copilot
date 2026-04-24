@@ -1,0 +1,97 @@
+────────────────────────────────
+## 예제 11: venn_diagram (벤 다이어그램, 3집합)
+────────────────────────────────
+
+데이터:
+유형: 3집합 벤 다이어그램
+주제: 다중 상품 보유 고객 분석
+집합:
+  A = 예금 고객 (총 120,000명)
+  B = 대출 고객 (총 80,000명)
+  C = 카드 고객 (총 95,000명)
+영역별 고객수:
+  예금만: 45,000
+  대출만: 18,000
+  카드만: 32,000
+  예금 ∩ 대출: 15,000
+  예금 ∩ 카드: 22,000
+  대출 ∩ 카드: 12,000
+  예금 ∩ 대출 ∩ 카드: 8,000
+
+계산 과정 (모델 내부 참조):
+  3원을 정삼각형 배치 (서로 충분히 교차):
+    원 반지름 r=110
+    중심 좌표:
+      예금 (위):     cx=400, cy=200
+      대출 (좌하):   cx=340, cy=300
+      카드 (우하):   cx=460, cy=300
+    중심 간 거리 ≈ 116 < 2r=220 → 교집합 영역 형성
+    fill-opacity=0.35로 색 혼합 자연 표현
+  영역 라벨 좌표 (시각적으로 각 영역 중앙):
+    예금만: (400, 130) - 위쪽 비중첩
+    대출만: (250, 350) - 좌하 비중첩
+    카드만: (550, 350) - 우하 비중첩
+    A∩B (예금∩대출, 좌측 상단 교집합): (310, 250)
+    A∩C (예금∩카드, 우측 상단 교집합): (490, 250)
+    B∩C (대출∩카드, 하단 교집합): (400, 330)
+    A∩B∩C (중앙 3중 교집합): (400, 280)
+  집합 이름 라벨: 각 원 외측 (예금: 400,90 / 대출: 200,400 / 카드: 600,400)
+  범례: 우측에 색상 구분
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- 제목 -->
+  <text x="400" y="35" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">다중 상품 보유 고객 분석</text>
+
+  <!-- ===== 3원 (반투명) ===== -->
+  <!-- 예금 고객 (위, 파랑) -->
+  <circle cx="400" cy="200" r="110" fill="#1a56db" fill-opacity="0.30" stroke="#1a56db" stroke-width="2"/>
+  <!-- 대출 고객 (좌하, 주황) -->
+  <circle cx="340" cy="300" r="110" fill="#f59e0b" fill-opacity="0.30" stroke="#f59e0b" stroke-width="2"/>
+  <!-- 카드 고객 (우하, 녹색) -->
+  <circle cx="460" cy="300" r="110" fill="#10b981" fill-opacity="0.30" stroke="#10b981" stroke-width="2"/>
+
+  <!-- ===== 집합 이름 라벨 (원 외측) ===== -->
+  <text x="400" y="80" text-anchor="middle" font-size="17" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1a56db">예금 (120,000명)</text>
+  <text x="180" y="425" text-anchor="middle" font-size="17" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#f59e0b">대출 (80,000명)</text>
+  <text x="620" y="425" text-anchor="middle" font-size="17" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#10b981">카드 (95,000명)</text>
+
+  <!-- ===== 영역별 고객수 라벨 ===== -->
+  <!-- 예금만 (위쪽 비중첩) -->
+  <text x="400" y="135" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">45,000</text>
+
+  <!-- 대출만 (좌하 비중첩) -->
+  <text x="265" y="345" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">18,000</text>
+
+  <!-- 카드만 (우하 비중첩) -->
+  <text x="535" y="345" text-anchor="middle" font-size="15" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">32,000</text>
+
+  <!-- 예금 ∩ 대출 (좌상 교집합) -->
+  <text x="320" y="245" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">15,000</text>
+
+  <!-- 예금 ∩ 카드 (우상 교집합) -->
+  <text x="480" y="245" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">22,000</text>
+
+  <!-- 대출 ∩ 카드 (하단 교집합) -->
+  <text x="400" y="345" text-anchor="middle" font-size="14" font-weight="600"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">12,000</text>
+
+  <!-- 3원 교집합 (중앙, 강조) -->
+  <circle cx="400" cy="280" r="22" fill="white" fill-opacity="0.7" stroke="#1f2937" stroke-width="1"/>
+  <text x="400" y="285" text-anchor="middle" font-size="14" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">8,000</text>
+
+  <!-- ===== 하단 인사이트 박스 ===== -->
+  <rect x="120" y="450" width="560" height="35" rx="6" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="400" y="473" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#374151">3개 상품 동시 보유 핵심 고객층 8,000명 (전체 예금고객의 6.7%)</text>
+</svg>

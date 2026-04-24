@@ -1,0 +1,120 @@
+────────────────────────────────
+## 예제 10: process_diagram (선형 프로세스 다이어그램)
+────────────────────────────────
+
+데이터:
+유형: 선형 5단계 프로세스
+주제: 자금세탁방지(AML) 처리 절차
+단계:
+  1. "거래 모니터링" — 실시간 거래 감시
+  2. "의심거래 식별" — 룰/AI 기반 탐지
+  3. "분석 및 검토" — 컴플라이언스 심사
+  4. "KoFIU 보고" — 금융정보분석원 신고 (STR)
+  5. "사후 관리" — 고객 모니터링 강화
+
+계산 과정 (모델 내부 참조):
+  단계 박스: width=130, height=80, 단계 5개
+  가로 배치 (좌우 여백 15씩):
+    total = 5×130 + 4×30(화살표 공간) = 770
+    start_x = (800 - 770) / 2 = 15
+    박스 x 좌표: 15, 175, 335, 495, 655
+    박스 cx 좌표: 80, 240, 400, 560, 720
+    박스 y: 200~280 (수직 중앙)
+  화살표: 이전 박스 우측(x=박스x+130) → 다음 박스 좌측(x=박스x+0)
+    arrow1: (145, 240) → (175, 240)
+    arrow2: (305, 240) → (335, 240)
+    arrow3: (465, 240) → (495, 240)
+    arrow4: (625, 240) → (655, 240)
+  단계 번호 원: 박스 상단 중앙 (cx, 190), r=18
+  설명 텍스트: 박스 하단 (cx, 320), 작은 폰트
+  색상: 단계별 6색 팔레트 순환 (1차~5차)
+
+출력:
+<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280"/>
+    </marker>
+  </defs>
+
+  <!-- 제목 -->
+  <text x="400" y="40" text-anchor="middle" font-size="20" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1f2937">자금세탁방지(AML) 처리 절차</text>
+
+  <!-- ===== 단계 1: 거래 모니터링 ===== -->
+  <rect x="15" y="200" width="130" height="80" rx="8" fill="#dbeafe" stroke="#1a56db" stroke-width="2"/>
+  <circle cx="80" cy="190" r="18" fill="#1a56db" stroke="white" stroke-width="2"/>
+  <text x="80" y="195" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">1</text>
+  <text x="80" y="235" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">거래</text>
+  <text x="80" y="255" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#1e40af">모니터링</text>
+  <text x="80" y="320" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">실시간 감시</text>
+
+  <!-- 화살표 1 → 2 -->
+  <line x1="145" y1="240" x2="175" y2="240" stroke="#6b7280" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ===== 단계 2: 의심거래 식별 ===== -->
+  <rect x="175" y="200" width="130" height="80" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <circle cx="240" cy="190" r="18" fill="#f59e0b" stroke="white" stroke-width="2"/>
+  <text x="240" y="195" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">2</text>
+  <text x="240" y="235" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">의심거래</text>
+  <text x="240" y="255" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#92400e">식별</text>
+  <text x="240" y="320" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">룰/AI 탐지</text>
+
+  <!-- 화살표 2 → 3 -->
+  <line x1="305" y1="240" x2="335" y2="240" stroke="#6b7280" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ===== 단계 3: 분석 및 검토 ===== -->
+  <rect x="335" y="200" width="130" height="80" rx="8" fill="#d1fae5" stroke="#10b981" stroke-width="2"/>
+  <circle cx="400" cy="190" r="18" fill="#10b981" stroke="white" stroke-width="2"/>
+  <text x="400" y="195" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">3</text>
+  <text x="400" y="235" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">분석 및</text>
+  <text x="400" y="255" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#065f46">검토</text>
+  <text x="400" y="320" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">컴플라이언스 심사</text>
+
+  <!-- 화살표 3 → 4 -->
+  <line x1="465" y1="240" x2="495" y2="240" stroke="#6b7280" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ===== 단계 4: KoFIU 보고 ===== -->
+  <rect x="495" y="200" width="130" height="80" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+  <circle cx="560" cy="190" r="18" fill="#ef4444" stroke="white" stroke-width="2"/>
+  <text x="560" y="195" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">4</text>
+  <text x="560" y="235" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#991b1b">KoFIU</text>
+  <text x="560" y="255" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#991b1b">보고(STR)</text>
+  <text x="560" y="320" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">금융정보분석원 신고</text>
+
+  <!-- 화살표 4 → 5 -->
+  <line x1="625" y1="240" x2="655" y2="240" stroke="#6b7280" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ===== 단계 5: 사후 관리 ===== -->
+  <rect x="655" y="200" width="130" height="80" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+  <circle cx="720" cy="190" r="18" fill="#8b5cf6" stroke="white" stroke-width="2"/>
+  <text x="720" y="195" text-anchor="middle" font-size="16" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="white">5</text>
+  <text x="720" y="235" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#5b21b6">사후</text>
+  <text x="720" y="255" text-anchor="middle" font-size="15" font-weight="bold"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#5b21b6">관리</text>
+  <text x="720" y="320" text-anchor="middle" font-size="13"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">고객 모니터링 강화</text>
+
+  <!-- 하단 진행 인디케이터 -->
+  <line x1="80" y1="380" x2="720" y2="380" stroke="#e5e7eb" stroke-width="2"/>
+  <text x="400" y="410" text-anchor="middle" font-size="14" font-style="italic"
+        font-family="'Malgun Gothic','맑은 고딕',sans-serif" fill="#6b7280">탐지 → 보고 → 사후 관리의 5단계 컴플라이언스 흐름</text>
+</svg>

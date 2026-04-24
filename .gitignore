@@ -30,6 +30,11 @@ htmlcov/
 .coverage.*
 coverage.xml
 
+# E2E 2026Q2 리포트 — 로컬 아티팩트 (trace/state/events 원본 덤프)
+tests/reports/e2e_2026Q2/traces/
+tests/reports/e2e_2026Q2/logs/
+tests/reports/e2e_2026Q2/events/
+
 # Type checking & Linting cache
 .mypy_cache/
 .ruff_cache/
@@ -59,11 +64,17 @@ logs/
 # HuggingFace 모델 다운로드 잠금 파일
 .locks/
 
-# 온라인 다운로드된 model 은 제외
-models/
+# 온라인 다운로드된 임베딩·리랭커 모델은 제외 (루트 models/ 만).
+# src/models/ 는 코드 디렉토리이므로 제외하지 않는다.
+/models/
 
 # Claude agent isolation worktrees (transient)
 .claude/worktrees/
 
 # Editor/manual backups
-*.bak
+*.bak*
+*.org*
+
+# pptx, docx 등 Office 파일 (필요 시 예외 추가)
+*.pptx
+*.docx

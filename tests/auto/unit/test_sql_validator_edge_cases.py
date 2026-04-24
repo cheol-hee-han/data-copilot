@@ -4,7 +4,20 @@
 테스트 대상: src/services/sql_safety_checker.py — validate_sql_safety()
 """
 
+import pytest
+
 from src.services.sql_safety_checker import SafetyCheckResult, validate_sql_safety
+
+
+@pytest.fixture(autouse=True)
+def _force_pii_masking(monkeypatch):
+    """PII 마스킹을 강제 활성화한다.
+
+    .env의 PII_MASKING_ENABLED=false 설정과 무관하게
+    check_pii_columns 가 실제 동작하도록 보장한다.
+    """
+    import src.config as _cfg
+    monkeypatch.setattr(_cfg.settings, "pii_masking_enabled", True)
 
 
 # ---------------------------------------------------------------------------

@@ -28,10 +28,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from psycopg.sql import SQL
 from pydantic import BaseModel, Field
 
 from src.agents.state.state import (
+    MAX_ASK_USER_ROUNDS,
     MAX_GENERATES,
     MAX_REPLANS,
     MAX_TOOL_CALLS,
@@ -51,16 +51,34 @@ from src.agents.state.state import (
     TableMeta,
     should_terminate,
 )
+from src.agents.models.clarification import (
+    AmbiguitySignal,
+    AmbiguityType,
+    QuestionType,
+)
+from src.models.enums import ConfidenceLevel
 from src.agents.nodes.system_prompts import RECOVERY_AGENT_SYSTEM
+from src.agents.utils.clarification_context import (
+    build_clarification_context,
+)
+from src.agents.utils.handoff import (
+    normalize_handoff_note,
+    normalize_previous_sql,
+)
 from src.config import settings
 from src.services.confidence_scorer import (
     THRESHOLD_FORCE_GENERATE,
     calculate_readiness,
 )
-from src.utils.llm import llm_call_with_parse_retry, ParseError
+from src.agents.nodes.thinking_modes import LLMNode
+from src.utils.llm import llm_call_with_parse_retry, ParseError, render_prompt
 from src.utils.llm.response import extract_json
 from src.utils.logger import get_logger
-from src.utils.tracker import record_prompt_variables
+from src.utils.tracker import (
+    LLMInteraction,
+    build_llm_reasoning_payload,
+    llm_failure_sentinel,
+)
 from src.utils.tracker.dispatch import (
     dispatch_tracking_event,
     REASONING_STEP,
@@ -90,36 +108,70 @@ async def recovery_agent_node(
     reason.target_db = ""
     reason.target_db_decision = None
 
-    # Step 1: Hypothesis 전이 + DeadEnd 기록
-    _handle_hypothesis_transition(reason)
-
     reason.loop_guard = reason.loop_guard.model_copy()
-    reason.loop_guard.increment_replan()
+    is_clarification_reentry = _has_clarification_answer(state)
 
-    # 실패 맥락을 로컬에 보존 (recovery 계획 수립에 사용)
-    # DeadEnd에는 이미 line 74에서 기록됨 → state에서는 초기화한다.
-    # recovery는 "접근 방식 전환"이므로 이전 SQL의 구체적 수정 지시(fix_section)는
-    # 새 전략과 컨텍스트가 불일치할 수 있어 전달하지 않는다.
-    entry_failure_type = reason.failure_type
-    entry_failure_reason = reason.failure_reason
-    reason.failure_type = None
-    reason.failure_reason = None
+    if not is_clarification_reentry:
+        # 일반 진입: 가설 전이 + replan 카운트 + failure 컨텍스트 보존/리셋
+        _handle_hypothesis_transition(reason)
+        reason.loop_guard.increment_replan()
+        entry_failure_type = reason.failure_type
+        entry_failure_reason = reason.failure_reason
+        reason.failure_type = None
+        reason.failure_reason = None
+    else:
+        # 명확화 재진입: 가설 전이 스킵, replan 미증가, failure 리셋 스킵
+        entry_failure_type = None
+        entry_failure_reason = None
 
-    # Step 2: LLM 1회 호출 → 새 execution_plan 수립
-    # 루프 가드 검사를 LLM 호출 이전이 아닌 이후에 수행하면
+    # LLM 1회 호출 → 새 execution_plan 수립
+    # 루프 가드 검사를 LLM 호출 이후에 수행하여
     # PENDING 가설이 소진된 상태에서도 LLM이 새 가설을 생성할 기회를 얻는다.
-    plan_result, full_variables = await _build_recovery_plan(
+    plan_result, interaction = await _build_recovery_plan(
         reason,
         state=state,
         entry_failure_type=entry_failure_type,
         entry_failure_reason=entry_failure_reason,
+        is_clarification_reentry=is_clarification_reentry,
     )
 
+    # ── ask_user: should_terminate 전에 조기 리턴 ──
+    if plan_result is not None and plan_result.action == "ask_user":
+        if reason.loop_guard.ask_user_count >= MAX_ASK_USER_ROUNDS:
+            logger.info(
+                "recovery_agent: ask_user 횟수 한도 초과, give_up 전환",
+                ask_user_count=reason.loop_guard.ask_user_count,
+            )
+            plan_result = RecoveryPlan(
+                action="give_up",
+                lessons_learned=plan_result.lessons_learned,
+            )
+            # give_up 경로로 fall-through
+        else:
+            reason.loop_guard.increment_ask_user()
+            _attach_lessons(reason, plan_result)
+            signal = _build_ask_user_signal(plan_result, turn_id=state.turn_id)
+            await _dispatch_reasoning_step(
+                reason,
+                plan_result,
+                interaction,
+                action="ask_user",
+                next_node="clarification_handler",
+                routing_reason="ask_user → 사용자 명확화 대기",
+                clarification_question=(
+                    plan_result.clarification.question
+                    if plan_result.clarification else None
+                ),
+                clarification_options=(
+                    plan_result.clarification.options
+                    if plan_result.clarification else None
+                ),
+            )
+            return {"reason": reason, "pending_signals": [signal]}
+
+    # ── replan: 가설 주입 (should_terminate 전) ──
     # LLM이 새 가설과 함께 replan을 제시했다면, should_terminate 평가 이전에
-    # current_hypothesis를 반영한다. 그렇지 않으면 _handle_hypothesis_transition에서
-    # pending이 비워진 직후 상태(current_hypothesis=None, pending=[])에서
-    # should_terminate의 "가설 소진" 조건이 false positive로 트리거되어
-    # LLM이 제시한 새 경로가 버려진다.
+    # current_hypothesis를 반영한다. 그렇지 않으면 "가설 소진" false positive 발생.
     if (
         plan_result is not None
         and plan_result.action == "replan"
@@ -144,10 +196,8 @@ async def recovery_agent_node(
         )
         await _dispatch_reasoning_step(
             reason,
-            entry_failure_type,
-            entry_failure_reason,
             plan_result,
-            full_variables,
+            interaction,
             action="give_up",
             next_node="result_finalizer",
             routing_reason=f"{termination_label} → 종료",
@@ -163,10 +213,8 @@ async def recovery_agent_node(
         )
         await _dispatch_reasoning_step(
             reason,
-            entry_failure_type,
-            entry_failure_reason,
             plan_result,
-            full_variables,
+            interaction,
             action="give_up",
             next_node="result_finalizer",
             routing_reason="give_up → 종료",
@@ -206,10 +254,8 @@ async def recovery_agent_node(
     _new_hyp = plan_result.new_hypothesis
     await _dispatch_reasoning_step(
         reason,
-        entry_failure_type,
-        entry_failure_reason,
         plan_result,
-        full_variables,
+        interaction,
         action="replan",
         next_node="context_retriever",
         routing_reason=(
@@ -223,79 +269,53 @@ async def recovery_agent_node(
 
 async def _dispatch_reasoning_step(
     reason: ReasoningState,
-    _entry_failure_type: FailureType | None,  # noqa: ARG001
-    _entry_failure_reason: str | None,  # noqa: ARG001
     plan_result: RecoveryPlan | None,
-    full_variables: dict[str, str],
+    interaction: LLMInteraction,
     *,
     action: str,
     next_node: str,
     routing_reason: str,
+    clarification_question: str | None = None,
+    clarification_options: list[str] | None = None,
 ) -> None:
-    """recovery_agent의 reasoning step을 디스패치한다."""
-    _output: dict[str, Any] = {"action": action}
+    """recovery_agent의 reasoning step을 디스패치한다 (Option B)."""
+    parsed_summary: dict[str, Any] = {"action": action}
+    if clarification_question:
+        parsed_summary["clarification_question"] = clarification_question
+    if clarification_options:
+        parsed_summary["clarification_options"] = clarification_options
     if plan_result is not None:
-        _output["analysis"] = plan_result.lessons_learned or ""
-        _output["lessons_learned"] = plan_result.lessons_learned or ""
+        parsed_summary["lessons_learned"] = plan_result.lessons_learned or ""
         if plan_result.new_hypothesis:
-            _output["new_hypothesis"] = {
+            parsed_summary["new_hypothesis"] = {
                 "id": plan_result.new_hypothesis.hypothesis_id,
                 "description": plan_result.new_hypothesis.description,
             }
         if plan_result.execution_plan:
-            _output["new_plan"] = [
+            parsed_summary["new_plan"] = [
                 f'Step {s.step}: {s.tool}("{s.input[:80]}")'
                 for s in plan_result.execution_plan
             ]
 
     await dispatch_tracking_event(
         REASONING_STEP,
-        {
-            "node": "recovery_agent",
-            "phase": "reason",
-            "step_type": "recovery",
-            "round": reason.loop_guard.replan_count,
-            "hypothesis_id": (
+        build_llm_reasoning_payload(
+            node="recovery_agent",
+            phase="reason",
+            round=reason.loop_guard.replan_count,
+            hypothesis_id=(
                 reason.current_hypothesis.hypothesis_id
                 if reason.current_hypothesis
                 else ""
             ),
-            "inputs": {
-                "entry_source": full_variables.get(
-                    "entry_source_description",
-                    "",
-                ),
-                "confirmed_knowledge": full_variables.get(
-                    "confirmed_knowledge",
-                    "",
-                ),
-                "unresolved_items": full_variables.get(
-                    "unresolved_items",
-                    "",
-                ),
-                "tool_execution_history": full_variables.get(
-                    "tool_execution_history",
-                    "",
-                ),
-                "explored_tables": full_variables.get(
-                    "explored_tables_summary",
-                    "",
-                ),
-                "dead_ends": full_variables.get(
-                    "dead_ends_summary",
-                    "",
-                ),
-                "sample_data": full_variables.get(
-                    "sample_data_summary",
-                    "",
-                ),
-            },
-            "output": _output,
-            "routing": {
+            interaction=interaction,
+            routing={
                 "next_node": next_node,
                 "reason": routing_reason,
             },
-        },
+            parsed_summary=parsed_summary,
+            step_type="recovery",
+        ),
     )
 
 
@@ -337,6 +357,14 @@ def _handle_hypothesis_transition(
     reason: ReasoningState,
 ) -> None:
     """현재 가설 FAILED 전환 + PENDING 소비 + DeadEnd 기록."""
+    # 미해소 critical KI의 id를 스냅샷 — 항목별 실패 횟수 추적용
+    # (id 기반: key 표기 차이에 영향 받지 않음)
+    unresolved_ids = [
+        ki.id for ki in reason.knowledge_items
+        if ki.status in (ConfidenceStatus.UNRESOLVED, ConfidenceStatus.CONFLICTED)
+        and ki.is_critical
+    ]
+
     if (
         reason.current_hypothesis
         and reason.current_hypothesis.status == HypothesisStatus.ACTIVE
@@ -353,6 +381,7 @@ def _handle_hypothesis_transition(
                 hypothesis_id=failed.hypothesis_id,
                 failure_type=(reason.failure_type or FailureType.TERM_UNRESOLVABLE),
                 reason=reason.failure_reason or "실패 사유 미제공",
+                related_knowledge_ids=unresolved_ids,
             )
         )
     elif reason.failure_type:
@@ -363,6 +392,7 @@ def _handle_hypothesis_transition(
                 hypothesis_id="no_hypothesis",
                 failure_type=reason.failure_type,
                 reason=reason.failure_reason or "가설 없이 실패",
+                related_knowledge_ids=unresolved_ids,
             )
         )
 
@@ -396,14 +426,104 @@ def _consume_next_pending(
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ask_user 헬퍼
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _has_clarification_answer(state: PipelineState) -> bool:
+    """현재 턴에서 recovery_agent 발 명확화 응답이 있는지 확인."""
+    return any(
+        s.source_node == "recovery_agent" and s.answer is not None
+        for s in state.resolved_signals
+        if s.turn_id == state.turn_id
+    )
+
+
+def _build_ask_user_signal(
+    plan: "RecoveryPlan",
+    *,
+    turn_id: str,
+) -> AmbiguitySignal:
+    """ask_user 판정 시 AmbiguitySignal을 생성한다."""
+    q = plan.clarification
+    question = q.question if q else "추가 정보가 필요합니다."
+    options = (q.options or []) if q else []
+    q_type = QuestionType.FREE_TEXT
+    if q and q.type == "single_select":
+        q_type = QuestionType.SINGLE_SELECT
+
+    return AmbiguitySignal(
+        source_node="recovery_agent",
+        ambiguity_type=AmbiguityType.CONTEXT,
+        decision="ASK",
+        confidence=ConfidenceLevel.LOW,
+        question=question,
+        question_type=q_type,
+        options=options,
+        reasoning=plan.lessons_learned,
+        turn_id=turn_id,
+    )
+
+
+def _estimate_item_failure_count(
+    ki: KnowledgeItem,
+    dead_ends: list[DeadEnd],
+) -> int:
+    """해당 KI가 UNRESOLVED였던 dead_end 횟수를 반환한다."""
+    return sum(
+        1 for de in dead_ends
+        if ki.id in de.related_knowledge_ids
+    )
+
+
+def _build_ask_user_eligible_items(
+    reason: ReasoningState,
+) -> str:
+    """미해소 항목별 실패 횟수를 계산하고 탐색 한계 여부를 표시한다."""
+    unresolved = [
+        ki for ki in reason.knowledge_items
+        if ki.status in (
+            ConfidenceStatus.UNRESOLVED,
+            ConfidenceStatus.CONFLICTED,
+        )
+        and ki.is_critical
+    ]
+    if not unresolved:
+        return "(미해소 항목 없음)"
+
+    lines: list[str] = []
+    for ki in unresolved:
+        count = _estimate_item_failure_count(
+            ki, reason.dead_ends,
+        )
+        if count >= 2:
+            lines.append(
+                f"- ({ki.id}) {ki.key} → {count}회 실패, 탐색 한계",
+            )
+        else:
+            lines.append(f"- ({ki.id}) {ki.key} → {count}회 실패")
+
+    return "\n".join(lines)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # LLM 호출 — 재계획
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class ClarificationRequest(BaseModel):
+    """ask_user 시 사용자에게 보내는 명확화 요청."""
+
+    type: str = "free_text"
+    question: str = "추가 정보가 필요합니다."
+    options: list[str] | None = None
 
 
 class RecoveryPlan(BaseModel):
     """recovery_agent LLM 출력 — 재계획 결과.
 
     action이 "replan"이면 execution_plan과 선택적 new_hypothesis를 포함하고,
+    "ask_user"이면 clarification을 포함���고,
     "give_up"이면 lessons_learned만 포함한다.
     """
 
@@ -413,6 +533,7 @@ class RecoveryPlan(BaseModel):
         default_factory=list,
     )
     new_hypothesis: Hypothesis | None = None
+    clarification: ClarificationRequest | None = None
 
 
 async def _build_recovery_plan(
@@ -421,11 +542,14 @@ async def _build_recovery_plan(
     state: PipelineState | None = None,
     entry_failure_type: FailureType | None = None,
     entry_failure_reason: str | None = None,
-) -> tuple[RecoveryPlan | None, dict[str, str]]:
+    is_clarification_reentry: bool = False,
+) -> tuple[RecoveryPlan | None, LLMInteraction]:
     """LLM 1회 호출로 새 execution_plan을 수립한다.
 
     Returns:
-        (RecoveryPlan 또는 None, full_variables) 튜플.
+        (RecoveryPlan 또는 None, LLMInteraction) 튜플.
+        LLMInteraction.prompt_variables 는 full(untruncated) 치환값,
+        raw_response 는 LLM 원본 응답(실패 시 실패 메시지).
     """
     original_query = ""
     rewritten_query = ""
@@ -436,19 +560,29 @@ async def _build_recovery_plan(
             getattr(nq, "rewritten_query", "")
             if nq else ""
         )
-    prompt, variables, full_variables = _build_prompt(
+
+    clarification_history = (
+        build_clarification_context(state) if state else ""
+    )
+    ask_user_eligible = _build_ask_user_eligible_items(reason)
+
+    prompt, variables = _build_prompt(
         reason,
         original_query=original_query,
         rewritten_query=rewritten_query,
         entry_failure_type=entry_failure_type,
         entry_failure_reason=entry_failure_reason,
+        is_clarification_reentry=is_clarification_reentry,
+        clarification_history=clarification_history,
+        ask_user_eligible_items=ask_user_eligible,
+        handoff_note=state.handoff_note if state else "",
     )
 
     def _parse_fn(raw_text: str) -> RecoveryPlan:
         return _parse_plan_response(raw_text)
 
     try:
-        _, plan = await llm_call_with_parse_retry(
+        raw_text, plan = await llm_call_with_parse_retry(
             system=prompt,
             messages=[
                 {
@@ -462,20 +596,25 @@ async def _build_recovery_plan(
             parse_fn=_parse_fn,
             max_tokens=1024,
             timeout=settings.llm_long_timeout,
-            node_name="recovery_agent",
+            node_name=LLMNode.RECOVERY_AGENT,
         )
-        await record_prompt_variables(variables)
-        return plan, full_variables
+        return plan, LLMInteraction(
+            prompt_variables=variables,
+            raw_response=raw_text,
+        )
     except (ParseError, ValueError, TimeoutError) as e:
         logger.warning(
             "recovery_agent LLM 호출 실패",
             error=str(e),
         )
-        return None, full_variables
+        return None, LLMInteraction(
+            prompt_variables=variables,
+            raw_response=llm_failure_sentinel("LLM 실패", e),
+        )
 
 
 def _parse_plan_response(raw_text: str) -> RecoveryPlan:
-    """LLM 응답에서 execution_plan을 파싱한다."""
+    """LLM 응답에서 action별로 분기하여 RecoveryPlan을 조립한다."""
     data = extract_json(raw_text)
     if not data:
         raise ValueError(
@@ -483,16 +622,32 @@ def _parse_plan_response(raw_text: str) -> RecoveryPlan:
         )
 
     action = data.get("action", "give_up")
-    if action not in ("replan", "give_up"):
+    if action not in ("replan", "ask_user", "give_up"):
         action = "replan"
 
-    lessons_learned = data.get("lessons_learned", "")
+    lessons = data.get("lessons_learned", "")
 
-    # execution_plan 파싱
+    # ── ask_user ──────────────────────────────────
+    if action == "ask_user":
+        cd = data.get("clarification") or {}
+        q_type = str(cd.get("type", "free_text")).lower().strip()
+        return RecoveryPlan(
+            action="ask_user",
+            lessons_learned=lessons,
+            clarification=ClarificationRequest(
+                type=q_type if q_type in ("single_select", "free_text") else "free_text",
+                question=cd.get("question", "추가 정보가 필요합니다."),
+                options=cd.get("options"),
+            ),
+        )
+
+    # ── give_up ───────────────────────────────────
+    if action == "give_up":
+        return RecoveryPlan(action="give_up", lessons_learned=lessons)
+
+    # ── replan ────────────────────────────────────
     steps: list[ExecutionStep] = []
-    for i, step_data in enumerate(
-        data.get("execution_plan", []),
-    ):
+    for i, step_data in enumerate(data.get("execution_plan", [])):
         if isinstance(step_data, dict) and step_data.get("tool"):
             steps.append(
                 ExecutionStep(
@@ -500,31 +655,27 @@ def _parse_plan_response(raw_text: str) -> RecoveryPlan:
                     tool=step_data["tool"],
                     input=step_data.get("input", ""),
                     purpose=step_data.get("purpose", ""),
-                )
+                ),
             )
 
-    # 새 가설 파싱 (선택적, ID는 Python에서 순번 채번)
+    # replan인데 유효한 스텝 없으면 → give_up 안전 전환
+    if not steps:
+        return RecoveryPlan(action="give_up", lessons_learned=lessons)
+
+    # 새 가설 파싱 (LLM 누락 시 execution_plan에서 추론)
     new_hypothesis = None
     hyp_data = data.get("new_hypothesis")
     if isinstance(hyp_data, dict) and hyp_data.get("description"):
         new_hypothesis = Hypothesis(
-            hypothesis_id="",  # 호출부에서 채번
+            hypothesis_id="",
             description=hyp_data["description"],
             strategy=hyp_data.get("strategy", ""),
             priority=0.7,
             status=HypothesisStatus.ACTIVE,
         )
-
-    if action == "give_up" or not steps:
-        return RecoveryPlan(
-            action="give_up",
-            lessons_learned=lessons_learned,
-        )
-
-    # new_hypothesis 필수 — LLM이 누락 시 execution_plan에서 추론
     if new_hypothesis is None:
         new_hypothesis = Hypothesis(
-            hypothesis_id="",  # 호출부에서 채번
+            hypothesis_id="",
             description=steps[0].purpose,
             strategy=", ".join(s.purpose for s in steps),
             priority=0.7,
@@ -533,7 +684,7 @@ def _parse_plan_response(raw_text: str) -> RecoveryPlan:
 
     return RecoveryPlan(
         action="replan",
-        lessons_learned=lessons_learned,
+        lessons_learned=lessons,
         execution_plan=steps,
         new_hypothesis=new_hypothesis,
     )
@@ -722,7 +873,7 @@ def _serialize_confirmed_items(
         ):
             evidence = ", ".join(ki.evidence) or "미생성"
             confirmed.append(
-                f"- {ki.key} — {ki.status.value}\n"
+                f"- ({ki.id}) {ki.key} — {ki.status.value}\n"
                 f"  역할: {_ROLE_DESC.get(prefix, '기타')}\n"
                 f"  {_VALUE_LABEL.get(prefix, '값')}: {ki.value}\n"
                 f"  판단 근거: {evidence} (출처: {ki.source})",
@@ -744,13 +895,13 @@ def _serialize_unresolved_items(
         critical_suffix = " (CRITICAL)" if ki.is_critical else ""
         if ki.status == ConfidenceStatus.UNRESOLVED:
             unresolved.append(
-                f"- {ki.key} — {ki.status.value}{critical_suffix}\n"
+                f"- ({ki.id}) {ki.key} — {ki.status.value}{critical_suffix}\n"
                 f"  역할: {_ROLE_DESC.get(prefix, '기타')}",
             )
         elif ki.status == ConfidenceStatus.CANDIDATE:
             evidence = ", ".join(ki.evidence) or "미생성"
             unresolved.append(
-                f"- {ki.key} — {ki.status.value}{critical_suffix}\n"
+                f"- ({ki.id}) {ki.key} — {ki.status.value}{critical_suffix}\n"
                 f"  역할: {_ROLE_DESC.get(prefix, '기타')}\n"
                 f"  {_VALUE_LABEL.get(prefix, '값')} 후보: {ki.value}\n"
                 f"  후보 판단 사유: {evidence} (출처: {ki.source})",
@@ -758,7 +909,7 @@ def _serialize_unresolved_items(
         elif ki.status == ConfidenceStatus.CONFLICTED:
             evidence = ", ".join(ki.evidence) or "미생성"
             unresolved.append(
-                f"- {ki.key} — {ki.status.value}{critical_suffix}\n"
+                f"- ({ki.id}) {ki.key} — {ki.status.value}{critical_suffix}\n"
                 f"  역할: {_ROLE_DESC.get(prefix, '기타')}\n"
                 f"  {_VALUE_LABEL.get(prefix, '값')}: {ki.value or '판단 불가'}\n"
                 f"  판단 충돌 사유: {evidence} (출처: {ki.source})",
@@ -835,6 +986,47 @@ def _serialize_dead_ends(
     return de_arr
 
 
+def _describe_entry_source(
+    reason: ReasoningState,
+    *,
+    entry_failure_type: FailureType | None = None,
+    entry_failure_reason: str | None = None,
+    is_clarification_reentry: bool = False,
+) -> str:
+    """진입 경로에 따른 컨텍스트 설명을 생성한다."""
+    if is_clarification_reentry:
+        return (
+            "명확화 재진입: 사용자에게 질문한 뒤 답변을 받았습니다. "
+            "아래 [명확화 이력]을 반영하여 새로운 replan을 수립하세요."
+        )
+
+    entry_src = reason.recovery_entry_source or "readiness_gate"
+    ft = entry_failure_type or "미제공"
+    fr = entry_failure_reason or "미제공"
+
+    if entry_src == "sql_validator":
+        body = "SQL을 생성하였으나 검증이 실패했습니다. 실패 사유에 집중하세요."
+    elif entry_src == "sql_generator":
+        body = "SQL 생성이 정보 부족으로 거부되었습니다. 실패 사유를 확인하고 해당 정보를 채우는 탐색을 계획하세요."
+    elif ft == FailureType.NO_KNOWLEDGE:
+        body = (
+            "정보 탐색이 불충분합니다. 질의 정규화에서 SELECT 절 표현, "
+            "WHERE 필터 조건 등이 추출되지 않았습니다. 현재 정보를 기반으로 다시 정규화 해야합니다."
+        )
+        entry_src = "readiness_gate"
+    else:
+        body = (
+            "정보 탐색이 불충분합니다. 아직 확인되지 않은 정보를 해소하기 위해 집중하세요. "
+            "만약, 참고할 SQL이 부족하다면 추가로 탐색을 계획하세요."
+        )
+
+    return (
+        f"실패 노드: {entry_src} — {body}\n"
+        f"실패 유형: {ft}\n"
+        f"상세 사유:\n{fr}"
+    )
+
+
 def _build_prompt(
     reason: ReasoningState,
     *,
@@ -842,52 +1034,27 @@ def _build_prompt(
     rewritten_query: str = "",
     entry_failure_type: FailureType | None = None,
     entry_failure_reason: str | None = None,
-) -> tuple[str, dict[str, str], dict[str, str]]:
+    is_clarification_reentry: bool = False,
+    clarification_history: str = "",
+    ask_user_eligible_items: str = "",
+    handoff_note: str = "",
+) -> tuple[str, dict[str, str]]:
     """recovery_agent 프롬프트를 조립한다.
 
-    진입 경로(readiness_gate/sql_validator/sql_generator)�� 설명,
-    지식 항목 ��류, 후보 테이블 요약, dead_ends 이력을 치���하여
-    RECOVERY_AGENT_SYSTEM 템플��을 완성한다.
+    진입 경로(readiness_gate/sql_validator/sql_generator) 설명,
+    지식 항목 분류, 후보 테이블 요약, dead_ends 이력을 치환하여
+    RECOVERY_AGENT_SYSTEM 템플릿을 완성한다.
 
     Returns:
-        (치환된 프롬프트, 200자 truncated 변수, full text 원본) 튜플.
+        (치환된 프롬프트, 트래킹용 변수 사전) 튜플.
+        ``render_prompt`` 반환 형식과 동일하다.
     """
-    # 진입 경로 설명
-    entry_src = reason.recovery_entry_source or "readiness_gate"
-    ft = entry_failure_type or "미제공"
-    fr = entry_failure_reason or "미제공"
-
-    
-#   - readiness_gate: 초기 탐색이 불충분하여 추가 탐색이 필요합니다. 넓은 범위에서 공백을 채우세요.
-#   - readiness_gate(NO_KNOWLEDGE): 질의 정규화에서 측정값·조건이 추출되지 않았습니다.
-#     유사 SQL을 참고하여 질의를 재해석하거나, 사용자에게 구체적인 항목을 확인하세요.
-#   - sql_validator: SQL 검증이 실패했습니다. 실패 원인에 집중하세요.
-#   - sql_generator: SQL 생성이 정보 부족으로 거부되었습니다. 거부 사유(reasons)를 확인하고 해당 정보를 채우는 탐색을 계획하세요.
-
-    if entry_src == "sql_validator":
-        entry_desc = (
-            f"실패 노드: sql_validator — SQL을 생성하였으나 검증이 실패했습니다. 실패 사유에 집중하세요.\n"
-            f"실패 유형: {ft}\n"
-            f"상세 사유:\n{fr}"
-        )
-    elif entry_src == "sql_generator":
-        entry_desc = (
-            f"실패 노드: sql_generator — SQL 생성이 정보 부족으로 거부되었습니다. 실패 사유를 확인하고 해당 정보를 채우는 탐색을 계획하세요.\n"
-            f"실패 유형: {ft}\n"
-            f"상세 사유:\n{fr}"
-        )
-    elif ft == FailureType.NO_KNOWLEDGE:  # readiness_gate
-        entry_desc = (
-            f"실패 노드: readiness_gate — 정보 탐색이 불충분합니다. 질의 정규화에서 SELECT 절 표현, WHERE 필터 조건 등이 추출되지 않았습니다. 현재 정보를 기반으로 다시 정규화 해야합니다.\n"
-            f"실패 유형: {ft}\n"
-            f"상세 사유:\n{fr}"
-        )
-    else:
-        entry_desc = (
-            f"실패 노드: readiness_gate — 정보 탐색이 불충분합니다. 아직 확인되지 않은 정보를 해소하기 위해 집중하세요. 만약, 참고할 SQL이 부족하다면 추가로 탐색을 계획하세요.\n"
-            f"실패 유형: {ft}\n"
-            f"상세 사유:\n{fr}"
-        )
+    entry_desc = _describe_entry_source(
+        reason,
+        entry_failure_type=entry_failure_type,
+        entry_failure_reason=entry_failure_reason,
+        is_clarification_reentry=is_clarification_reentry,
+    )
 
     # 지식 항목 분류
     confirmed_items = _serialize_confirmed_items(reason.knowledge_items)
@@ -899,25 +1066,29 @@ def _build_prompt(
     # dead_ends 요약
     de_lines = _serialize_dead_ends(reason.dead_ends, reason.hypotheses)
 
-    # 치환 (프롬프트 파일의 placeholder와 1:1 매핑)
-    prompt = RECOVERY_AGENT_SYSTEM
     replacements = {
         "{original_query}": original_query or "",
         "{rewritten_query}": rewritten_query or original_query or "",
         "{entry_source_description}": entry_desc,
+        "{replan_count}": str(reason.loop_guard.replan_count),
+        "{max_replans}": str(MAX_REPLANS),
         "{confirmed_knowledge}": ("\n".join(confirmed_items) or "(없음 — 확인된 정보가 없습니다.)"),
         "{unresolved_items}": ("\n".join(unresolved_items) or "(없음 — 해소되지 않은 정보가 없습니다.)"),
         "{explored_tables_summary}": ("\n".join(selected_tables) or "(없음 — 연관 있는 테이블을 아직 찾지 못했습니다.)"),
         "{dead_ends_summary}": ("\n".join(de_lines) or "(없음 — 이전 실패 경험이 없습니다.)"),
         "{tool_execution_history}": (_build_tool_execution_history(reason)),
         "{sample_data_summary}": (_build_sample_summary(reason)),
+        "{clarification_history}": clarification_history or "(없음)",
+        "{ask_user_eligible_items}": ask_user_eligible_items or "(없음)",
+        "{handoff_note}": normalize_handoff_note(handoff_note),
+        "{previous_sql}": normalize_previous_sql(
+            reason.previous_turn_sql,
+        ),
+        "{previous_sql_explanation}": normalize_previous_sql(
+            reason.previous_turn_sql_explanation,
+        ),
     }
-    for key, value in replacements.items():
-        prompt = prompt.replace(key, value)
-
-    variables = {k.strip("{}"): v[:200] for k, v in replacements.items()}
-    full_variables = {k.strip("{}"): v for k, v in replacements.items()}
-    return prompt, variables, full_variables
+    return render_prompt(RECOVERY_AGENT_SYSTEM, replacements)
 
 
 def _build_sample_summary(reason: ReasoningState) -> str:
@@ -936,9 +1107,13 @@ def _build_sample_summary(reason: ReasoningState) -> str:
             lines.append(
                 f"- {ct.table_name}: {len(rows)}행 " f"(컬럼: {', '.join(cols)})",
             )
+        elif rows is not None:
+            lines.append(
+                f"- {ct.table_name}: 0행 (데이터 없음 확인됨)",
+            )
         else:
             lines.append(
-                f"- {ct.table_name}: 0행 (데이터 없음 또는 미조회)",
+                f"- {ct.table_name}: (미조회)",
             )
 
     return "\n".join(lines) or "(없음)"
@@ -1009,7 +1184,8 @@ def _build_failure_summary(
     unresolved = reason.get_unresolved_knowledge()
     if unresolved:
         parts.append(
-            "미해소 용어: " f"{', '.join(ki.key for ki in unresolved)}",
+            "미해소 용어: "
+            f"{', '.join(f'({ki.id}) {ki.key}' for ki in unresolved)}",
         )
 
     return "\n".join(parts)

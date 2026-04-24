@@ -1,0 +1,508 @@
+# ============================================================
+# 테이블 간 카디널리티 + 시딩 볼륨 정의
+# ============================================================
+# 용도: 
+#   1. 부모 테이블 1건당 자식 테이블 레코드 수 결정
+#   2. 각 테이블의 시딩 시 실제 생성할 레코드 수 계산
+#   3. 프로파일별 스케일링 (prototype/stress/full)
+# 
+# 실제 은행 규모:
+#   - CSC001M 고객: 약 1,000만명
+#   - DPG001M 계좌: 약 1,850만개
+#   - SLE001L 카드매출: 약 12억/년  ← 시딩 절대 불가
+# → scale_factor로 축소하되, 대용량 테이블은 별도 상한 설정
+# ============================================================
+
+version: 1
+last_updated: 2026-04-22
+
+# ────────────────────────────────────────────
+# 시딩 프로파일
+# ────────────────────────────────────────────
+default_profile: prototype
+
+profiles:
+  prototype:
+    # 프로토타입·데모·테스트용 (기본)
+    scale_factor: 0.001           # 전체 1/1000 축소
+    random_seed: 42
+    base_date: '20261221'         # 시딩 기준일
+    description: "로컬 테스트·데모 규모 (수만~수십만 행)"
+
+  stress:
+    # 성능 테스트용
+    scale_factor: 0.01            # 1/100
+    random_seed: 42
+    base_date: '20261221'
+    description: "부하 테스트 규모 (수백만 행)"
+
+  full:
+    # 이론치 - 실제 구현 비권장
+    scale_factor: 1.0
+    base_date: '20261221'
+    description: "실제 은행 규모 (수십억 행, 비권장)"
+
+# ────────────────────────────────────────────
+# 대용량 테이블 고정 상한 (스케일 무시)
+# ────────────────────────────────────────────
+# SLE001L 등 12억 행 테이블은 축소해도 여전히 너무 큼 → 고정값
+big_table_caps:
+  prototype:
+    SLE001L: 50_000           # 카드매출: 5만 건 (2020~2026 전체)
+    DPF003P: 30_000           # 일별잔액: 3만 (대표 계좌 × 30일)
+    EBS001L: 100_000          # 이체거래: 10만
+    FXC001L: 20_000           # 환전거래: 2만
+    FXD001L: 10_000           # FX 딜: 1만
+    SLE002L: 30_000           # 카드매출 상세
+    DPG010L: 50_000           # 계좌거래
+    CLN004L: 100_000          # 카드 이용내역
+    MVC001S: 5_000            # 카드 일별 매출 (부점×일)
+    MVP001S: 5_000            # 수신 일별 (부점×일)
+    MVN001S: 5_000            # 여신 일별
+  stress:
+    SLE001L: 5_000_000
+    DPF003P: 3_000_000
+    EBS001L: 10_000_000
+    FXC001L: 2_000_000
+    FXD001L: 1_000_000
+    SLE002L: 3_000_000
+    DPG010L: 5_000_000
+    CLN004L: 10_000_000
+
+# ────────────────────────────────────────────
+# 기준 테이블 절대 볼륨 (원천)
+# scale_factor 적용 대상
+# ────────────────────────────────────────────
+base_volumes:
+  # ─ 조직 ─
+  CMI001M: 850            # 부점 (스케일 미적용, 원래 소량)
+  CMI007M: 25_000         # 직원
+  CMI014M: 50             # 임원
+  
+  # ─ 고객 ─
+  CSC001M: 10_000_000     # 고객 (활성+휴면+해지)
+  CSC002M: 500_000        # 법인·개인사업자 (고객의 5%)
+  
+  # ─ 상품 ─
+  PFP001M: 11_000         # 상품 (활성 3,500 + 폐기 7,500)
+  
+  # ─ 가맹점 ─
+  SLE021M: 2_500_000      # 가맹점
+  
+  # ─ 원장 마스터 (scale 적용) ─
+  DPG001M: 18_500_000     # 예금계좌
+  LNB001M: 4_800_000      # 대출
+  CLN001M: 4_200_000      # 카드회원
+  CLN002M: 6_800_000      # 카드
+  RPC001M: 1_850_000      # 퇴직연금 가입자
+  TRS001M: 280_000        # 신탁계약
+  FND001M: 4_500          # 펀드 (전체 펀드 상품 수 적음)
+  DRV001M: 28_000         # 파생계약
+  FXR001M: 180_000        # 외화대출
+
+# ────────────────────────────────────────────
+# 핵심 FK 관계 카디널리티
+# "부모 1건당 자식 레코드 평균 개수"
+# ────────────────────────────────────────────
+relationships:
+  # ═══ 고객 중심 관계 ═══
+  - parent: CSC001M
+    child: CSC002M         # 법인·사업자 상세
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.05
+    note: "5% 고객이 법인·개인사업자"
+
+  - parent: CSC001M
+    child: CSC006M         # 연락처
+    via_column: CSN
+    cardinality:
+      distribution: fixed
+      value: 1
+    note: "1:1 관계"
+
+  - parent: CSC001M
+    child: CSC007M         # 주소
+    via_column: CSN
+    cardinality:
+      distribution: poisson
+      lambda: 1.5
+      min: 1
+    note: "평균 1.5개 주소 (집 + 회사 등)"
+
+  - parent: CSC001M
+    child: CSI001M         # 신용정보
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.8
+    note: "80% 고객이 신용평가 대상 (성인)"
+
+  - parent: CSC001M
+    child: CSK001M         # KYC
+    via_column: CSN
+    cardinality:
+      distribution: fixed
+      value: 1
+    note: "1:1 KYC 마스터"
+
+  # ═══ 고객 → 수신 ═══
+  - parent: CSC001M
+    child: DPG001M         # 예금계좌
+    via_column: CSN
+    cardinality:
+      distribution: poisson
+      lambda: 1.85
+      min: 0
+      max: 20
+      zero_inflation: 0.08
+    note: "평균 1.85 계좌 (원천 비율). 8%는 계좌 없음 (금융거래 중단)"
+
+  # ═══ 계좌 → 수신 상품별 ═══
+  - parent: DPG001M
+    child: DPF001M         # 정기예금
+    via_column: ACN
+    cardinality:
+      distribution: bernoulli
+      p: 0.17
+    note: "17% 계좌가 정기예금 (18.5M 중 3.2M)"
+
+  - parent: DPG001M
+    child: DPD001M         # 정기적금
+    via_column: ACN
+    cardinality:
+      distribution: bernoulli
+      p: 0.15
+    note: "15% 계좌가 정기적금"
+
+  - parent: DPG001M
+    child: DPB001M         # 요구불
+    via_column: ACN
+    cardinality:
+      distribution: bernoulli
+      p: 0.46
+    note: "46% 계좌가 요구불 (가장 많음)"
+
+  - parent: DPG001M
+    child: DPN001M         # 신탁 원장
+    via_column: ACN
+    cardinality:
+      distribution: bernoulli
+      p: 0.03
+    note: "3% 계좌가 신탁"
+
+  - parent: DPG001M
+    child: DPY001M         # 외화예금
+    via_column: ACN
+    cardinality:
+      distribution: bernoulli
+      p: 0.02
+    note: "2% 계좌가 외화예금"
+
+  # ═══ 고객 → 여신 ═══
+  - parent: CSC001M
+    child: LNB001M         # 대출 기본
+    via_column: CSN
+    cardinality:
+      distribution: poisson
+      lambda: 0.48
+      min: 0
+      max: 10
+      zero_inflation: 0.60
+    note: "60% 고객은 대출 없음. 대출 있는 고객 평균 1.2건"
+
+  - parent: LNB001M
+    child: LNH001M         # 주담대
+    via_column: LON_NO
+    cardinality:
+      distribution: bernoulli
+      p: 0.30
+    note: "30% 대출이 주담대"
+
+  - parent: LNB001M
+    child: LNJ001M         # 전세자금
+    via_column: LON_NO
+    cardinality:
+      distribution: bernoulli
+      p: 0.18
+    note: "18% 대출이 전세"
+
+  - parent: LNB001M
+    child: LNC001M         # 신용대출
+    via_column: LON_NO
+    cardinality:
+      distribution: bernoulli
+      p: 0.38
+    note: "38% 대출이 신용대출"
+
+  - parent: LNB001M
+    child: LNK001M         # 기업여신
+    via_column: LON_NO
+    cardinality:
+      distribution: bernoulli
+      p: 0.10
+    note: "10% 대출이 기업여신"
+
+  - parent: LNB001M
+    child: LNW001M         # 정책자금
+    via_column: LON_NO
+    cardinality:
+      distribution: bernoulli
+      p: 0.08
+    note: "8% 대출이 정책자금"
+
+  - parent: LNB001M
+    child: LNM001M         # 담보
+    via_column: LON_NO
+    cardinality:
+      distribution: poisson
+      lambda: 0.6
+      zero_inflation: 0.55
+      max: 5
+    note: "45% 대출이 유담보, 평균 1.3 담보"
+
+  - parent: LNB001M
+    child: LNG001M         # 보증
+    via_column: LON_NO
+    cardinality:
+      distribution: poisson
+      lambda: 0.5
+      zero_inflation: 0.60
+      max: 3
+    note: "40% 대출이 보증 있음"
+
+  - parent: LNB001M
+    child: LNO001M         # 연체
+    via_column: LON_NO
+    cardinality:
+      distribution: bernoulli
+      p: 0.04
+    note: "4% 대출에 연체 발생 (180K / 4.8M)"
+
+  # ═══ 고객 → 카드 ═══
+  - parent: CSC001M
+    child: CLN001M         # 카드회원
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.42
+    note: "42% 고객이 카드회원 (4.2M / 10M)"
+
+  - parent: CLN001M
+    child: CLN002M         # 카드 발급
+    via_column: MBR_NO
+    cardinality:
+      distribution: poisson
+      lambda: 1.62
+      min: 1
+      max: 8
+    note: "카드회원당 평균 1.62장 (6.8M / 4.2M)"
+
+  # ═══ 카드 → 매출 ═══ (대용량)
+  - parent: CLN002M
+    child: SLE001L
+    via_column: CARD_NO_ALTR
+    cardinality:
+      # 카드당 거래 평균 계산 (참고용, 실제는 big_table_caps 사용)
+      distribution: poisson
+      lambda: 180
+      note: "참고: 카드당 누적 매출 180건 (2020~2026, 월 3건)"
+    volume_policy: use_big_table_cap
+
+  - parent: SLE021M
+    child: SLE001L
+    via_column: MERCH_NO
+    cardinality:
+      distribution: poisson
+      lambda: 480
+      note: "가맹점당 매출 480건 (2020~2026)"
+    volume_policy: use_big_table_cap
+
+  # ═══ 가맹점 관련 ═══
+  - parent: SLE021M
+    child: SLE022M         # 가맹점 수수료
+    via_column: MERCH_NO
+    cardinality:
+      distribution: fixed
+      value: 1
+    note: "1:1 수수료 정책"
+
+  - parent: SLE021M
+    child: SLE048M         # 가맹점 계약
+    via_column: MERCH_NO
+    cardinality:
+      distribution: poisson
+      lambda: 1.3
+      min: 1
+    note: "평균 1.3 계약 (갱신 포함)"
+
+  # ═══ 퇴직연금 ═══
+  - parent: CSC001M
+    child: RPC001M         # 퇴직연금 가입자
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.185
+    note: "18.5% 고객이 퇴직연금 (1.85M / 10M)"
+
+  - parent: RPC001M
+    child: RPD002M         # IRP 계정
+    via_column: PEN_NO
+    cardinality:
+      distribution: bernoulli
+      p: 0.68
+    note: "68% 가입자가 IRP"
+
+  # ═══ 신탁 ═══
+  - parent: CSC001M
+    child: TRS001M
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.028
+    note: "2.8% 고객이 신탁계약"
+
+  - parent: TRS001M
+    child: TRS009L         # 신탁재산거래
+    via_column: TRST_NO
+    cardinality:
+      distribution: poisson
+      lambda: 35
+      min: 1
+    note: "신탁당 연간 거래 35건 (총 30개월)"
+
+  # ═══ 전자금융·이체 ═══
+  - parent: CSC001M
+    child: EBB001M         # 인터넷뱅킹 가입
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.72
+    note: "72% 고객이 인터넷뱅킹 가입"
+
+  - parent: CSC001M
+    child: EBM001M         # 모바일뱅킹 가입
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.82
+    note: "82% 고객이 모바일뱅킹 가입"
+
+  # ═══ 외환 ═══
+  - parent: CSC001M
+    child: FXR001M         # 외화대출
+    via_column: CSN
+    cardinality:
+      distribution: bernoulli
+      p: 0.018
+    note: "1.8% 고객이 외화대출 (소수 기업 위주)"
+
+  # ═══ 이력 테이블 (History) ═══
+  - parent: DPG001M
+    child: DPG020H         # 계좌상태이력
+    via_column: ACN
+    cardinality:
+      distribution: poisson
+      lambda: 2.5
+      min: 1
+    note: "계좌당 평균 2.5건 상태 변경 이력"
+
+  - parent: CSC001M
+    child: CSC009H         # 고객정보변경이력
+    via_column: CSN
+    cardinality:
+      distribution: poisson
+      lambda: 3.2
+      min: 1
+    note: "고객당 평균 3.2회 정보 변경"
+
+  - parent: LNB001M
+    child: LNB040H         # 대출상태이력
+    via_column: LON_NO
+    cardinality:
+      distribution: poisson
+      lambda: 4.5
+      min: 1
+
+  # ═══ 직원 관련 ═══
+  - parent: CMI007M
+    child: CMI008H         # 직원발령이력
+    via_column: EMN
+    cardinality:
+      distribution: poisson
+      lambda: 5.2
+      min: 1
+    note: "직원당 평균 5.2회 발령 (입사+승진+부서이동)"
+
+  - parent: CMI007M
+    child: CMI010H         # 승진이력
+    via_column: EMN
+    cardinality:
+      distribution: poisson
+      lambda: 2.1
+
+# ────────────────────────────────────────────
+# 도메인별 기본 카디널리티 (위에 명시 안 된 FK)
+# ────────────────────────────────────────────
+domain_defaults:
+  # 이력 테이블 (*H): 부모당 평균 이벤트 수
+  history:
+    pattern: "[A-Z]+\\d+H$"
+    distribution: poisson
+    lambda: 2.5
+    min: 1
+
+  # 거래 로그 (*L): 일반적으로 많음
+  log_small:      # 소규모 로그 (권한 변경, 설정 변경 등)
+    distribution: poisson
+    lambda: 3
+
+  log_medium:     # 중규모 로그 (이체, 상담 등)
+    distribution: poisson
+    lambda: 20
+
+  log_large:      # 대규모 로그 (거래, 매출) - big_table_caps 사용
+    distribution: "use_big_table_cap"
+
+  # 마스터 (*M): 1:1 또는 소량
+  master_detail:
+    distribution: fixed
+    value: 1
+
+  # 스냅샷 (*S) - 마트
+  summary_snapshot:
+    distribution: "period_grain"
+    # 실제 계산: 기간(일/월) × 그레인(부점/상품/세그)
+    # 별도 로직
+
+  # 스냅샷 (*P) - 일별/월별
+  snapshot_daily:
+    distribution: "period_parent"
+    period_days: 30  # 기본 30일 생성 (전체는 big_table_caps)
+
+# ────────────────────────────────────────────
+# 특수 테이블 시딩 규칙 (scale/big_table_caps에 안 맞는 경우)
+# ────────────────────────────────────────────
+special_volumes:
+  prototype:
+    # 참조 코드 테이블은 원본 그대로 (작음)
+    CMI025M: 500          # 코드마스터
+    CMI026C: 3000         # 코드상세
+    CMI021C: 365          # 영업일코드 (1년)
+    CMI022C: 15           # 공휴일코드
+    CMI023C: 365          # 외환영업일
+    CMI024C: 250          # 한국은행영업일
+    
+    # 시스템 테이블
+    SYS001M: 100
+    
+    # 상품 관련 (원본 유지)
+    PFP001M: 1000         # 상품 1000개 (11000 축소)
+    
+    # 부점 축소
+    CMI001M: 100          # 부점 100개 (850 축소)
+    CMI007M: 2500         # 직원 2500명
+    
+    # 가맹점 축소  
+    SLE021M: 25000        # 가맹점 2.5만

@@ -16,6 +16,7 @@ Dummy 모드: use_dummy=True일 때 Neo4j 연결 없이 샘플 온톨로지 데�
 from __future__ import annotations
 
 import time as _time
+from collections import OrderedDict
 from typing import Any
 
 from src.config import settings
@@ -48,7 +49,10 @@ class Neo4jConnector(SearchConnector):
     def __init__(self, use_dummy: bool = True) -> None:
         self._use_dummy = use_dummy
         self._driver: Any = None
-        self._cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        # LRU + TTL 캐시: OrderedDict 로 삽입 순서 유지 → 오래된 항목부터 제거
+        self._cache: OrderedDict[
+            str, tuple[float, list[dict[str, Any]]]
+        ] = OrderedDict()
 
     async def connect(self) -> None:
         """Neo4j 연결을 초기화한다."""
@@ -58,13 +62,22 @@ class Neo4jConnector(SearchConnector):
 
         from neo4j import AsyncGraphDatabase
 
-        self._driver = AsyncGraphDatabase.driver(
+        driver = AsyncGraphDatabase.driver(
             f"bolt://{settings.neo4j_host}:{settings.neo4j_port}",
             auth=(settings.neo4j_user, settings.neo4j_password),
             max_connection_pool_size=settings.neo4j_pool_size,
             connection_timeout=settings.neo4j_request_timeout,
             connection_acquisition_timeout=settings.db_pool_timeout,
         )
+
+        # 실접속 검증 — lazy driver가 실제 Bolt 핸드셰이크를 수행하도록 강제
+        try:
+            await driver.verify_connectivity()
+        except Exception:
+            await driver.close()
+            raise
+
+        self._driver = driver
         logger.info("Neo4j 연결 완료")
 
     async def disconnect(self) -> None:
@@ -253,15 +266,26 @@ class Neo4jConnector(SearchConnector):
         cypher: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """TTL 캐시 적용 Cypher 실행."""
+        """LRU + TTL 캐시 적용 Cypher 실행.
+
+        TTL 만료 히트는 캐시에서 제거하고 재조회한다.
+        상한 초과 시 가장 오래된(또는 LRU) 엔트리를 제거한다.
+        """
         now = _time.time()
         if cache_key in self._cache:
             ts, data = self._cache[cache_key]
             if now - ts < settings.neo4j_cache_ttl:
+                # 최근 사용으로 갱신 (LRU 뒤로 이동)
+                self._cache.move_to_end(cache_key)
                 return data
+            # TTL 만료 엔트리 제거
+            del self._cache[cache_key]
 
         result = await self._execute_cypher(cypher, params)
         self._cache[cache_key] = (now, result)
+        # 상한 초과 시 가장 오래된 엔트리 제거
+        while len(self._cache) > settings.neo4j_cache_max_entries:
+            self._cache.popitem(last=False)
         return result
 
 

@@ -185,7 +185,7 @@ def test_state_transition_sequence():
 
     # 모든 상태가 정의되어 있는지 확인
     all_statuses = set(QueryStatus)
-    terminal = {QueryStatus.COMPLETED, QueryStatus.ERROR, QueryStatus.AWAITING_CLARIFICATION, QueryStatus.SQL_RETRY, QueryStatus.CANCELLED}
+    terminal = {QueryStatus.COMPLETED, QueryStatus.ERROR, QueryStatus.AWAITING_CLARIFICATION, QueryStatus.SQL_RETRY, QueryStatus.CANCELLED, QueryStatus.CONTINUE_ORCHESTRATION_PENDING}
     defined = set(valid_transitions.keys()) | terminal
 
     missing = all_statuses - defined
